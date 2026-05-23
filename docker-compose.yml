@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  db:
+    image: mysql:8.0
+    container_name: planner_db
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: planner_pro
+      MYSQL_USER: planner_user
+      MYSQL_PASSWORD: planner_password
+    ports:
+      - '3306:3306'
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  cache:
+    image: redis:7-alpine
+    container_name: planner_cache
+    restart: always
+    ports:
+      - '6379:6379'
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: planner_backend
+    restart: always
+    ports:
+      - '3001:3001'
+    environment:
+      DATABASE_URL: mysql://planner_user:planner_password@db:3306/planner_pro
+      REDIS_HOST: cache
+      REDIS_PORT: 6379
+      GITHUB_CLIENT_ID: votre_client_id_github
+      GITHUB_CLIENT_SECRET: votre_client_secret_github
+      JWT_SECRET: planner-pro-super-secret-key-a-changer-en-production
+      ENCRYPTION_KEY: super-secret-key-32-bytes-long!
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    depends_on:
+      - db
+      - cache
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: planner_frontend
+    restart: always
+    ports:
+      - '3000:3000'
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+
+volumes:
+  mysql_data:
