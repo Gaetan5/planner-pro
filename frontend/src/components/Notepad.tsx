@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
-import { useApp, Note } from '../context/AppContext'
-import { FileText, Plus, Save, Trash2, CheckCircle2 } from 'lucide-react'
+import { useApp } from '../context/AppContext'
+import { Plus, Save, Trash2, CheckCircle2 } from 'lucide-react'
+import './Notepad.css'
 
 export const Notepad: React.FC = () => {
   const { notes, saveNote, deleteNote } = useApp()
@@ -9,6 +10,7 @@ export const Notepad: React.FC = () => {
   const [noteContent, setNoteContent] = useState('')
   const [showSuccessToast, setShowSuccessToast] = useState(false)
   const [parsedCount, setParsedCount] = useState(0)
+  const [liveTaskCount, setLiveTaskCount] = useState(0)
 
   const activeNote = notes.find(n => n.id === selectedNoteId)
 
@@ -22,6 +24,18 @@ export const Notepad: React.FC = () => {
       setNoteContent('')
     }
   }, [selectedNoteId, notes])
+
+  // Debounce regex local pour compter les - [ ] en temps réel
+  React.useEffect(() => {
+    const handler = setTimeout(() => {
+      const taskRegex = /^-\s*\[\s*\]\s+(.+)$/im
+      const lines = noteContent.split('\n')
+      const count = lines.filter(line => taskRegex.test(line)).length
+      setLiveTaskCount(count)
+    }, 300)
+
+    return () => clearTimeout(handler)
+  }, [noteContent])
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -48,83 +62,69 @@ export const Notepad: React.FC = () => {
   }
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: '24px', flex: 1, minHeight: 0 }}>
+    <div className="notepad-layout">
       {/* Sidebar de la liste des notes */}
-      <aside className="glass-panel" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h3 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Mes Notes</h3>
-          <button onClick={handleCreateNew} style={{ background: 'none', border: 'none', color: 'var(--accent-primary)', cursor: 'pointer' }}>
+      <aside className="glass-panel notepad-sidebar">
+        <div className="notepad-sidebar-header">
+          <h3 className="notepad-sidebar-title">Mes Notes</h3>
+          <button onClick={handleCreateNew} className="notepad-new-note-btn">
             <Plus size={18} />
           </button>
         </div>
 
-        <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '4px', overflowY: 'auto', flex: 1 }}>
-          {notes.map(note => (
-            <li
-              key={note.id}
-              onClick={() => setSelectedNoteId(note.id)}
-              style={{
-                padding: '10px 12px',
-                borderRadius: 'var(--radius-sm)',
-                cursor: 'pointer',
-                background: selectedNoteId === note.id ? 'var(--glass-highlight)' : 'none',
-                color: selectedNoteId === note.id ? 'var(--text-primary)' : 'var(--text-secondary)',
-                fontSize: '14px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between'
-              }}
-            >
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '180px' }}>
-                {note.title || 'Note sans titre'}
-              </span>
-              <Trash2 size={13} style={{ cursor: 'pointer', opacity: 0.5 }} onClick={(e) => { e.stopPropagation(); deleteNote(note.id); handleCreateNew() }} />
-            </li>
-          ))}
+        <ul className="notepad-note-list">
+          {notes.map(note => {
+            const activeTasks = note.tasks?.filter(t => t.status !== 'DONE') || []
+            return (
+              <li
+                key={note.id}
+                onClick={() => setSelectedNoteId(note.id)}
+                className={`notepad-note-item ${selectedNoteId === note.id ? 'notepad-note-item--active' : ''}`}
+              >
+                <span className="notepad-note-title-span">
+                  {note.title || 'Note sans titre'}
+                  {activeTasks.length > 0 && (
+                    <span className="task-indicator" style={{ marginLeft: '8px', padding: '1px 5px', fontSize: '10px' }}>
+                      {activeTasks.length}
+                    </span>
+                  )}
+                </span>
+                <button
+                  className="notepad-note-delete-btn"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    deleteNote(note.id)
+                    handleCreateNew()
+                  }}
+                >
+                  <Trash2 size={13} />
+                </button>
+              </li>
+            )
+          })}
         </ul>
       </aside>
 
       {/* Zone d'édition */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', minHeight: 0 }}>
+      <div className="notepad-editor-container">
         {showSuccessToast && (
-          <div style={{
-            background: 'var(--color-success)',
-            color: '#fff',
-            padding: '12px 16px',
-            borderRadius: 'var(--radius-sm)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px',
-            boxShadow: 'var(--shadow-md)',
-            animation: 'pulse-glow 3s infinite'
-          }}>
+          <div className="toast toast--success">
             <CheckCircle2 size={20} />
             <div>
-              <p style={{ fontWeight: 600, fontSize: '14px' }}>Note enregistrée avec succès !</p>
-              <p style={{ fontSize: '12px', opacity: 0.9 }}>{parsedCount} tâche(s) ont été extraite(s) et ajoutée(s) à votre Todo-list.</p>
+              <p style={{ fontWeight: 600, fontSize: '14px', margin: 0 }}>Note enregistrée avec succès !</p>
+              <p style={{ fontSize: '12px', opacity: 0.9, margin: 0 }}>{parsedCount} tâche(s) ont été extraite(s) et ajoutée(s) à votre Todo-list.</p>
             </div>
           </div>
         )}
 
-        <form onSubmit={handleSave} className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px', flex: 1, minHeight: 0 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <form onSubmit={handleSave} className="glass-panel notepad-editor-form">
+          <div className="notepad-editor-header">
             <input
               type="text"
               placeholder="Titre de la note"
               value={noteTitle}
               onChange={e => setNoteTitle(e.target.value)}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: '#fff',
-                fontSize: '20px',
-                fontWeight: 700,
-                outline: 'none',
-                width: '70%',
-                borderBottom: '1px solid transparent'
-              }}
-              onFocus={e => e.target.style.borderBottom = '1px solid var(--glass-border)'}
-              onBlur={e => e.target.style.borderBottom = '1px solid transparent'}
+              className="notepad-note-title-input"
               required
             />
 
@@ -133,24 +133,21 @@ export const Notepad: React.FC = () => {
             </button>
           </div>
 
-          <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr', gap: '20px', minHeight: 0 }}>
+          <div className="notepad-textarea-container">
             <textarea
               placeholder="Rédigez vos notes en Markdown ici...&#10;&#10;Pour automatiser une tâche, écrivez simplement :&#10;- [ ] Rédiger le rapport d'architecture #Planner-Pro"
               value={noteContent}
               onChange={e => setNoteContent(e.target.value)}
-              style={{
-                background: 'var(--bg-secondary)',
-                border: '1px solid var(--glass-border)',
-                color: '#fff',
-                padding: '16px',
-                borderRadius: 'var(--radius-sm)',
-                outline: 'none',
-                resize: 'none',
-                fontFamily: 'monospace',
-                fontSize: '14px',
-                lineHeight: '1.6'
-              }}
+              className="notepad-textarea"
             />
+            <div className="notepad-toolbar">
+              <span>Markdown supporté</span>
+              {liveTaskCount > 0 && (
+                <span className="task-indicator">
+                  {liveTaskCount} tâche(s) détectée(s)
+                </span>
+              )}
+            </div>
           </div>
         </form>
       </div>

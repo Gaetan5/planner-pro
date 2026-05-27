@@ -1,11 +1,15 @@
 import { Controller, Get, Post, Body, Param, Put, Delete, UseGuards, Req } from '@nestjs/common';
 import { ProjectsService } from './projects.service';
 import { JwtAuthGuard } from '../auth/jwt.guard';
+import { TrackingGateway } from '../tracking/tracking.gateway';
 
 @Controller('projects')
 @UseGuards(JwtAuthGuard)
 export class ProjectsController {
-  constructor(private readonly projectsService: ProjectsService) {}
+  constructor(
+    private readonly projectsService: ProjectsService,
+    private readonly trackingGateway: TrackingGateway,
+  ) {}
 
   @Post()
   createProject(@Req() req: any, @Body() body: { name: string; description?: string }) {
@@ -42,11 +46,15 @@ export class ProjectsController {
   }
 
   @Put('tasks/:taskId')
-  updateTask(
+  async updateTask(
     @Param('taskId') taskId: string,
     @Body() body: { title?: string; description?: string; status?: string; priority?: string },
   ) {
-    return this.projectsService.updateTask(taskId, body);
+    const updated = await this.projectsService.updateTask(taskId, body);
+    if (body.status && this.trackingGateway.server) {
+      this.trackingGateway.server.emit('task-status-changed', { taskId });
+    }
+    return updated;
   }
 
   @Delete('tasks/:taskId')

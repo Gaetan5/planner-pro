@@ -120,23 +120,25 @@ Notre design s'inscrit dans un style **Glassmorphism Premium** intégrant une hi
 ```dockerfile
 # Stage 1 : Build & Install deps
 FROM node:18-alpine AS builder
+RUN corepack enable && corepack prepare pnpm@latest --activate
 WORKDIR /app
-COPY package*.json ./
+COPY package.json pnpm-lock.yaml ./
 COPY prisma ./prisma/
-RUN npm ci
+RUN pnpm install --frozen-lockfile
 COPY . .
-RUN npm run build
+RUN pnpm run build
 
 # Stage 2 : Image d'Exécution Minimale
 FROM node:18-alpine
+RUN corepack enable && corepack prepare pnpm@latest --activate
 WORKDIR /app
 ENV NODE_ENV=production
-COPY package*.json ./
-RUN npm ci --only=production
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile --prod
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/wait-for-db.js ./
-RUN npx prisma generate
+RUN pnpm exec prisma generate
 
 # Sécurisation par défaut : Exécution en mode non-root
 USER node
@@ -187,7 +189,7 @@ CMD ["node", "dist/main"]
 
 ### 📋 Prérequis Locaux
 - **Docker Engine** >= 20.10.x et **Docker Compose** >= 2.x
-- Ou **NodeJS** (v18.x) pour le développement hôte.
+- Ou **NodeJS** (v18.x) et **pnpm** (v9.x) pour le développement hôte.
 
 ### 🔌 Initialisation de l'Environnement
 1. Créez votre fichier d'environnement local :
@@ -207,15 +209,15 @@ Si vous développez localement avec un serveur de développement natif pour prof
 
 1. Installer l'ensemble du monorepo :
    ```bash
-   npm install
+   pnpm install
    ```
 2. Assurez-vous que vos instances MySQL et Redis locales sont actives, puis poussez le schéma de base de données :
    ```bash
-   npm run db:push -w backend
+   pnpm --filter backend exec prisma db push
    ```
 3. Lancer les deux instances en mode Watch/Dev :
    ```bash
-   npm run dev
+   pnpm dev
    ```
 
 ---

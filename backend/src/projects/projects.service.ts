@@ -1,9 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotesService } from '../notes/notes.service';
 
 @Injectable()
 export class ProjectsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notesService: NotesService,
+  ) {}
 
   async createProject(userId: string, name: string, description?: string) {
     return this.prisma.project.create({
@@ -17,28 +21,34 @@ export class ProjectsService {
 
   async getProjects(userId: string) {
     return this.prisma.project.findMany({
-      where: { userId },
+      where: { userId, deletedAt: null },
       include: {
-        tasks: true,
+        tasks: {
+          where: { deletedAt: null },
+        },
       },
     });
   }
 
   async getProject(projectId: string) {
-    return this.prisma.project.findUnique({
-      where: { id: projectId },
+    return this.prisma.project.findFirst({
+      where: { id: projectId, deletedAt: null },
       include: {
-        tasks: true,
+        tasks: {
+          where: { deletedAt: null },
+        },
       },
     });
   }
 
   async deleteProject(projectId: string) {
-    await this.prisma.task.deleteMany({
+    await this.prisma.task.updateMany({
       where: { projectId },
+      data: { deletedAt: new Date() },
     });
-    return this.prisma.project.delete({
+    return this.prisma.project.update({
       where: { id: projectId },
+      data: { deletedAt: new Date() },
     });
   }
 
@@ -56,20 +66,34 @@ export class ProjectsService {
 
   async getTasks(projectId: string) {
     return this.prisma.task.findMany({
-      where: { projectId },
+      where: { projectId, deletedAt: null },
     });
   }
 
   async updateTask(taskId: string, data: { title?: string; description?: string; status?: string; priority?: string }) {
-    return this.prisma.task.update({
+    const task = await this.prisma.task.findFirst({
+      where: { id: taskId, deletedAt: null },
+    });
+    if (!task) {
+      throw new Error('Task not found or deleted');
+    }
+
+    const updatedTask = await this.prisma.task.update({
       where: { id: taskId },
       data,
     });
+
+    if ((data.status || data.title) && updatedTask.noteId) {
+      await this.notesService.syncTaskStatusToNote(taskId, updatedTask.status);
+    }
+
+    return updatedTask;
   }
 
   async deleteTask(taskId: string) {
-    return this.prisma.task.delete({
+    return this.prisma.task.update({
       where: { id: taskId },
+      data: { deletedAt: new Date() },
     });
   }
 
@@ -88,6 +112,7 @@ export class ProjectsService {
       where: {
         task: {
           userId,
+          deletedAt: null,
         },
       },
       include: {
