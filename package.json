@@ -2,17 +2,14 @@
   "name": "planner-pro-monorepo",
   "version": "1.0.0",
   "private": true,
-  "workspaces": [
-    "frontend",
-    "backend"
-  ],
+  "packageManager": "pnpm@9.15.4",
   "scripts": {
-    "dev:frontend": "npm run dev -w frontend",
-    "dev:backend": "npm run start:dev -w backend",
-    "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\"",
-    "build:frontend": "npm run build -w frontend",
-    "build:backend": "npm run build -w backend",
-    "build": "npm run build:frontend && npm run build:backend"
+    "dev:frontend": "pnpm --filter frontend dev",
+    "dev:backend": "pnpm --filter backend start:dev",
+    "dev": "concurrently \"pnpm dev:frontend\" \"pnpm dev:backend\"",
+    "build:frontend": "pnpm --filter frontend build",
+    "build:backend": "pnpm --filter backend build",
+    "build": "pnpm build:frontend && pnpm build:backend"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

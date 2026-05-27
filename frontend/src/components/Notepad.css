@@ -1,0 +1,212 @@
+/* ========================================
+   NOTEPAD MODULE
+   ======================================== */
+
+.notepad-layout {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: var(--space-2xl);
+  flex: 1;
+  min-height: 0;
+}
+
+/* Sidebar */
+.notepad-sidebar {
+  padding: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.notepad-sidebar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.notepad-sidebar-title {
+  font-size: var(--font-md);
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.notepad-new-note-btn {
+  background: none;
+  border: none;
+  color: var(--accent-primary);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform var(--transition-fast);
+}
+
+.notepad-new-note-btn:hover {
+  transform: scale(1.1);
+}
+
+.notepad-note-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.notepad-note-item {
+  padding: var(--space-md) var(--space-lg);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.notepad-note-item:hover {
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-primary);
+}
+
+.notepad-note-item--active {
+  background: var(--glass-highlight);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.notepad-note-title-span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
+}
+
+.notepad-note-delete-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity var(--transition-fast), color var(--transition-fast);
+  display: inline-flex;
+  align-items: center;
+}
+
+.notepad-note-item:hover .notepad-note-delete-btn {
+  opacity: 0.8;
+}
+
+.notepad-note-delete-btn:hover {
+  color: var(--color-error) !important;
+  opacity: 1 !important;
+}
+
+/* Zone d'édition */
+.notepad-editor-container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  min-height: 0;
+}
+
+.notepad-editor-form {
+  padding: var(--space-2xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  flex: 1;
+  min-height: 0;
+}
+
+.notepad-editor-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.notepad-note-title-input {
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: var(--font-3xl);
+  font-weight: 700;
+  outline: none;
+  width: 70%;
+  border-bottom: 1px solid transparent;
+  transition: border-color var(--transition-fast);
+}
+
+.notepad-note-title-input:focus {
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.notepad-textarea-container {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-xl);
+  min-height: 0;
+}
+
+.notepad-textarea {
+  background: var(--bg-secondary);
+  border: 1px solid var(--glass-border);
+  color: #fff;
+  padding: var(--space-lg);
+  border-radius: var(--radius-sm);
+  outline: none;
+  resize: none;
+  font-family: monospace;
+  font-size: var(--font-base);
+  line-height: 1.6;
+}
+
+.notepad-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+}
+
+.task-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  color: var(--accent-primary);
+  padding: 2px var(--space-sm);
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+}
+
+.sync-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-success);
+}
+
+.sync-indicator svg {
+  animation: spin 2s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .notepad-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .notepad-sidebar {
+    display: none;
+  }
+}

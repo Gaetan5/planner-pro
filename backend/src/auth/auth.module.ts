@@ -11,7 +11,13 @@ import { PrismaModule } from '../prisma/prisma.module';
     ConfigModule.forRoot(),
     JwtModule.register({
       global: true,
-      secret: process.env.JWT_SECRET || 'planner-pro-super-secret-key',
+      secret: (() => {
+        const secret = process.env.JWT_SECRET;
+        if (!secret) {
+          throw new Error('La variable d\'environnement JWT_SECRET est obligatoire mais absente (Fail-Fast).');
+        }
+        return secret;
+      })(),
       signOptions: { expiresIn: '7d' },
     }),
   ],

@@ -1,24 +1,27 @@
 FROM node:18-alpine
 
+# Activer pnpm via corepack
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
 WORKDIR /app
 
 # Copier les fichiers de dépendances
-COPY package*.json ./
+COPY package.json pnpm-lock.yaml ./
 COPY prisma ./prisma/
 
 # Installer les dépendances
-RUN npm install
+RUN pnpm install --frozen-lockfile
 
 # Copier le reste du code source
 COPY . .
 
 # Générer le client Prisma
-RUN npx prisma generate
+RUN pnpm exec prisma generate
 
 # Compiler l'application NestJS
-RUN npm run build
+RUN pnpm run build
 
 EXPOSE 3001
 
 # Lancer l'attente de MySQL, la synchronisation Prisma puis démarrer l'application
-CMD node wait-for-db.js && npx prisma db push && node dist/main
+CMD node wait-for-db.js && pnpm exec prisma migrate deploy && node dist/main
