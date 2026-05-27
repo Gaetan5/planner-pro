@@ -7,7 +7,7 @@ Ce document décrit le travail accompli pour poser toutes les bases techniques e
 ## 🛠️ Ce qui a été réalisé
 
 ### 1. Structure Monorepo
-- **[package.json (Racine)](file:///home/gaetan/Documents/GitHub/planner-pro/package.json)** : Configuration des Workspaces NPM (`frontend` et `backend`). Script global `dev` configuré avec `concurrently` (à installer lors du premier `npm install`).
+- **[package.json (Racine)](file:///home/gaetan/Documents/GitHub/planner-pro/package.json)** : Configuration des Workspaces pnpm (`frontend` et `backend`). Script global `dev` configuré avec `concurrently` (à installer lors du premier `pnpm install`).
 - **[.gitignore](file:///home/gaetan/Documents/GitHub/planner-pro/.gitignore)** : Configuration des exclusions standards (bases de données locales, builds, modules, logs).
 
 ### 2. Frontend React + Vite
@@ -43,15 +43,15 @@ Pour lancer le projet localement :
 1. **Installer les dépendances** :
    ```bash
    # À la racine du projet
-   npm install
+   pnpm install
    ```
 2. **Générer le client Prisma & Migrer la base** :
    ```bash
    # Dans le dossier backend/
-   npx prisma migrate dev --name init
+   pnpm exec prisma migrate dev --name init
    ```
 3. **Lancer les serveurs de développement** :
    ```bash
    # À la racine du projet (lance simultanément le frontend sur le port 3000 et le backend sur le port 3001)
-   npm run dev
+   pnpm dev
    ```
