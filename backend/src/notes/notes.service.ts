@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
+import { randomUUID } from 'crypto';
 
 @Injectable()
 export class NotesService {
@@ -26,7 +27,7 @@ export class NotesService {
     await this.redis.del(this.getCacheKey(userId));
 
     // Analyser le contenu pour extraire et automatiser les tâches
-    await this.parseTasksFromContent(userId, content);
+    await this.parseTasksFromContent(userId, content, note.id);
 
     return note;
   }
@@ -44,7 +45,7 @@ export class NotesService {
     await this.redis.del(this.getCacheKey(userId));
 
     // Analyser à nouveau le contenu pour voir s'il y a de nouvelles tâches
-    await this.parseTasksFromContent(userId, content);
+    await this.parseTasksFromContent(userId, content, noteId);
 
     return note;
   }
@@ -63,9 +64,14 @@ export class NotesService {
       console.warn('Impossible de lire le cache Redis, repli sur la base de données:', e);
     }
 
-    // Récupérer depuis la base de données
+    // Récupérer depuis la base de données avec les tâches associées actives
     const notes = await this.prisma.note.findMany({
-      where: { userId },
+      where: { userId, deletedAt: null },
+      include: {
+        tasks: {
+          where: { deletedAt: null },
+        },
+      },
       orderBy: { updatedAt: 'desc' },
     });
 
@@ -80,19 +86,30 @@ export class NotesService {
   }
 
   async getNote(noteId: string) {
-    return this.prisma.note.findUnique({
-      where: { id: noteId },
+    return this.prisma.note.findFirst({
+      where: { id: noteId, deletedAt: null },
+      include: {
+        tasks: {
+          where: { deletedAt: null },
+        },
+      },
     });
   }
 
   async deleteNote(noteId: string) {
-    const note = await this.prisma.note.findUnique({
-      where: { id: noteId },
+    const note = await this.prisma.note.findFirst({
+      where: { id: noteId, deletedAt: null },
     });
 
     if (note) {
-      await this.prisma.note.delete({
+      await this.prisma.note.update({
         where: { id: noteId },
+        data: { deletedAt: new Date() },
+      });
+      // Supprimer logiquement les tâches associées à la note
+      await this.prisma.task.updateMany({
+        where: { noteId },
+        data: { deletedAt: new Date() },
       });
       // Invalider le cache de l'utilisateur
       await this.redis.del(this.getCacheKey(note.userId));
@@ -101,32 +118,93 @@ export class NotesService {
   }
 
   /**
+   * Synchronise le statut d'une tâche cochée/décochée avec la case à cocher correspondante
+   * dans la note qui l'a créée.
+   */
+  async syncTaskStatusToNote(taskId: string, newStatus: string) {
+    const task = await this.prisma.task.findFirst({
+      where: { id: taskId, deletedAt: null },
+      include: { note: true, project: true },
+    });
+
+    if (!task || !task.noteId || !task.note || task.note.deletedAt) return;
+
+    const note = task.note;
+    let content = note.content;
+    const taskTitle = task.title;
+    const isDone = newStatus === 'DONE';
+    const projectName = task.project?.name;
+
+    // Retrouver la ligne de la note par le commentaire d'identifiant invisible <!-- task:ID -->
+    const lineRegex = new RegExp(`^(\\s*-\\s*\\[[ xX]?\\]\\s+)(.*?)(?:\\s+#\\w+)?\\s*<!--\\s*task:${taskId}\\s*-->\\s*$`, 'm');
+
+    const match = content.match(lineRegex);
+    if (match) {
+      const prefix = match[1];
+      const newPrefix = prefix.replace(/\[[ xX]?\]/, isDone ? '[x]' : '[ ]');
+      const oldLine = match[0];
+
+      // Mettre à jour le statut, le titre et le projet dans la ligne Markdown
+      const projectTag = projectName && projectName !== 'Inbox' ? ` #${projectName}` : '';
+      const newLine = `${newPrefix}${taskTitle}${projectTag} <!-- task:${taskId} -->`;
+
+      content = content.replace(oldLine, newLine);
+
+      // Mettre à jour la note en base
+      await this.prisma.note.update({
+        where: { id: note.id },
+        data: { content },
+      });
+
+      // Invalider le cache Redis
+      await this.redis.del(this.getCacheKey(note.userId));
+      console.log(`Statut de la tâche "${taskTitle}" et titre synchronisés dans la note "${note.title}" (${isDone ? '[x]' : '[ ]'})`);
+    }
+  }
+
+  /**
    * Analyse le contenu Markdown d'une note pour extraire les lignes de type "- [ ] Tâche"
    * et les transformer automatiquement en tâches réelles en base de données.
    */
-  private async parseTasksFromContent(userId: string, content: string) {
+  private async parseTasksFromContent(userId: string, content: string, noteId: string) {
     const lines = content.split('\n');
-    const taskRegex = /^-\s*\[\s*\]\s+(.+)$/i;
+    let hasChanges = false;
+    const updatedLines = [];
+
+    // Regex pour détecter une tâche avec case à cocher : "- [ ] Tâche" ou "- [x] Tâche"
+    const taskLineRegex = /^(\s*-\s*\[([ xX])\]\s+)(.+)$/;
 
     for (const line of lines) {
-      const match = line.match(taskRegex);
-      if (match) {
-        let taskTitle = match[1].trim();
-        let targetProjectName = 'Inbox'; // Projet par défaut
+      const match = line.match(taskLineRegex);
 
-        // Extraire un éventuel tag de projet (ex: #ProjetA ou #Startup)
-        const tagMatch = taskTitle.match(/#(\w+)/);
-        if (tagMatch) {
-          targetProjectName = tagMatch[1];
-          // Nettoyer le titre de la tâche en enlevant le hashtag
-          taskTitle = taskTitle.replace(`#${targetProjectName}`, '').trim();
+      if (match) {
+        const prefix = match[1];
+        const checkChar = match[2];
+        let taskText = match[3].trim();
+        const isDone = checkChar.toLowerCase() === 'x';
+
+        // Tenter d'extraire un identifiant de tâche existant à la fin de la ligne
+        let taskId: string | null = null;
+        const idMatch = taskText.match(/(.+)<!--\s*task:([\w-]+)\s*-->/i);
+        if (idMatch) {
+          taskText = idMatch[1].trim();
+          taskId = idMatch[2];
         }
 
-        // 1. Récupérer ou créer le projet cible
+        // Extraire un tag de projet (ex: #ProjetA ou #Startup)
+        let targetProjectName = 'Inbox';
+        const tagMatch = taskText.match(/#(\w+)/);
+        if (tagMatch) {
+          targetProjectName = tagMatch[1];
+          taskText = taskText.replace(`#${targetProjectName}`, '').trim();
+        }
+
+        // 1. Récupérer ou créer le projet cible actif
         let project = await this.prisma.project.findFirst({
           where: {
             name: { equals: targetProjectName },
             userId,
+            deletedAt: null,
           },
         });
 
@@ -140,27 +218,82 @@ export class NotesService {
           });
         }
 
-        // 2. Vérifier si cette tâche n'a pas déjà été créée pour éviter les doublons
-        const existingTask = await this.prisma.task.findFirst({
-          where: {
-            title: taskTitle,
-            projectId: project.id,
-            userId,
-          },
-        });
+        const taskStatus = isDone ? 'DONE' : 'TODO';
 
-        // 3. Créer la tâche si elle n'existe pas encore
-        if (!existingTask) {
+        if (taskId) {
+          // Si un identifiant existe déjà, on vérifie la tâche correspondante active
+          const existingTask = await this.prisma.task.findFirst({
+            where: { id: taskId, deletedAt: null },
+          });
+
+          if (existingTask) {
+            // Mettre à jour si le statut, le titre ou le projet a changé dans la note
+            const statusChanged = (existingTask.status === 'DONE' && !isDone) ? 'TODO' : ((existingTask.status !== 'DONE' && isDone) ? 'DONE' : null);
+            const titleChanged = existingTask.title !== taskText;
+            const projectChanged = existingTask.projectId !== project.id;
+
+            if (statusChanged || titleChanged || projectChanged) {
+              await this.prisma.task.update({
+                where: { id: taskId },
+                data: {
+                  title: taskText,
+                  status: statusChanged || existingTask.status as any,
+                  projectId: project.id,
+                },
+              });
+              console.log(`Tâche "${taskId}" mise à jour depuis la note.`);
+            }
+            updatedLines.push(line);
+          } else {
+            // Recréer la tâche si elle a été supprimée accidentellement
+            await this.prisma.task.create({
+              data: {
+                id: taskId,
+                title: taskText,
+                status: taskStatus,
+                projectId: project.id,
+                userId,
+                noteId,
+              },
+            });
+            console.log(`Tâche "${taskId}" recréée avec l'ID de la note.`);
+            updatedLines.push(line);
+          }
+        } else {
+          // Aucun identifiant présent : création d'une nouvelle tâche et injection du tag dans la note
+          const newTaskId = randomUUID();
+
           await this.prisma.task.create({
             data: {
-              title: taskTitle,
+              id: newTaskId,
+              title: taskText,
+              status: taskStatus,
               projectId: project.id,
               userId,
+              noteId,
             },
           });
-          console.log(`Tâche créée automatiquement : "${taskTitle}" dans le projet "${targetProjectName}"`);
+
+          console.log(`Tâche créée automatiquement : "${taskText}" avec l'ID "${newTaskId}"`);
+
+          const projectSuffix = tagMatch ? ` #${targetProjectName}` : '';
+          const newLine = `${prefix}${taskText}${projectSuffix} <!-- task:${newTaskId} -->`;
+          updatedLines.push(newLine);
+          hasChanges = true;
         }
+      } else {
+        updatedLines.push(line);
       }
+    }
+
+    if (hasChanges) {
+      const newContent = updatedLines.join('\n');
+      await this.prisma.note.update({
+        where: { id: noteId },
+        data: { content: newContent },
+      });
+      // Invalider le cache de l'utilisateur
+      await this.redis.del(this.getCacheKey(userId));
     }
   }
 }
