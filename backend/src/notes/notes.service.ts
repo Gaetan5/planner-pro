@@ -141,13 +141,15 @@ export class NotesService {
     let match: RegExpMatchArray | null = null;
     const staticRegex = /^(\s*-\s*\[[ xX]?\]\s+)(.*?)(?:\s+#\w+)?\s*<!--\s*task:([a-zA-Z0-9-]+)\s*-->\s*$/;
 
-    for (let i = 0; i < lines.length; i++) {
-      const m = lines[i].match(staticRegex);
+    let currentIndex = 0;
+    for (const line of lines) {
+      const m = line.match(staticRegex);
       if (m && m[3] === taskId) {
-        lineIndex = i;
+        lineIndex = currentIndex;
         match = m;
         break;
       }
+      currentIndex++;
     }
 
     if (lineIndex !== -1 && match) {
@@ -158,7 +160,7 @@ export class NotesService {
       const projectTag = projectName && projectName !== 'Inbox' ? ` #${projectName}` : '';
       const newLine = `${newPrefix}${taskTitle}${projectTag} <!-- task:${taskId} -->`;
 
-      lines[lineIndex] = newLine;
+      lines.splice(lineIndex, 1, newLine);
       content = lines.join('\n');
 
       // Mettre à jour la note en base
