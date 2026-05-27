@@ -1,10 +1,9 @@
-import { Controller, Post, Get, Body, Param, Query } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, Query, UseGuards, Req } from '@nestjs/common';
 import { AuthService } from './auth.service';
+import { JwtAuthGuard } from './jwt.guard';
 
 @Controller('auth')
 export class AuthController {
-  private readonly defaultUserId = 'default-user-id';
-
   constructor(private readonly authService: AuthService) {}
 
   /**
@@ -19,8 +18,9 @@ export class AuthController {
    * Récupère les dépôts GitHub de l'utilisateur connecté
    */
   @Get('github/repos')
-  getGitHubRepositories(@Query('userId') queryUserId?: string) {
-    const userId = queryUserId || this.defaultUserId;
+  @UseGuards(JwtAuthGuard)
+  getGitHubRepositories(@Req() req: any) {
+    const userId = req.user.id;
     return this.authService.getGitHubRepositories(userId);
   }
 
@@ -28,11 +28,12 @@ export class AuthController {
    * Synchronise un dépôt GitHub à un projet Planner-Pro
    */
   @Post('github/sync')
+  @UseGuards(JwtAuthGuard)
   syncRepository(
     @Body() body: { projectId: string; repoFullName: string },
-    @Query('userId') queryUserId?: string,
+    @Req() req: any,
   ) {
-    const userId = queryUserId || this.defaultUserId;
+    const userId = req.user.id;
     return this.authService.syncRepositoryToProject(userId, body.projectId, body.repoFullName);
   }
 }
