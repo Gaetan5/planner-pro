@@ -48,7 +48,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
     }
 
     if (!token) {
-      console.log(`Connexion WebSocket rejetée : Token manquant pour le client ${client.id}`);
+      console.log('Accès WebSocket refusé : Identifiant non fourni.');
       client.disconnect(true);
       return;
     }
@@ -62,7 +62,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
       const activeTracking = await this.trackingService.getActiveTracking(client.data.userId);
       client.emit('active-timer-state', activeTracking);
     } catch (error) {
-      console.log(`Connexion WebSocket rejetée : Token invalide pour le client ${client.id}`);
+      console.log('Accès WebSocket refusé : Validation de l\'identité échouée.');
       client.disconnect(true);
     }
   }

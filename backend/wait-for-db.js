@@ -22,7 +22,9 @@ function checkConnection() {
     process.exit(0);
   });
 
-  client.on('error', () => {
+  const onError = () => {
+    client.off('error', onError);
+    client.destroy();
     retries--;
     if (retries === 0) {
       console.error('MySQL n\'a pas démarré à temps. Abandon.');
@@ -30,7 +32,9 @@ function checkConnection() {
     }
     console.log(`En attente du démarrage de MySQL... (${retries} tentatives restantes)`);
     setTimeout(checkConnection, 2000);
-  });
+  };
+
+  client.on('error', onError);
 }
 
 checkConnection();

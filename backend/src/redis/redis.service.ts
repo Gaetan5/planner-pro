@@ -25,7 +25,11 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleDestroy() {
-    this.redisClient.disconnect();
+    if (this.redisClient) {
+      this.redisClient.removeAllListeners('connect');
+      this.redisClient.removeAllListeners('error');
+      this.redisClient.disconnect();
+    }
   }
 
   /**
