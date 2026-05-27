@@ -20,8 +20,11 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     try {
+      if (!process.env.JWT_SECRET) {
+        throw new Error('JWT_SECRET n\'est pas défini.');
+      }
       const payload = await this.jwtService.verifyAsync(token, {
-        secret: process.env.JWT_SECRET || 'planner-pro-super-secret-key-a-changer-en-production',
+        secret: process.env.JWT_SECRET,
       });
       // Assigner l'utilisateur décodé à la requête
       request['user'] = { id: payload.sub, email: payload.email, name: payload.name };
