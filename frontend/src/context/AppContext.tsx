@@ -125,6 +125,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Gérer la connexion WebSocket et tester l'API Backend
   useEffect(() => {
+    let activeSocket: any = null
+
     if (!user) {
       if (socket) {
         socket.disconnect()
@@ -149,36 +151,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               Authorization: user.token ? `Bearer ${user.token}` : ''
             }
           })
+          activeSocket = newSocket
           setSocket(newSocket)
 
-          newSocket.on('connect', () => {
+          const handleConnect = () => {
             console.log('Connecté au WebSocket backend')
-          })
-
-          newSocket.on('active-timer-state', (state) => {
+          }
+          const handleActiveTimerState = (state: any) => {
             setActiveTimer(state)
-          })
-
-          newSocket.on('timer-started', (log) => {
+          }
+          const handleTimerStarted = (log: any) => {
             setActiveTimer({
               id: log.id,
               startTime: log.startTime,
               taskId: log.taskId,
               task: log.task
             })
-          })
-
-          newSocket.on('timer-stopped', () => {
-            setActiveTimer(null)
-          })
-
-          newSocket.on('task-status-changed', () => {
-            refreshData()
-          })
-
-          return () => {
-            newSocket.close()
           }
+          const handleTimerStopped = () => {
+            setActiveTimer(null)
+          }
+          const handleTaskStatusChanged = () => {
+            refreshData()
+          }
+
+          newSocket.on('connect', handleConnect)
+          newSocket.on('active-timer-state', handleActiveTimerState)
+          newSocket.on('timer-started', handleTimerStarted)
+          newSocket.on('timer-stopped', handleTimerStopped)
+          newSocket.on('task-status-changed', handleTaskStatusChanged)
         } else {
           setIsConnected(false)
         }
@@ -189,6 +190,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     initConnection()
+
+    return () => {
+      if (activeSocket) {
+        activeSocket.off('connect')
+        activeSocket.off('active-timer-state')
+        activeSocket.off('timer-started')
+        activeSocket.off('timer-stopped')
+        activeSocket.off('task-status-changed')
+        activeSocket.disconnect()
+      }
+    }
   }, [user])
 
   // Charger les données réelles depuis le backend

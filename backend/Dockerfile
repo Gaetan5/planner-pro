@@ -21,7 +21,7 @@ COPY --chown=node:node backend/package.json ./backend/
 COPY --chown=node:node frontend/package.json ./frontend/
 
 # Installer les dépendances du monorepo filtrées pour le backend
-RUN pnpm install --filter backend... --frozen-lockfile
+RUN pnpm install --filter backend... --no-frozen-lockfile
 
 # Copier le reste des fichiers du backend
 COPY --chown=node:node backend ./backend/
