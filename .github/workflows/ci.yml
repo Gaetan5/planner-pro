@@ -12,7 +12,7 @@ jobs:
       mysql:
         image: mysql:8.0
         env:
-          MYSQL_ROOT_PASSWORD: root_password
+          MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
           MYSQL_DATABASE: planner_pro_test
         ports: ['3306:3306']
         options: >-
@@ -24,9 +24,9 @@ jobs:
         image: redis:7-alpine
         ports: ['6379:6379']
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: pnpm/action-setup@fe6df111a0c3664d4eae09a90209f8319f6a15fe # v4.0.0
+      - uses: actions/setup-node@3963e583c2e1631028787c8a865b4333c62612f0 # v4.1.0
         with:
           node-version: 18
           cache: pnpm
@@ -34,8 +34,8 @@ jobs:
       - run: pnpm build
       - run: pnpm --filter backend test
         env:
-          DATABASE_URL: mysql://root:root_password@localhost:3306/planner_pro_test
-          JWT_SECRET: ci-test-secret-key-32-chars-min!
-          ENCRYPTION_KEY: ci-test-encryption-key-32-bytes!
+          DATABASE_URL: mysql://root:${{ secrets.MYSQL_ROOT_PASSWORD }}@localhost:3306/planner_pro_test
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
           REDIS_HOST: localhost
           REDIS_PORT: 6379
