@@ -3,8 +3,8 @@ FROM node:18-alpine
 # Installer les dépendances système pour Prisma (openssl et libc6-compat pour Alpine)
 RUN apk add --no-cache openssl libc6-compat
 
-# Activer pnpm via corepack
-RUN corepack enable
+# Installer pnpm globalement
+RUN npm install -g pnpm@9.15.4
 
 # Créer le répertoire de travail et lui attribuer les droits node
 RUN mkdir -p /home/node/app && chown -R node:node /home/node/app
@@ -21,7 +21,7 @@ COPY --chown=node:node backend/package.json ./backend/
 COPY --chown=node:node frontend/package.json ./frontend/
 
 # Installer les dépendances du monorepo filtrées pour le backend
-RUN pnpm install --filter backend... --no-frozen-lockfile
+RUN --mount=type=cache,id=pnpm,target=/home/node/.local/share/pnpm/store/v3 pnpm install --filter backend... --no-frozen-lockfile
 
 # Copier le reste des fichiers du backend
 COPY --chown=node:node backend ./backend/
