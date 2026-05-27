@@ -136,19 +136,30 @@ export class NotesService {
     const projectName = task.project?.name;
 
     // Retrouver la ligne de la note par le commentaire d'identifiant invisible <!-- task:ID -->
-    const lineRegex = new RegExp(`^(\\s*-\\s*\\[[ xX]?\\]\\s+)(.*?)(?:\\s+#\\w+)?\\s*<!--\\s*task:${taskId}\\s*-->\\s*$`, 'm');
+    const lines = content.split('\n');
+    let lineIndex = -1;
+    let match: RegExpMatchArray | null = null;
+    const staticRegex = /^(\s*-\s*\[[ xX]?\]\s+)(.*?)(?:\s+#\w+)?\s*<!--\s*task:([a-zA-Z0-9-]+)\s*-->\s*$/;
 
-    const match = content.match(lineRegex);
-    if (match) {
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(staticRegex);
+      if (m && m[3] === taskId) {
+        lineIndex = i;
+        match = m;
+        break;
+      }
+    }
+
+    if (lineIndex !== -1 && match) {
       const prefix = match[1];
       const newPrefix = prefix.replace(/\[[ xX]?\]/, isDone ? '[x]' : '[ ]');
-      const oldLine = match[0];
 
       // Mettre à jour le statut, le titre et le projet dans la ligne Markdown
       const projectTag = projectName && projectName !== 'Inbox' ? ` #${projectName}` : '';
       const newLine = `${newPrefix}${taskTitle}${projectTag} <!-- task:${taskId} -->`;
 
-      content = content.replace(oldLine, newLine);
+      lines[lineIndex] = newLine;
+      content = lines.join('\n');
 
       // Mettre à jour la note en base
       await this.prisma.note.update({
