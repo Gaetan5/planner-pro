@@ -1,7 +1,7 @@
 FROM node:18-alpine
 
-# Activer pnpm via corepack
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# Installer pnpm globalement
+RUN npm install -g pnpm@9.15.4
 
 # Créer le répertoire de travail et lui attribuer les droits node
 RUN mkdir -p /home/node/app && chown -R node:node /home/node/app
@@ -18,7 +18,7 @@ COPY --chown=node:node frontend/package.json ./frontend/
 COPY --chown=node:node backend/package.json ./backend/
 
 # Installer les dépendances du monorepo filtrées pour le frontend
-RUN pnpm install --filter frontend... --no-frozen-lockfile
+RUN --mount=type=cache,id=pnpm,target=/home/node/.local/share/pnpm/store/v3 pnpm install --filter frontend... --no-frozen-lockfile
 
 # Copier le reste des fichiers du frontend
 COPY --chown=node:node frontend ./frontend/
