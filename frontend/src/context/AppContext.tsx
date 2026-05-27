@@ -9,6 +9,7 @@ export interface Task {
   priority: 'LOW' | 'MEDIUM' | 'HIGH'
   projectId: string
   project?: { name: string }
+  noteId?: string
 }
 
 export interface Project {
@@ -24,6 +25,7 @@ export interface Note {
   title: string
   content: string
   updatedAt: string
+  tasks?: Task[]
 }
 
 export interface TimeBlock {
@@ -40,12 +42,12 @@ interface AppContextType {
   notes: Note[]
   timeBlocks: TimeBlock[]
   activeTimer: { id: string; startTime: string; taskId: string; task?: Task } | null
-  activeTab: 'dashboard' | 'kanban' | 'calendar' | 'notes'
+  activeTab: 'dashboard' | 'kanban' | 'calendar' | 'notes' | 'pomodoro'
   isConnected: boolean
   login: (code: string) => Promise<void>
   logout: () => void
   mockLogin: (name: string) => void
-  setActiveTab: (tab: 'dashboard' | 'kanban' | 'calendar' | 'notes') => void
+  setActiveTab: (tab: 'dashboard' | 'kanban' | 'calendar' | 'notes' | 'pomodoro') => void
   createProject: (name: string, description?: string) => Promise<void>
   deleteProject: (projectId: string) => Promise<void>
   createTask: (projectId: string, title: string, description?: string, priority?: string) => Promise<void>
@@ -58,11 +60,30 @@ interface AppContextType {
   createTimeBlock: (taskId: string, startTime: string, endTime: string) => Promise<void>
   updateTimeBlock: (timeBlockId: string, startTime: string, endTime: string) => Promise<void>
   deleteTimeBlock: (timeBlockId: string) => Promise<void>
+  // Pomodoro
+  pomodoroState: 'idle' | 'focus' | 'break'
+  pomodoroTaskId: string | null
+  pomodoroTimeLeft: number
+  pomodoroSettings: { focusDuration: number; breakDuration: number }
+  isPomodoroRunning: boolean
+  setPomodoroSettings: (settings: { focusDuration: number; breakDuration: number }) => void
+  startPomodoro: (taskId: string) => void
+  pausePomodoro: () => void
+  resumePomodoro: () => void
+  resetPomodoro: () => void
+  skipBreak: () => void
+  // Thème
+  theme: 'dark' | 'light'
+  toggleTheme: () => void
+  // Notifications
+  requestNotificationPermission: () => Promise<void>
+  sendBrowserNotification: (title: string, options?: NotificationOptions) => void
+  scheduleReminder: (taskTitle: string, startTimeIso: string) => void
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined)
 
-const BACKEND_URL = 'http://localhost:3001'
+const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001'
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<AppContextType['user']>(null)
@@ -70,9 +91,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [notes, setNotes] = useState<Note[]>([])
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([])
   const [activeTimer, setActiveTimer] = useState<AppContextType['activeTimer']>(null)
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'kanban' | 'calendar' | 'notes'>('dashboard')
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'kanban' | 'calendar' | 'notes' | 'pomodoro'>('dashboard')
   const [isConnected, setIsConnected] = useState(false)
   const [socket, setSocket] = useState<Socket | null>(null)
+
+  // Pomodoro States
+  const [pomodoroState, setPomodoroState] = useState<'idle' | 'focus' | 'break'>('idle')
+  const [pomodoroTaskId, setPomodoroTaskId] = useState<string | null>(null)
+  const [pomodoroSettings, setPomodoroSettings] = useState({ focusDuration: 25, breakDuration: 5 })
+  const [pomodoroTimeLeft, setPomodoroTimeLeft] = useState<number>(25 * 60)
+  const [isPomodoroRunning, setIsPomodoroRunning] = useState(false)
+
+  // Thème State
+  const [theme, setTheme] = useState<'dark' | 'light'>(
+    (localStorage.getItem('planner_theme') as 'dark' | 'light') || 'dark'
+  )
 
   // Charger la session utilisateur au démarrage
   useEffect(() => {
@@ -137,6 +170,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
           newSocket.on('timer-stopped', () => {
             setActiveTimer(null)
+          })
+
+          newSocket.on('task-status-changed', () => {
+            refreshData()
           })
 
           return () => {
@@ -323,12 +360,151 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (res.ok) refreshData()
   }
 
+  // Thème logic
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    localStorage.setItem('planner_theme', theme)
+  }, [theme])
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))
+  }
+
+  // Notifications logic
+  const requestNotificationPermission = async () => {
+    if ('Notification' in window) {
+      const permission = await Notification.requestPermission()
+      console.log('Permission notification:', permission)
+    }
+  }
+
+  const sendBrowserNotification = (title: string, options?: NotificationOptions) => {
+    if ('Notification' in window && Notification.permission === 'granted') {
+      try {
+        new Notification(title, options)
+      } catch (e) {
+        console.error('Erreur lors de l\'envoi de la notification:', e)
+      }
+    }
+  }
+
+  const scheduleReminder = (taskTitle: string, startTimeIso: string) => {
+    const targetTime = new Date(startTimeIso).getTime()
+    const now = Date.now()
+    const reminderTime = targetTime - 5 * 60 * 1000
+    const delay = reminderTime - now
+
+    if (delay > 0) {
+      console.log(`Rappel programmé pour "${taskTitle}" dans ${Math.round(delay / 1000)}s`)
+      setTimeout(() => {
+        sendBrowserNotification('Time-Blocking imminent !', {
+          body: `Votre bloc de temps pour "${taskTitle}" commence dans 5 minutes.`,
+        })
+      }, delay)
+    } else {
+      const startDelay = targetTime - now
+      if (startDelay > 0) {
+        setTimeout(() => {
+          sendBrowserNotification('Time-Blocking commencé !', {
+            body: `C'est l'heure de commencer : "${taskTitle}"`,
+          })
+        }, startDelay)
+      }
+    }
+  }
+
+  // Demander la permission de notification au login
+  useEffect(() => {
+    if (user) {
+      requestNotificationPermission()
+    }
+  }, [user])
+
+  // Pomodoro logic
+  useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+    if (isPomodoroRunning && pomodoroTimeLeft > 0) {
+      interval = setInterval(() => {
+        setPomodoroTimeLeft((prev) => prev - 1)
+      }, 1000)
+    } else if (isPomodoroRunning && pomodoroTimeLeft === 0) {
+      if (pomodoroState === 'focus') {
+        stopTimer()
+        setPomodoroState('break')
+        setPomodoroTimeLeft(pomodoroSettings.breakDuration * 60)
+        sendBrowserNotification('Session Focus terminée !', {
+          body: 'Il est temps de faire une pause bien méritée.',
+        })
+      } else if (pomodoroState === 'break') {
+        setPomodoroState('focus')
+        setPomodoroTimeLeft(pomodoroSettings.focusDuration * 60)
+        if (pomodoroTaskId) {
+          startTimer(pomodoroTaskId)
+        }
+        sendBrowserNotification('La pause est terminée !', {
+          body: 'C\'est parti pour une nouvelle session de focus.',
+        })
+      }
+    }
+
+    return () => {
+      if (interval) clearInterval(interval)
+    }
+  }, [isPomodoroRunning, pomodoroTimeLeft, pomodoroState, pomodoroSettings, pomodoroTaskId])
+
+  const startPomodoro = (taskId: string) => {
+    setPomodoroTaskId(taskId)
+    setPomodoroState('focus')
+    setPomodoroTimeLeft(pomodoroSettings.focusDuration * 60)
+    setIsPomodoroRunning(true)
+    startTimer(taskId)
+  }
+
+  const pausePomodoro = () => {
+    setIsPomodoroRunning(false)
+    stopTimer()
+  }
+
+  const resumePomodoro = () => {
+    if (pomodoroTaskId) {
+      setIsPomodoroRunning(true)
+      if (pomodoroState === 'focus') {
+        startTimer(pomodoroTaskId)
+      }
+    }
+  }
+
+  const resetPomodoro = () => {
+    setIsPomodoroRunning(false)
+    setPomodoroState('idle')
+    setPomodoroTaskId(null)
+    setPomodoroTimeLeft(pomodoroSettings.focusDuration * 60)
+    stopTimer()
+  }
+
+  const skipBreak = () => {
+    if (pomodoroState === 'break') {
+      setPomodoroState('focus')
+      setPomodoroTimeLeft(pomodoroSettings.focusDuration * 60)
+      if (pomodoroTaskId) {
+        startTimer(pomodoroTaskId)
+      }
+    }
+  }
+
   return (
     <AppContext.Provider value={{
       user, projects, notes, timeBlocks, activeTimer, activeTab, isConnected,
       login, logout, mockLogin, setActiveTab, createProject, deleteProject,
       createTask, updateTask, deleteTask, startTimer, stopTimer, saveNote, deleteNote,
-      createTimeBlock, updateTimeBlock, deleteTimeBlock
+      createTimeBlock, updateTimeBlock, deleteTimeBlock,
+      // Pomodoro
+      pomodoroState, pomodoroTaskId, pomodoroTimeLeft, pomodoroSettings, isPomodoroRunning,
+      setPomodoroSettings, startPomodoro, pausePomodoro, resumePomodoro, resetPomodoro, skipBreak,
+      // Thème
+      theme, toggleTheme,
+      // Notifications
+      requestNotificationPermission, sendBrowserNotification, scheduleReminder
     }}>
       {children}
     </AppContext.Provider>
