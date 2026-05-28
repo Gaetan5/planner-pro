@@ -21,7 +21,7 @@ COPY --chown=node:node backend/package.json ./backend/
 COPY --chown=node:node frontend/package.json ./frontend/
 
 # Installer les dépendances du monorepo filtrées pour le backend
-RUN --mount=type=cache,id=pnpm,target=/home/node/.local/share/pnpm/store/v3 pnpm install --filter backend... --no-frozen-lockfile
+RUN --mount=type=cache,id=pnpm,target=/home/node/.local/share/pnpm/store/v3 pnpm install --filter backend... --no-frozen-lockfile --prod=false
 
 # Copier le reste des fichiers du backend
 COPY --chown=node:node backend ./backend/

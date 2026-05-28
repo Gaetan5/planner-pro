@@ -46,7 +46,7 @@ interface AppContextType {
   isConnected: boolean
   login: (code: string) => Promise<void>
   logout: () => void
-  mockLogin: (name: string) => void
+  mockLogin: (name: string) => Promise<void>
   setActiveTab: (tab: 'dashboard' | 'kanban' | 'calendar' | 'notes' | 'pomodoro') => void
   createProject: (name: string, description?: string) => Promise<void>
   deleteProject: (projectId: string) => Promise<void>
@@ -219,8 +219,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (noteRes.ok) setNotes(await noteRes.json())
       if (tbRes.ok) setTimeBlocks(await tbRes.json())
       if (activeRes.ok) {
-        const act = await activeRes.json()
-        setActiveTimer(act || null)
+        const text = await activeRes.text()
+        const act = text ? JSON.parse(text) : null
+        setActiveTimer(act)
       }
     } catch (e) {
       console.error('Erreur lors du chargement des données depuis le backend :', e)
@@ -260,12 +261,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (socket) socket.disconnect()
   }
 
-  const mockLogin = (name: string) => {
-    // bypass pour le développement local
-    const mockUserData = { id: 'default-user-id', name: name || 'Gaëtan', email: 'gaetan@planner.pro', token: 'mock-jwt-token' }
-    setUser(mockUserData)
-    localStorage.setItem('planner_user', JSON.stringify(mockUserData))
+  const mockLogin = async (name: string) => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/auth/mock/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name || 'Gaëtan' }),
+      })
+      if (!res.ok) throw new Error('Échec simulation login')
+      const data = await res.json()
+      const userData = { id: data.user.id, name: data.user.name, email: data.user.email, token: data.accessToken }
+      setUser(userData)
+      localStorage.setItem('planner_user', JSON.stringify(userData))
+    } catch (e) {
+      console.error(e)
+      throw e
+    }
   }
+
 
   // CRUD Projets
   const createProject = async (name: string, description?: string) => {

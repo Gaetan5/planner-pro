@@ -96,6 +96,40 @@ export class AuthService {
   }
 
   /**
+   * Login simulé pour le développement local.
+   */
+  async mockLogin(name: string) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new BadRequestException('Le mode simulation n\'est pas disponible en production.');
+    }
+
+    const email = `${name.toLowerCase().replace(/\s+/g, '')}@local.planner.pro`;
+    const user = await this.prisma.user.upsert({
+      where: { email },
+      update: {
+        name,
+        githubId: 'mock-github-id',
+        githubUsername: name,
+      },
+      create: {
+        email,
+        name,
+        githubId: 'mock-github-id',
+        githubUsername: name,
+      },
+    });
+
+    const payload = { sub: user.id, email: user.email, name: user.name };
+    const jwt = this.jwtService.sign(payload);
+
+    return {
+      user,
+      accessToken: jwt,
+    };
+  }
+
+
+  /**
    * Récupère la liste des dépôts GitHub publics et privés de l'utilisateur.
    */
   async getGitHubRepositories(userId: string) {
