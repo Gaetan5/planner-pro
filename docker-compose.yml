@@ -52,12 +52,15 @@ services:
     restart: always
     ports:
       - '3000:3000'
+    environment:
+      VITE_API_URL: http://localhost:3002
     volumes:
       - ./frontend:/home/node/app/frontend
       - /home/node/app/frontend/node_modules
       - /home/node/app/node_modules
     depends_on:
       - backend
+
 
 volumes:
   mysql_data:

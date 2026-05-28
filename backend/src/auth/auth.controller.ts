@@ -15,6 +15,15 @@ export class AuthController {
   }
 
   /**
+   * Endpoint de login simulé pour le développement local
+   */
+  @Post('mock/login')
+  mockLogin(@Body() body: { name: string }) {
+    return this.authService.mockLogin(body.name);
+  }
+
+
+  /**
    * Récupère les dépôts GitHub de l'utilisateur connecté
    */
   @Get('github/repos')
