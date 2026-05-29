@@ -28,7 +28,7 @@ export class TrackingController {
   }
 
   @Get('logs/:taskId')
-  getTimeLogsForTask(@Param('taskId') taskId: string) {
-    return this.trackingService.getTimeLogsForTask(taskId);
+  getTimeLogsForTask(@Req() req: any, @Param('taskId') taskId: string) {
+    return this.trackingService.getTimeLogsForTask(req.user.id, taskId);
   }
 }
