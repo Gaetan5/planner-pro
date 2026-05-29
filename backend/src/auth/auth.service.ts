@@ -104,17 +104,18 @@ export class AuthService {
     }
 
     const email = `${name.toLowerCase().replace(/\s+/g, '')}@local.planner.pro`;
+    const mockGithubId = `mock-github-id-${name.toLowerCase().replace(/\s+/g, '')}`;
     const user = await this.prisma.user.upsert({
       where: { email },
       update: {
         name,
-        githubId: 'mock-github-id',
+        githubId: mockGithubId,
         githubUsername: name,
       },
       create: {
         email,
         name,
-        githubId: 'mock-github-id',
+        githubId: mockGithubId,
         githubUsername: name,
       },
     });

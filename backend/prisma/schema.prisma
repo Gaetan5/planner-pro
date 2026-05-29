@@ -18,11 +18,57 @@ model User {
   githubId          String?        @unique
   githubUsername    String?
   githubAccessToken String?
+  ownedWorkspaces   Workspace[]    @relation("WorkspaceOwner")
+  memberships       Membership[]
   projects          Project[]
   tasks             Task[]
+  taskAssignments   TaskAssignee[]
+  resourceProfiles  ResourceProfile[]
+  resourceAllocations ResourceAllocation[]
   notes             Note[]
   refreshTokens     RefreshToken[]
   createdAt         DateTime       @default(now())
+}
+
+model Workspace {
+  id          String       @id @default(uuid())
+  name        String
+  ownerId     String
+  owner       User         @relation("WorkspaceOwner", fields: [ownerId], references: [id])
+  memberships Membership[]
+  projects    Project[]
+  teams       Team[]
+  resourceProfiles ResourceProfile[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  deletedAt   DateTime?
+
+  @@index([ownerId])
+}
+
+model Membership {
+  id          String          @id @default(uuid())
+  workspaceId String
+  workspace   Workspace       @relation(fields: [workspaceId], references: [id])
+  userId      String
+  user        User            @relation(fields: [userId], references: [id])
+  role        WorkspaceRole   @default(MEMBER)
+  createdAt   DateTime        @default(now())
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+model Team {
+  id          String      @id @default(uuid())
+  name        String
+  workspaceId String
+  workspace   Workspace   @relation(fields: [workspaceId], references: [id])
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  deletedAt   DateTime?
+
+  @@index([workspaceId])
 }
 
 model Project {
@@ -30,26 +76,149 @@ model Project {
   name        String
   description String?   @db.Text
   githubRepo  String?   // Ex: "gaetan/planner-pro"
+  status      ProjectStatus @default(PLANNING)
+  startDate   DateTime?
+  dueDate     DateTime?
   userId      String
   user        User      @relation(fields: [userId], references: [id])
+  workspaceId String?
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id])
+  phases      ProjectPhaseItem[]
+  milestones  Milestone[]
+  deliverables Deliverable[]
+  deliveries  DeliveryRecord[]
+  resourceAllocations ResourceAllocation[]
   tasks       Task[]
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
 
   @@index([userId])
+  @@index([workspaceId])
+}
+
+model ProjectPhaseItem {
+  id          String    @id @default(uuid())
+  name        String
+  status      PhaseStatus @default(NOT_STARTED)
+  order       Int       @default(0)
+  startDate   DateTime?
+  dueDate     DateTime?
+  projectId   String
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([projectId])
+}
+
+model Milestone {
+  id          String    @id @default(uuid())
+  name        String
+  description String?   @db.Text
+  dueDate     DateTime?
+  completedAt DateTime?
+  projectId   String
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([projectId])
+}
+
+model Deliverable {
+  id          String            @id @default(uuid())
+  title       String
+  description String?           @db.Text
+  status      DeliverableStatus @default(DRAFT)
+  dueDate     DateTime?
+  acceptedAt  DateTime?
+  projectId   String
+  project     Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@index([projectId])
+}
+
+model ResourceProfile {
+  id                    String    @id @default(uuid())
+  workspaceId           String
+  workspace             Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id])
+  weeklyCapacityMinutes Int       @default(2400)
+  skills                String?   @db.Text
+  costRateCents         Int?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+model ResourceAllocation {
+  id                String   @id @default(uuid())
+  projectId         String
+  project           Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId            String
+  user              User     @relation(fields: [userId], references: [id])
+  allocationPercent Int      @default(100)
+  roleLabel         String?
+  startDate         DateTime?
+  endDate           DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([userId])
+}
+
+model DeliveryRecord {
+  id          String         @id @default(uuid())
+  projectId   String
+  project     Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  status      DeliveryStatus @default(DRAFT)
+  summary     String?        @db.Text
+  deliveredAt DateTime?
+  acceptedAt  DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  checklist   DeliveryChecklistItem[]
+
+  @@index([projectId])
+}
+
+model DeliveryChecklistItem {
+  id          String         @id @default(uuid())
+  deliveryId  String
+  delivery    DeliveryRecord @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  title       String
+  checked     Boolean        @default(false)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([deliveryId])
 }
 
 model Task {
   id          String         @id @default(uuid())
   title       String
   description String?        @db.Text
-  status      String         @default("TODO") // TODO, IN_PROGRESS, DONE
-  priority    String         @default("MEDIUM") // LOW, MEDIUM, HIGH
+  status      TaskStatus     @default(TODO)
+  priority    TaskPriority   @default(MEDIUM)
+  startDate   DateTime?
+  dueDate     DateTime?
+  estimatedMinutes Int?
+  progress    Int            @default(0)
+  labels      String?        @db.Text
   projectId   String
   project     Project        @relation(fields: [projectId], references: [id])
   userId      String
   user        User           @relation(fields: [userId], references: [id])
+  assignees   TaskAssignee[]
+  dependencies TaskDependency[] @relation("TaskDependencies")
+  dependents   TaskDependency[] @relation("TaskDependents")
   timeBlocks  TimeBlock[]
   timeLogs    TimeLog[]
   noteId      String?
@@ -61,6 +230,31 @@ model Task {
   @@index([projectId])
   @@index([userId])
   @@index([noteId])
+}
+
+model TaskAssignee {
+  id        String   @id @default(uuid())
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([taskId, userId])
+  @@index([userId])
+}
+
+model TaskDependency {
+  id              String   @id @default(uuid())
+  taskId          String
+  task            Task     @relation("TaskDependencies", fields: [taskId], references: [id], onDelete: Cascade)
+  dependsOnTaskId String
+  dependsOnTask   Task     @relation("TaskDependents", fields: [dependsOnTaskId], references: [id], onDelete: Cascade)
+  type            DependencyType @default(FINISH_TO_START)
+  createdAt       DateTime @default(now())
+
+  @@unique([taskId, dependsOnTaskId])
+  @@index([dependsOnTaskId])
 }
 
 model TimeBlock {
@@ -108,5 +302,59 @@ model RefreshToken {
   createdAt   DateTime  @default(now())
 
   @@index([userId])
+}
+
+enum DeliveryStatus {
+  DRAFT
+  READY_FOR_ACCEPTANCE
+  ACCEPTED
+  REJECTED
+}
+
+enum ProjectStatus {
+  PLANNING
+  ACTIVE
+  ON_HOLD
+  AT_RISK
+  DELIVERED
+  CLOSED
+}
+
+enum PhaseStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  DONE
+}
+
+enum DeliverableStatus {
+  DRAFT
+  READY_FOR_REVIEW
+  ACCEPTED
+  DELIVERED
+}
+
+enum DependencyType {
+  FINISH_TO_START
+  START_TO_START
+  FINISH_TO_FINISH
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
 }
 
