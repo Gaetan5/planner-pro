@@ -177,15 +177,39 @@ CMD ["node", "dist/main"]
 - [ ] Les dépendances techniques (ex: structures de base de données) sont prêtes ou mockées.
 
 #### Definition of Done (DoD) - Pour qu'une tâche soit validée :
-- [ ] Le code est compilé sans avertissements (TypeScript & Linters OK).
-- [ ] Le schéma Prisma est migré et les tests d'intégration de base de données sont au vert.
-- [ ] Les flux de chiffrement (tokens) et de routage (JWT) ont été validés par test.
-- [ ] La documentation a été mise à jour (Fichiers API, README ou ADR si impact architectural).
-- [ ] Les critères d'accessibilité (contraste, raccourcis claviers) sont respectés.
+- [x] Le code est compilé sans avertissements (TypeScript & Linters OK).
+- [x] Le schéma Prisma est migré et les tests d'intégration de base de données sont au vert.
+- [x] Les flux de chiffrement (tokens) et de routage (JWT) ont été validés par test.
+- [x] La documentation a été mise à jour (Fichiers API, README ou ADR si impact architectural).
+- [x] Les critères d'accessibilité (contraste, raccourcis claviers) sont respectés.
 
 ---
 
-## 🚀 5. Procédure de Boot et d'Exploitation
+## 🧪 5. Validation par ligne de commande (CLI Integration Tests)
+
+L'application intègre des scripts de validation de bout en bout en ligne de commande pour s'assurer du bon fonctionnement des APIs et de l'alignement des fonctionnalités avec le frontend.
+
+### A. Test de création de projet de base
+Pour valider l'authentification mockée, la création de projet, de jalons et de livrables associés :
+```bash
+BACKEND_URL=http://localhost:3009 node backend/test_cli_project.js
+```
+
+### B. Test des fonctionnalités avancées (Calendrier, Planification, Notes & Équipes)
+Pour valider l'extraction de tâches depuis les notes Markdown, le time-blocking, la planification de dépendances Gantt, et la synchronisation double-sens des cases à cocher :
+```bash
+BACKEND_URL=http://localhost:3009 node backend/test_cli_features.js
+```
+
+### C. Test de robustesse (Détection de cycles & RBAC)
+Pour valider la détection de dépendances cycliques (DFS), le contrôle d'accès RBAC (rejet des actions d'écriture pour les rôles `MEMBER`/`VIEWER` avec erreur 403), le filtrage du calendrier et l'exclusion des blocs de code Markdown :
+```bash
+BACKEND_URL=http://localhost:3009 node backend/test_cli_improvements.js
+```
+
+---
+
+## 🚀 6. Procédure de Boot et d'Exploitation
 
 ### 📋 Prérequis Locaux
 - **Docker Engine** >= 20.10.x et **Docker Compose** >= 2.x

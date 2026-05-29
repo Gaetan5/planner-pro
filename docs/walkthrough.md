@@ -1,57 +1,55 @@
-# Walkthrough - Initialisation de Planner-Pro
+# Walkthrough — Clôture de l'Audit & Extension Professionnelle
 
-Ce document décrit le travail accompli pour poser toutes les bases techniques et architecturales de **Planner-Pro**.
-
----
-
-## 🛠️ Ce qui a été réalisé
-
-### 1. Structure Monorepo
-- **[package.json (Racine)](file:///home/gaetan/Documents/GitHub/planner-pro/package.json)** : Configuration des Workspaces pnpm (`frontend` et `backend`). Script global `dev` configuré avec `concurrently` (à installer lors du premier `pnpm install`).
-- **[.gitignore](file:///home/gaetan/Documents/GitHub/planner-pro/.gitignore)** : Configuration des exclusions standards (bases de données locales, builds, modules, logs).
-
-### 2. Frontend React + Vite
-- **[package.json (Frontend)](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/package.json)** : Dépendances définies (React 18, Lucide React pour les icônes, Socket.io-client pour le temps réel).
-- **[vite.config.ts](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/vite.config.ts)** & **[tsconfig.json](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/tsconfig.json)** : Configurations optimales avec port de dev à `3000`.
-- **[index.html](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/index.html)** : Fichier HTML d'entrée avec favicone d'horloge emoji et titre de l'application.
-- **[src/index.css](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/index.css)** : Charte graphique premium implémentée (thème sombre, variables HSL, design Glassmorphism, animations de pulsation et scrollbars stylisées).
-- **[src/App.tsx](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/App.tsx)** : Tableau de bord immersif interactif avec :
-  - Un en-tête moderne.
-  - Un volet latéral de navigation des projets.
-  - Un module de Time Tracking fonctionnel (démarrer/arrêter un chronomètre temps réel).
-  - Des sections de Todo-list et de calendrier prêtes pour l'intégration.
-
-### 3. Backend NestJS & Base de données
-- **[package.json (Backend)](file:///home/gaetan/Documents/GitHub/planner-pro/backend/package.json)** : Dépendances NestJS, WebSockets et Prisma client.
-- **[tsconfig.json](file:///home/gaetan/Documents/GitHub/planner-pro/backend/tsconfig.json)** & **[nest-cli.json](file:///home/gaetan/Documents/GitHub/planner-pro/backend/nest-cli.json)** : Configuration TypeScript et compilation NestJS.
-- **[src/main.ts](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/main.ts)** : Point d'entrée avec activation de CORS sur le port `3001`.
-- **Modules de Base** : `app.module.ts`, `app.controller.ts`, `app.service.ts` configurés et fonctionnels.
-- **[prisma/schema.prisma](file:///home/gaetan/Documents/GitHub/planner-pro/backend/prisma/schema.prisma)** : Schéma de base de données SQLite complet modélisant la vision produit (Utilisateurs, Projets, Tâches, Blocs de temps pour le calendrier, Logs de temps pour le chronomètre, et Bloc-notes).
-
-### 4. Authentification & SSO GitHub (Mise en œuvre Expert)
-- **[auth.service.ts](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/auth/auth.service.ts)** : Logique d'échange de code OAuth GitHub, enregistrement/mise à jour automatique de l'utilisateur, génération de JWT d'accès, récupération des dépôts et liaison à un projet.
-- **[auth.controller.ts](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/auth/auth.controller.ts)** : Points d'accès REST `/auth/github/login`, `/auth/github/repos` et `/auth/github/sync`.
-- **[auth.module.ts](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/auth/auth.module.ts)** : Déclaration et configuration de JWT et de ConfigModule.
-- **[.env.example](file:///home/gaetan/Documents/GitHub/planner-pro/.env.example)** : Exemple de configuration pour la clé secrète JWT et les identifiants OAuth GitHub.
+Ce document résume le travail effectué pour finaliser les phases 1 à 5 de l'application **Planner Pro**.
 
 ---
 
-## 🚀 Prochaines étapes (Installation & Démarrage)
+## 🛠️ Modifications Réalisées
 
-Pour lancer le projet localement :
+### 1. Securisation du Module de Time Tracking
+- **[tracking.controller.ts](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/tracking/tracking.controller.ts)** : Ajout du décorateur `@Req() req: any` pour passer l'identifiant de l'utilisateur authentifié `req.user.id` à la méthode `getTimeLogsForTask`.
+- **[tracking.service.ts](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/tracking/tracking.service.ts)** :
+  - Mise à jour de `startTracking` pour s'assurer que la tâche existe, n'est pas supprimée et appartient à l'utilisateur ou à son workspace.
+  - Mise à jour de `getTimeLogsForTask` pour exiger et vérifier la même autorisation d'accès utilisateur avant de renvoyer les logs de temps.
 
-1. **Installer les dépendances** :
-   ```bash
-   # À la racine du projet
-   pnpm install
-   ```
-2. **Générer le client Prisma & Migrer la base** :
-   ```bash
-   # Dans le dossier backend/
-   pnpm exec prisma migrate dev --name init
-   ```
-3. **Lancer les serveurs de développement** :
-   ```bash
-   # À la racine du projet (lance simultanément le frontend sur le port 3000 et le backend sur le port 3001)
-   pnpm dev
-   ```
+### 2. Extension du Contexte Applicatif (Frontend)
+- **[AppContext.tsx](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/context/AppContext.tsx)** :
+  - Ajout des types de données pour les workspaces, les jalons (milestones), les livrables (deliverables), les livraisons (deliveries), les dépendances de tâches et la capacité des ressources.
+  - Mise à jour de `refreshData()` pour charger les workspaces et le rapport de capacité des ressources en parallèle des autres appels d'API.
+  - Implémentation des 11 méthodes de mutation API (création de jalon, acceptation de livrable, toggle de checklist de livraison, etc.) et exposition de ces méthodes aux composants enfants.
+
+### 3. Vues Professionnelles Intégrées
+- **[GovernanceView.tsx](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/components/GovernanceView.tsx)** & **[GovernanceView.css](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/components/GovernanceView.css)** :
+  - En-tête d'équipe dynamique montrant les avatars des membres du workspace.
+  - Gestion des Jalons (création, complétion).
+  - Gestion des Livrables (création, cycle de statut).
+  - Workflow de livraison interactive (création avec checklist, toggle interactif des éléments de checklist, décision d'acceptation/rejet).
+  - Bilan de clôture finale de projet (glowing premium UI) s'affichant dès que toutes les tâches et livrables sont acceptés et validés.
+- **[CapacityView.tsx](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/components/CapacityView.tsx)** & **[CapacityView.css](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/components/CapacityView.css)** :
+  - Visualisation des taux de charge (capacité planifiée vs capacité hebdomadaire) et d'allocation projet.
+  - Alertes de surcharge glowing (en rouge) avec badges de conflits (`CAPACITY_EXCEEDED` / `ALLOCATION_EXCEEDED`).
+  - Formulaires de mise à jour de profil d'équipe et d'affectation projet.
+
+### 4. Liaisons et Navigation Globales
+- **[KanbanBoard.tsx](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/components/KanbanBoard.tsx)** : Affichage des tâches bloquantes sur les cartes Kanban et possibilité de lier une dépendance lors de la création d'une tâche.
+- **[App.tsx](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/App.tsx)** : Intégration des deux nouveaux onglets **Gouvernance** et **Ressources** dans le menu principal (bureau) et la barre de navigation inférieure (mobile) avec des icônes sémantiques.
+
+---
+
+## 🧪 Validation & Compilation
+
+### Compilation TypeScript & Bundling
+Le monorepo a été compilé avec succès en exécutant la commande globale :
+```bash
+pnpm build
+```
+Le build du frontend React (Vite) et du backend NestJS se sont terminés sans aucune erreur TypeScript ou de transpilateur.
+
+### Tests Unitaires & Sécurité
+Un nouveau fichier de test unitaire [tracking.service.spec.ts](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/tracking/tracking.service.spec.ts) a été créé pour garantir l'étanchéité des autorisations sur les logs et le tracking.
+
+Les tests unitaires Jest ont été lancés :
+```bash
+pnpm --filter backend test
+```
+Les 3 suites de tests du backend (chiffrement, notes et sécurité du tracking) sont validées à 100% (10/10 PASS).
