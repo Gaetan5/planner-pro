@@ -38,7 +38,7 @@ RUN pnpm run build
 EXPOSE 3001
 
 # Lancer l'attente de MySQL, la génération de Prisma, la synchronisation Prisma puis démarrer l'application
-CMD node wait-for-db.js && pnpm exec prisma generate && pnpm exec prisma migrate deploy && node dist/main
+CMD node wait-for-db.js && (pnpm install --filter backend... --no-frozen-lockfile --prod=false --config.confirmModulesPurge=false || true) && pnpm exec prisma generate && pnpm exec prisma migrate deploy && node dist/main
 
 
 
