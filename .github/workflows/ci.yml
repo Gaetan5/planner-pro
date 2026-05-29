@@ -31,6 +31,8 @@ jobs:
           node-version: 18
           cache: pnpm
       - run: pnpm install --no-frozen-lockfile
+      - name: Generate Prisma Client
+        run: pnpm --filter backend prisma generate
       - run: pnpm build
       - run: pnpm --filter backend test
         env:
