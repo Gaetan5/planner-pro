@@ -187,7 +187,19 @@ export class NotesService {
     // Regex pour détecter une tâche avec case à cocher : "- [ ] Tâche" ou "- [x] Tâche"
     const taskLineRegex = /^(\s*-\s*\[([ xX])\]\s+)(.+)$/;
 
+    let inCodeBlock = false;
     for (const line of lines) {
+      if (line.trim().startsWith('```')) {
+        inCodeBlock = !inCodeBlock;
+        updatedLines.push(line);
+        continue;
+      }
+
+      if (inCodeBlock) {
+        updatedLines.push(line);
+        continue;
+      }
+
       const match = line.match(taskLineRegex);
 
       if (match) {
