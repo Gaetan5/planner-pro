@@ -32,7 +32,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --no-frozen-lockfile
       - name: Generate Prisma Client
-        run: pnpm --filter backend prisma generate
+        run: pnpm --filter backend exec prisma generate
       - run: pnpm build
       - run: pnpm --filter backend test
         env:
