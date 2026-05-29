@@ -6,7 +6,9 @@ import { Notepad } from './components/Notepad'
 import { DashboardContent } from './components/DashboardContent'
 import { PomodoroTimer } from './components/PomodoroTimer'
 import { CommandPalette } from './components/CommandPalette'
-import { LogOut, AlertTriangle, LayoutDashboard, Kanban, Calendar, FileText, Timer, Sun, Moon } from 'lucide-react'
+import { GovernanceView } from './components/GovernanceView'
+import { CapacityView } from './components/CapacityView'
+import { LogOut, AlertTriangle, LayoutDashboard, Kanban, Calendar, FileText, Timer, Sun, Moon, ShieldCheck, Users } from 'lucide-react'
 import logo from './logo.png'
 import './App.css'
 
@@ -23,6 +25,8 @@ function AppWithSession() {
       case 'calendar': return <CalendarView />
       case 'notes': return <Notepad />
       case 'pomodoro': return <PomodoroTimer />
+      case 'governance': return <GovernanceView />
+      case 'resources': return <CapacityView />
       default: return <DashboardContent />
     }
   }
@@ -72,6 +76,18 @@ function AppWithSession() {
             className={`nav-tab ${activeTab === 'pomodoro' ? 'nav-tab--active' : ''}`}
           >
             Pomodoro
+          </button>
+          <button
+            onClick={() => setActiveTab('governance')}
+            className={`nav-tab ${activeTab === 'governance' ? 'nav-tab--active' : ''}`}
+          >
+            Gouvernance
+          </button>
+          <button
+            onClick={() => setActiveTab('resources')}
+            className={`nav-tab ${activeTab === 'resources' ? 'nav-tab--active' : ''}`}
+          >
+            Ressources
           </button>
         </nav>
 
@@ -155,6 +171,20 @@ function AppWithSession() {
         >
           <Timer size={20} />
           <span>Pomodoro</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('governance')}
+          className={`bottom-nav-item ${activeTab === 'governance' ? 'bottom-nav-item--active' : ''}`}
+        >
+          <ShieldCheck size={20} />
+          <span>Gouv.</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('resources')}
+          className={`bottom-nav-item ${activeTab === 'resources' ? 'bottom-nav-item--active' : ''}`}
+        >
+          <Users size={20} />
+          <span>Ress.</span>
         </button>
       </nav>
       <CommandPalette />

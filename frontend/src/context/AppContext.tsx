@@ -1,15 +1,43 @@
 import React, { createContext, useContext, useState, useEffect } from 'react'
 import { io, Socket } from 'socket.io-client'
 
+export interface TaskAssignee {
+  id: string
+  user: { id: string; name?: string; email: string }
+}
+
+export interface TaskDependency {
+  id: string
+  taskId: string
+  dependsOnTaskId: string
+  type: 'FINISH_TO_START' | 'START_TO_START' | 'FINISH_TO_FINISH'
+  dependsOnTask?: Task
+}
+
 export interface Task {
   id: string
   title: string
   description?: string
   status: 'TODO' | 'IN_PROGRESS' | 'DONE'
   priority: 'LOW' | 'MEDIUM' | 'HIGH'
+  startDate?: string
+  dueDate?: string
+  estimatedMinutes?: number
+  progress?: number
+  labels?: string
   projectId: string
   project?: { name: string }
+  assignees?: TaskAssignee[]
+  dependencies?: TaskDependency[]
+  dependents?: { id: string; task: Task }[]
   noteId?: string
+}
+
+export interface Workspace {
+  id: string
+  name: string
+  ownerId: string
+  memberships?: WorkspaceMember[]
 }
 
 export interface Project {
@@ -17,6 +45,14 @@ export interface Project {
   name: string
   description?: string
   githubRepo?: string
+  status?: 'PLANNING' | 'ACTIVE' | 'ON_HOLD' | 'AT_RISK' | 'DELIVERED' | 'CLOSED'
+  startDate?: string
+  dueDate?: string
+  workspaceId?: string
+  workspace?: Workspace
+  milestones?: Milestone[]
+  deliverables?: Deliverable[]
+  deliveries?: DeliveryRecord[]
   tasks?: Task[]
 }
 
@@ -36,21 +72,96 @@ export interface TimeBlock {
   task?: Task
 }
 
+export interface WorkspaceMember {
+  id: string
+  role: 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER'
+  user: { id: string; name?: string; email: string }
+}
+
+export interface Milestone {
+  id: string
+  name: string
+  description?: string
+  dueDate?: string
+  completedAt?: string
+  projectId: string
+}
+
+export interface Deliverable {
+  id: string
+  title: string
+  description?: string
+  status: 'DRAFT' | 'READY_FOR_REVIEW' | 'ACCEPTED' | 'DELIVERED'
+  dueDate?: string
+  acceptedAt?: string
+  projectId: string
+}
+
+export interface DeliveryChecklistItem {
+  id: string
+  deliveryId: string
+  title: string
+  checked: boolean
+}
+
+export interface DeliveryRecord {
+  id: string
+  projectId: string
+  status: 'DRAFT' | 'READY_FOR_ACCEPTANCE' | 'ACCEPTED' | 'REJECTED'
+  summary?: string
+  deliveredAt?: string
+  acceptedAt?: string
+  checklist?: DeliveryChecklistItem[]
+}
+
+export interface ResourceProfile {
+  id: string
+  workspaceId: string
+  userId: string
+  weeklyCapacityMinutes: number
+  skills?: string
+  costRateCents?: number
+}
+
+export interface ResourceCapacityReportItem {
+  user: { id: string; name?: string; email: string }
+  role: string
+  profile?: ResourceProfile
+  weeklyCapacityMinutes: number
+  plannedMinutes: number
+  estimatedOpenMinutes: number
+  allocationPercent: number
+  loadPercent: number
+  overloaded: boolean
+  conflicts: string[]
+}
+
+export type CreateTaskOptions = {
+  startDate?: string
+  dueDate?: string
+  estimatedMinutes?: number
+  progress?: number
+  labels?: string
+  assigneeIds?: string[]
+}
 interface AppContextType {
   user: { id: string; name: string; email: string; token?: string } | null
   projects: Project[]
   notes: Note[]
+  workspaces: Workspace[]
+  workspaceMembers: WorkspaceMember[]
+  resourceCapacity: ResourceCapacityReportItem[]
   timeBlocks: TimeBlock[]
   activeTimer: { id: string; startTime: string; taskId: string; task?: Task } | null
-  activeTab: 'dashboard' | 'kanban' | 'calendar' | 'notes' | 'pomodoro'
+  activeTab: 'dashboard' | 'kanban' | 'calendar' | 'notes' | 'pomodoro' | 'governance' | 'resources'
   isConnected: boolean
   login: (code: string) => Promise<void>
   logout: () => void
   mockLogin: (name: string) => Promise<void>
-  setActiveTab: (tab: 'dashboard' | 'kanban' | 'calendar' | 'notes' | 'pomodoro') => void
-  createProject: (name: string, description?: string) => Promise<void>
+  setActiveTab: (tab: 'dashboard' | 'kanban' | 'calendar' | 'notes' | 'pomodoro' | 'governance' | 'resources') => void
+  createProject: (name: string, description?: string, workspaceId?: string, status?: string, startDate?: string, dueDate?: string) => Promise<void>
   deleteProject: (projectId: string) => Promise<void>
-  createTask: (projectId: string, title: string, description?: string, priority?: string) => Promise<void>
+  createTask: (projectId: string, title: string, description?: string, priority?: string, options?: CreateTaskOptions) => Promise<any>
   updateTask: (taskId: string, data: Partial<Task>) => Promise<void>
   deleteTask: (taskId: string) => Promise<void>
   startTimer: (taskId: string) => void
@@ -79,8 +190,19 @@ interface AppContextType {
   requestNotificationPermission: () => Promise<void>
   sendBrowserNotification: (title: string, options?: NotificationOptions) => void
   scheduleReminder: (taskTitle: string, startTimeIso: string) => void
+  // Professional features
+  createMilestone: (projectId: string, name: string, description?: string, dueDate?: string) => Promise<void>
+  completeMilestone: (milestoneId: string) => Promise<void>
+  createDeliverable: (projectId: string, title: string, description?: string, status?: string, dueDate?: string) => Promise<void>
+  updateDeliverableStatus: (deliverableId: string, status: string) => Promise<void>
+  createDelivery: (projectId: string, summary?: string, checklist?: string[]) => Promise<void>
+  updateDeliveryStatus: (deliveryId: string, status: string) => Promise<void>
+  toggleDeliveryChecklistItem: (itemId: string) => Promise<void>
+  addTaskDependency: (taskId: string, dependsOnTaskId: string, type?: string) => Promise<void>
+  removeTaskDependency: (taskId: string, dependsOnTaskId: string) => Promise<void>
+  updateResourceProfile: (userId: string, weeklyCapacityMinutes?: number, skills?: string, costRateCents?: number) => Promise<void>
+  createResourceAllocation: (projectId: string, userId: string, allocationPercent: number, roleLabel?: string, startDate?: string, endDate?: string) => Promise<void>
 }
-
 const AppContext = createContext<AppContextType | undefined>(undefined)
 
 const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001'
@@ -89,9 +211,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [user, setUser] = useState<AppContextType['user']>(null)
   const [projects, setProjects] = useState<Project[]>([])
   const [notes, setNotes] = useState<Note[]>([])
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([])
+  const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMember[]>([])
+  const [resourceCapacity, setResourceCapacity] = useState<ResourceCapacityReportItem[]>([])
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([])
   const [activeTimer, setActiveTimer] = useState<AppContextType['activeTimer']>(null)
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'kanban' | 'calendar' | 'notes' | 'pomodoro'>('dashboard')
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'kanban' | 'calendar' | 'notes' | 'pomodoro' | 'governance' | 'resources'>('dashboard')
   const [isConnected, setIsConnected] = useState(false)
   const [socket, setSocket] = useState<Socket | null>(null)
 
@@ -208,16 +333,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!user || !isConnected) return
 
     try {
-      const [projRes, noteRes, tbRes, activeRes] = await Promise.all([
+      const [projRes, noteRes, membersRes, tbRes, activeRes, workspacesRes, capacityRes] = await Promise.all([
         fetch(`${BACKEND_URL}/projects`, { headers: getHeaders() }),
         fetch(`${BACKEND_URL}/notes`, { headers: getHeaders() }),
+        fetch(`${BACKEND_URL}/projects/members`, { headers: getHeaders() }),
         fetch(`${BACKEND_URL}/projects/timeblocks/all`, { headers: getHeaders() }),
-        fetch(`${BACKEND_URL}/tracking/active`, { headers: getHeaders() })
+        fetch(`${BACKEND_URL}/tracking/active`, { headers: getHeaders() }),
+        fetch(`${BACKEND_URL}/projects/workspaces`, { headers: getHeaders() }),
+        fetch(`${BACKEND_URL}/projects/resources/capacity`, { headers: getHeaders() })
       ])
 
       if (projRes.ok) setProjects(await projRes.json())
       if (noteRes.ok) setNotes(await noteRes.json())
+      if (membersRes.ok) setWorkspaceMembers(await membersRes.json())
       if (tbRes.ok) setTimeBlocks(await tbRes.json())
+      if (workspacesRes.ok) setWorkspaces(await workspacesRes.json())
+      if (capacityRes.ok) setResourceCapacity(await capacityRes.json())
       if (activeRes.ok) {
         const text = await activeRes.text()
         const act = text ? JSON.parse(text) : null
@@ -256,6 +387,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.removeItem('planner_user')
     setProjects([])
     setNotes([])
+    setWorkspaceMembers([])
     setTimeBlocks([])
     setActiveTimer(null)
     if (socket) socket.disconnect()
@@ -281,11 +413,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
 
   // CRUD Projets
-  const createProject = async (name: string, description?: string) => {
+  const createProject = async (name: string, description?: string, workspaceId?: string, status?: string, startDate?: string, dueDate?: string) => {
     const res = await fetch(`${BACKEND_URL}/projects`, {
       method: 'POST',
       headers: getHeaders(),
-      body: JSON.stringify({ name, description })
+      body: JSON.stringify({ name, description, workspaceId, status, startDate, dueDate })
     })
     if (res.ok) refreshData()
   }
@@ -299,13 +431,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }
 
   // CRUD Tâches
-  const createTask = async (projectId: string, title: string, description?: string, priority: string = 'MEDIUM') => {
+  const createTask = async (projectId: string, title: string, description?: string, priority: string = 'MEDIUM', options: CreateTaskOptions = {}) => {
     const res = await fetch(`${BACKEND_URL}/projects/${projectId}/tasks`, {
       method: 'POST',
       headers: getHeaders(),
-      body: JSON.stringify({ title, description, priority })
+      body: JSON.stringify({ title, description, priority, ...options })
     })
-    if (res.ok) refreshData()
+    if (res.ok) {
+      const task = await res.json()
+      refreshData()
+      return task
+    }
+    return null
   }
 
   const updateTask = async (taskId: string, data: Partial<Task>) => {
@@ -381,6 +518,102 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const res = await fetch(`${BACKEND_URL}/projects/timeblocks/${timeBlockId}`, {
       method: 'DELETE',
       headers: getHeaders()
+    })
+    if (res.ok) refreshData()
+  }
+
+  // Professional features
+  const createMilestone = async (projectId: string, name: string, description?: string, dueDate?: string) => {
+    const res = await fetch(`${BACKEND_URL}/projects/${projectId}/milestones`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ name, description, dueDate })
+    })
+    if (res.ok) refreshData()
+  }
+
+  const completeMilestone = async (milestoneId: string) => {
+    const res = await fetch(`${BACKEND_URL}/projects/milestones/${milestoneId}/complete`, {
+      method: 'PUT',
+      headers: getHeaders()
+    })
+    if (res.ok) refreshData()
+  }
+
+  const createDeliverable = async (projectId: string, title: string, description?: string, status?: string, dueDate?: string) => {
+    const res = await fetch(`${BACKEND_URL}/projects/${projectId}/deliverables`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ title, description, status, dueDate })
+    })
+    if (res.ok) refreshData()
+  }
+
+  const updateDeliverableStatus = async (deliverableId: string, status: string) => {
+    const res = await fetch(`${BACKEND_URL}/projects/deliverables/${deliverableId}/status/${status}`, {
+      method: 'PUT',
+      headers: getHeaders()
+    })
+    if (res.ok) refreshData()
+  }
+
+  const createDelivery = async (projectId: string, summary?: string, checklist?: string[]) => {
+    const res = await fetch(`${BACKEND_URL}/projects/${projectId}/deliveries`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ summary, checklist })
+    })
+    if (res.ok) refreshData()
+  }
+
+  const updateDeliveryStatus = async (deliveryId: string, status: string) => {
+    const res = await fetch(`${BACKEND_URL}/projects/deliveries/${deliveryId}/status`, {
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify({ status })
+    })
+    if (res.ok) refreshData()
+  }
+
+  const toggleDeliveryChecklistItem = async (itemId: string) => {
+    const res = await fetch(`${BACKEND_URL}/projects/deliveries/items/${itemId}/toggle`, {
+      method: 'PUT',
+      headers: getHeaders()
+    })
+    if (res.ok) refreshData()
+  }
+
+  const addTaskDependency = async (taskId: string, dependsOnTaskId: string, type: string = 'FINISH_TO_START') => {
+    const res = await fetch(`${BACKEND_URL}/projects/tasks/${taskId}/dependencies`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ dependsOnTaskId, type })
+    })
+    if (res.ok) refreshData()
+  }
+
+  const removeTaskDependency = async (taskId: string, dependsOnTaskId: string) => {
+    const res = await fetch(`${BACKEND_URL}/projects/tasks/${taskId}/dependencies/${dependsOnTaskId}`, {
+      method: 'DELETE',
+      headers: getHeaders()
+    })
+    if (res.ok) refreshData()
+  }
+
+  const updateResourceProfile = async (userId: string, weeklyCapacityMinutes?: number, skills?: string, costRateCents?: number) => {
+    const res = await fetch(`${BACKEND_URL}/projects/resources/${userId}/profile`, {
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify({ weeklyCapacityMinutes, skills, costRateCents })
+    })
+    if (res.ok) refreshData()
+  }
+
+  const createResourceAllocation = async (projectId: string, userId: string, allocationPercent: number, roleLabel?: string, startDate?: string, endDate?: string) => {
+    const res = await fetch(`${BACKEND_URL}/projects/${projectId}/allocations`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ userId, allocationPercent, roleLabel, startDate, endDate })
     })
     if (res.ok) refreshData()
   }
@@ -519,7 +752,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   return (
     <AppContext.Provider value={{
-      user, projects, notes, timeBlocks, activeTimer, activeTab, isConnected,
+      user, projects, notes, workspaces, workspaceMembers, resourceCapacity, timeBlocks, activeTimer, activeTab, isConnected,
       login, logout, mockLogin, setActiveTab, createProject, deleteProject,
       createTask, updateTask, deleteTask, startTimer, stopTimer, saveNote, deleteNote,
       createTimeBlock, updateTimeBlock, deleteTimeBlock,
@@ -529,7 +762,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Thème
       theme, toggleTheme,
       // Notifications
-      requestNotificationPermission, sendBrowserNotification, scheduleReminder
+      requestNotificationPermission, sendBrowserNotification, scheduleReminder,
+      // Professional features
+      createMilestone, completeMilestone, createDeliverable, updateDeliverableStatus,
+      createDelivery, updateDeliveryStatus, toggleDeliveryChecklistItem, addTaskDependency, removeTaskDependency,
+      updateResourceProfile, createResourceAllocation
     }}>
       {children}
     </AppContext.Provider>
