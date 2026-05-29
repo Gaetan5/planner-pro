@@ -75,6 +75,26 @@ graph TD
 * **Décision** : Développement d'un script Node léger à la racine du backend (`wait-for-db.js`) qui utilise le module `net` natif pour tester le port TCP `3306` en boucle toutes les 2 secondes. Le backend attend que ce port réponde avant de lancer `prisma db push` et de démarrer le serveur.
 * **Conséquences** : Éradication totale des crashs liés à l'initialisation asynchrone des services de données.
 
+### Sécurisation & Robustesse de Production (Audit Technique)
+
+Pour répondre aux exigences d'une mise en production de niveau entreprise, quatre correctifs majeurs ont été implémentés directement dans le backend :
+
+1. **Détection de Cycles de Dépendances (DFS)** :
+   - **Problématique** : L'ajout de dépendances de planification (ex. : la tâche A finit pour que la tâche B commence) pouvait mener à des blocages ou des boucles circulaires ($A \rightarrow B \rightarrow A$) qui faisaient planter le rendu de Gantt.
+   - **Solution** : Implémentation d'un algorithme de parcours de graphe en profondeur (DFS - Depth-First Search) récursif dans [projects.service.ts](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/projects/projects.service.ts). Si un cycle est détecté, l'API rejette l'opération avec une erreur `400 BadRequestException`.
+
+2. **Contrôle d'Accès Basé sur les Rôles de Workspace (RBAC)** :
+   - **Problématique** : N'importe quel membre d'un workspace pouvait modifier les jalons, les livrables, valider des livraisons ou assigner des ressources.
+   - **Solution** : Ajout d'une méthode de validation `assertWorkspaceRole` dans le service des projets. Les modifications administratives sensibles lèvent désormais une exception `403 ForbiddenException` si l'utilisateur n'a pas un rôle d'administration (`OWNER` ou `ADMIN`) au sein du workspace.
+
+3. **Optimisation du Calendrier (Filtrage Temporel)** :
+   - **Problématique** : Le chargement de tous les blocs de temps historiques (`Timeblocks`) dégradait les performances sur le long terme.
+   - **Solution** : Ajout de filtres temporels optionnels `start` et `end` sur l'API `GET /projects/timeblocks/all` pour ne charger que les blocs pertinents de la journée ou de la semaine visible sur l'interface.
+
+4. **Parser de Notes Immunisé** :
+   - **Problématique** : Les tâches rédigées à titre d'exemples dans les blocs de code Markdown (triple backticks ` ``` `) dans les notes étaient lues à tort par le parser, créant des faux positifs en base de données.
+   - **Solution** : Ajout d'un drapeau d'état dans [notes.service.ts](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/notes/notes.service.ts) qui force le parseur à ignorer toutes les lignes de texte situées entre des délimiteurs de blocs de code.
+
 ---
 
 ## 🎨 2. Design System & Ergonomie UX (UX/UI Designer Perspective)
@@ -114,42 +134,51 @@ Notre design s'inscrit dans un style **Glassmorphism Premium** intégrant une hi
 
 ## 🐳 3. Stratégie de Conteneurisation & DevOps (DevOps Perspective)
 
-### Analyse des Dockerfiles de Production
+### Analyse du Dockerfile du Backend (`/backend/Dockerfile`)
+L'image de conteneur du backend intègre des mécanismes avancés pour supporter à la fois la compilation de production et le re-linking dynamique en environnement de développement local :
 
-#### Backend Dockerfile (`/backend/Dockerfile`)
 ```dockerfile
-# Stage 1 : Build & Install deps
-FROM node:18-alpine AS builder
-RUN corepack enable && corepack prepare pnpm@latest --activate
-WORKDIR /app
-COPY package.json pnpm-lock.yaml ./
-COPY prisma ./prisma/
-RUN pnpm install --frozen-lockfile
-COPY . .
+FROM node:18-alpine
+
+# Installer les dépendances système pour Prisma (openssl et libc6-compat pour Alpine)
+RUN apk add --no-cache openssl libc6-compat
+
+# Installer pnpm globalement
+RUN npm install -g pnpm@9.15.4
+
+# Créer le répertoire de travail et lui attribuer les droits node
+RUN mkdir -p /home/node/app && chown -R node:node /home/node/app
+WORKDIR /home/node/app
+USER node
+
+# Copier les fichiers de configuration du monorepo pnpm à la racine
+COPY --chown=node:node package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY --chown=node:node backend/package.json ./backend/
+COPY --chown=node:node frontend/package.json ./frontend/
+
+# Installer les dépendances du monorepo filtrées pour le backend
+RUN --mount=type=cache,id=pnpm,target=/home/node/.local/share/pnpm/store/v3 pnpm install --filter backend... --no-frozen-lockfile --prod=false
+
+# Copier le reste des fichiers du backend
+COPY --chown=node:node backend ./backend/
+WORKDIR /home/node/app/backend
+
+# Générer le client Prisma et compiler l'application NestJS
+RUN pnpm exec prisma generate
 RUN pnpm run build
 
-# Stage 2 : Image d'Exécution Minimale
-FROM node:18-alpine
-RUN corepack enable && corepack prepare pnpm@latest --activate
-WORKDIR /app
-ENV NODE_ENV=production
-COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile --prod
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/wait-for-db.js ./
-RUN pnpm exec prisma generate
-
-# Sécurisation par défaut : Exécution en mode non-root
-USER node
 EXPOSE 3001
-CMD ["node", "dist/main"]
+
+# Lancer l'attente de MySQL, la regénération/migration puis démarrer l'application
+CMD node wait-for-db.js && (pnpm install --filter backend... --no-frozen-lockfile --prod=false --config.confirmModulesPurge=false || true) && pnpm exec prisma generate && pnpm exec prisma migrate deploy && node dist/main
 ```
 
-#### Rationale DevOps :
-- **Multi-Stage Build** : Réduction du poids final de l'image de 80% (pas d'outils de compilation TypeScript ni de dépendances de dev dans l'image finale).
-- **Sécurité (Principle of Least Privilege)** : L'image finale s'exécute sous l'utilisateur natif `node` et non `root` pour éviter toute élévation de privilèges en cas d'exploitation de faille dans l'application.
-- **Volume anonyme `/app/node_modules`** : Dans `docker-compose.yml`, cette directive isole les paquets compilés dans le conteneur Linux de ceux potentiellement présents sur l'hôte Windows/macOS/Linux afin d'éviter les incompatibilités binaires de packages natifs (comme Prisma ou bcrypt).
+### Rationale DevOps & Résilience au démarrage :
+- **Sécurisation par défaut (Principle of Least Privilege)** : L'image s'exécute sous l'utilisateur natif `node` et non `root` pour éviter toute élévation de privilèges.
+- **Résilience du volume de développement (Modules Purge)** : Lors du montage du volume local `./backend:/home/node/app/backend` pour le développement en direct, les packages installés dans le conteneur peuvent entrer en conflit avec ceux de l'hôte. 
+  - **Solution** : Le script d'entrée réinstalle et relie dynamiquement les modules (`pnpm install`).
+  - **Bypass interactif** : L'option `--config.confirmModulesPurge=false` a été introduite pour désactiver l'invite interactive de confirmation de pnpm en environnement non-interactif, évitant ainsi le blocage et les crashs au boot du conteneur.
+- **Synchronisation automatique** : Au démarrage, le conteneur attend la base de données, applique automatiquement les migrations Prisma en attente, génère le client local et lance le serveur.
 
 ---
 
