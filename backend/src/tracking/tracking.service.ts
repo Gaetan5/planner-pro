@@ -6,12 +6,19 @@ export class TrackingService {
   constructor(private readonly prisma: PrismaService) {}
 
   async startTracking(userId: string, taskId: string) {
-    // Vérifier si la tâche existe
-    const task = await this.prisma.task.findUnique({
-      where: { id: taskId },
+    // Vérifier si la tâche existe et si l'utilisateur y a accès
+    const task = await this.prisma.task.findFirst({
+      where: {
+        id: taskId,
+        deletedAt: null,
+        OR: [
+          { userId },
+          { project: { workspace: { memberships: { some: { userId } } } } },
+        ],
+      },
     });
     if (!task) {
-      throw new BadRequestException('La tâche spécifiée n\'existe pas.');
+      throw new BadRequestException('La tâche spécifiée n\'existe pas ou vous n\'y avez pas accès.');
     }
 
     // Arrêter automatiquement toute session de tracking en cours pour cet utilisateur
@@ -73,7 +80,21 @@ export class TrackingService {
     });
   }
 
-  async getTimeLogsForTask(taskId: string) {
+  async getTimeLogsForTask(userId: string, taskId: string) {
+    const task = await this.prisma.task.findFirst({
+      where: {
+        id: taskId,
+        deletedAt: null,
+        OR: [
+          { userId },
+          { project: { workspace: { memberships: { some: { userId } } } } },
+        ],
+      },
+    });
+    if (!task) {
+      throw new BadRequestException('La tâche spécifiée n\'existe pas ou vous n\'y avez pas accès.');
+    }
+
     return this.prisma.timeLog.findMany({
       where: { taskId },
       orderBy: { startTime: 'desc' },
