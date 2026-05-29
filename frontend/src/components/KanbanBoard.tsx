@@ -67,6 +67,8 @@ function DraggableCard({
     : undefined
 
   const isTrackingThis = activeTimer?.taskId === task.id
+  const dueDate = task.dueDate ? new Date(task.dueDate).toLocaleDateString() : null
+  const estimate = task.estimatedMinutes ? `${Math.round(task.estimatedMinutes / 60 * 10) / 10}h` : null
 
   return (
     <div
@@ -116,6 +118,32 @@ function DraggableCard({
       {task.description && (
         <p className="kanban-card-desc">{task.description}</p>
       )}
+
+      <div className="kanban-card-meta">
+        {dueDate && <span>Échéance {dueDate}</span>}
+        {estimate && <span>Estimé {estimate}</span>}
+        {typeof task.progress === 'number' && <span>{task.progress}%</span>}
+      </div>
+
+      {task.dependencies && task.dependencies.length > 0 && (
+        <div className="kanban-card-dependencies" style={{ marginTop: 'var(--space-xs)', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+          {task.dependencies.map((dep) => (
+            <span key={dep.id} style={{ fontSize: 'var(--font-2xs)', color: 'var(--color-error)', display: 'flex', alignItems: 'center', gap: '2px' }}>
+              🔗 Bloqué par : {dep.dependsOnTask?.title || 'Tâche'}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {task.assignees && task.assignees.length > 0 && (
+        <div className="kanban-card-assignees">
+          {task.assignees.map((assignee) => (
+            <span key={assignee.id} className="kanban-card-assignee">
+              {(assignee.user.name || assignee.user.email).slice(0, 2).toUpperCase()}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -125,6 +153,7 @@ function DraggableCard({
 export const KanbanBoard: React.FC = () => {
   const {
     projects,
+    workspaceMembers,
     createTask,
     updateTask,
     deleteTask,
@@ -133,6 +162,7 @@ export const KanbanBoard: React.FC = () => {
     startTimer,
     activeTimer,
     stopTimer,
+    addTaskDependency,
   } = useApp()
 
   const [selectedProjId, setSelectedProjId] = useState<string>(projects[0]?.id || '')
@@ -140,6 +170,12 @@ export const KanbanBoard: React.FC = () => {
   const [taskTitle, setTaskTitle] = useState('')
   const [taskDesc, setTaskDesc] = useState('')
   const [taskPriority, setTaskPriority] = useState('MEDIUM')
+  const [taskDueDate, setTaskDueDate] = useState('')
+  const [taskEstimateHours, setTaskEstimateHours] = useState('')
+  const [taskProgress, setTaskProgress] = useState('0')
+  const [taskLabels, setTaskLabels] = useState('')
+  const [taskAssigneeIds, setTaskAssigneeIds] = useState<string[]>([])
+  const [taskDependencyId, setTaskDependencyId] = useState('')
 
   const [showNewProjForm, setShowNewProjForm] = useState(false)
   const [projName, setProjName] = useState('')
@@ -157,13 +193,30 @@ export const KanbanBoard: React.FC = () => {
     })
   )
 
-  const handleCreateTask = (e: React.FormEvent) => {
+  const handleCreateTask = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!taskTitle.trim() || !activeProject) return
-    createTask(activeProject.id, taskTitle, taskDesc, taskPriority)
+    const createdTask = await createTask(activeProject.id, taskTitle, taskDesc, taskPriority, {
+      dueDate: taskDueDate ? new Date(taskDueDate).toISOString() : undefined,
+      estimatedMinutes: taskEstimateHours ? Math.round(Number(taskEstimateHours) * 60) : undefined,
+      progress: Number(taskProgress) || 0,
+      labels: taskLabels || undefined,
+      assigneeIds: taskAssigneeIds,
+    })
+
+    if (createdTask && taskDependencyId) {
+      await addTaskDependency(createdTask.id, taskDependencyId)
+    }
+
     setTaskTitle('')
     setTaskDesc('')
     setTaskPriority('MEDIUM')
+    setTaskDueDate('')
+    setTaskEstimateHours('')
+    setTaskProgress('0')
+    setTaskLabels('')
+    setTaskAssigneeIds([])
+    setTaskDependencyId('')
     setShowNewTaskForm(false)
   }
 
@@ -332,6 +385,79 @@ export const KanbanBoard: React.FC = () => {
                 <option value="MEDIUM">Priorité Moyenne</option>
                 <option value="HIGH">Priorité Haute</option>
               </select>
+              <div className="task-modal-grid">
+                <label>
+                  Échéance
+                  <input
+                    type="date"
+                    value={taskDueDate}
+                    onChange={e => setTaskDueDate(e.target.value)}
+                    className="form-input"
+                  />
+                </label>
+                <label>
+                  Estimation (h)
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={taskEstimateHours}
+                    onChange={e => setTaskEstimateHours(e.target.value)}
+                    className="form-input"
+                  />
+                </label>
+                <label>
+                  Avancement (%)
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={taskProgress}
+                    onChange={e => setTaskProgress(e.target.value)}
+                    className="form-input"
+                  />
+                </label>
+                <label>
+                  Labels
+                  <input
+                    type="text"
+                    placeholder="design, api, urgent"
+                    value={taskLabels}
+                    onChange={e => setTaskLabels(e.target.value)}
+                    className="form-input"
+                  />
+                </label>
+              </div>
+              <label className="task-modal-assignees">
+                Affectation
+                <select
+                  multiple
+                  value={taskAssigneeIds}
+                  onChange={e => setTaskAssigneeIds(Array.from(e.currentTarget.selectedOptions, option => option.value))}
+                  className="form-select"
+                >
+                  {workspaceMembers.map((member) => (
+                    <option key={member.user.id} value={member.user.id}>
+                      {member.user.name || member.user.email} - {member.role}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="task-modal-assignees" style={{ marginTop: '8px' }}>
+                Dépendance (Bloqué par)
+                <select
+                  value={taskDependencyId}
+                  onChange={e => setTaskDependencyId(e.target.value)}
+                  className="form-select"
+                >
+                  <option value="">Aucune</option>
+                  {activeProject?.tasks?.map((taskItem) => (
+                    <option key={taskItem.id} value={taskItem.id}>
+                      {taskItem.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <div className="kanban-card-controls" style={{ justifyContent: 'flex-end', gap: '12px', marginTop: '8px' }}>
                 <button
                   type="button"
