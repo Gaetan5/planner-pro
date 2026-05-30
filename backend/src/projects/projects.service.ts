@@ -1,7 +1,8 @@
 import { Injectable, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotesService } from '../notes/notes.service';
-import { Prisma, TaskPriority, ProjectStatus, DeliverableStatus, DependencyType, DeliveryStatus, WorkspaceRole } from '@prisma/client';
+import { Prisma, TaskPriority, ProjectStatus, DeliverableStatus, DependencyType, DeliveryStatus, WorkspaceRole, TaskStatus } from '@prisma/client';
+import * as crypto from 'crypto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
@@ -934,5 +935,91 @@ export class ProjectsService {
     return this.prisma.timeBlock.delete({
       where: { id: timeBlockId },
     });
+  }
+
+  private verifyGitHubSignature(payload: any, signature?: string): boolean {
+    const secret = process.env.GITHUB_WEBHOOK_SECRET;
+    if (!secret) {
+      // Si aucun secret n'est configuré, validation passive par défaut
+      return true;
+    }
+    if (!signature) {
+      return false;
+    }
+    try {
+      const hmac = crypto.createHmac('sha256', secret);
+      const bodyStr = JSON.stringify(payload);
+      const digest = 'sha256=' + hmac.update(bodyStr).digest('hex');
+      return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(digest));
+    } catch (e) {
+      return false;
+    }
+  }
+
+  private extractTaskIdsFromText(text: string): string[] {
+    if (!text) return [];
+    const regex = /(?:fix|fixes|fixed|close|closes|closed|resolve|resolves|resolved)\s+#([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/gi;
+    const taskIds: string[] = [];
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+      taskIds.push(match[1]);
+    }
+    return taskIds;
+  }
+
+  private async closeTaskFromWebhook(taskId: string): Promise<boolean> {
+    const task = await this.prisma.task.findFirst({
+      where: { id: taskId, deletedAt: null },
+    });
+    if (!task) {
+      return false;
+    }
+    if (task.status === TaskStatus.DONE) {
+      return false;
+    }
+    await this.prisma.task.update({
+      where: { id: taskId },
+      data: { status: TaskStatus.DONE, progress: 100 },
+    });
+    if (task.noteId) {
+      await this.notesService.syncTaskStatusToNote(taskId, TaskStatus.DONE);
+    }
+    return true;
+  }
+
+  async handleGitHubWebhook(payload: any, signature?: string): Promise<string[]> {
+    if (!this.verifyGitHubSignature(payload, signature)) {
+      throw new ForbiddenException('Signature webhook GitHub invalide');
+    }
+
+    const taskIdsToClose = new Set<string>();
+
+    if (payload.action === 'closed' && payload.pull_request) {
+      const pr = payload.pull_request;
+      if (pr.merged === true) {
+        const textToSearch = `${pr.title || ''} ${pr.body || ''}`;
+        const ids = this.extractTaskIdsFromText(textToSearch);
+        ids.forEach(id => taskIdsToClose.add(id));
+      }
+    }
+
+    if (payload.commits && Array.isArray(payload.commits)) {
+      for (const commit of payload.commits) {
+        if (commit.message) {
+          const ids = this.extractTaskIdsFromText(commit.message);
+          ids.forEach(id => taskIdsToClose.add(id));
+        }
+      }
+    }
+
+    const closedIds: string[] = [];
+    for (const taskId of taskIdsToClose) {
+      const success = await this.closeTaskFromWebhook(taskId);
+      if (success) {
+        closedIds.push(taskId);
+      }
+    }
+
+    return closedIds;
   }
 }

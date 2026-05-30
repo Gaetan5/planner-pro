@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Body, Param, Put, Delete, UseGuards, Req, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Put, Delete, UseGuards, Req, Query, Headers } from '@nestjs/common';
+import { Public } from '../auth/public.decorator';
 import { DeliverableStatus } from '@prisma/client';
 import { ProjectsService } from './projects.service';
 import { JwtAuthGuard } from '../auth/jwt.guard';
@@ -258,5 +259,20 @@ export class ProjectsController {
   @Delete('timeblocks/:timeBlockId')
   deleteTimeBlock(@Req() req: any, @Param('timeBlockId') timeBlockId: string) {
     return this.projectsService.deleteTimeBlock(timeBlockId, req.user.id);
+  }
+
+  @Public()
+  @Post('webhooks/github')
+  async handleGitHubWebhook(
+    @Body() payload: any,
+    @Headers('x-hub-signature-256') signature?: string,
+  ) {
+    const closedTaskIds = await this.projectsService.handleGitHubWebhook(payload, signature);
+    if (this.trackingGateway.server) {
+      for (const taskId of closedTaskIds) {
+        this.trackingGateway.server.emit('task-status-changed', { taskId });
+      }
+    }
+    return { closedTaskIds };
   }
 }
