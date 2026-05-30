@@ -1,6 +1,8 @@
 import React, { useState } from 'react'
 import { useApp } from '../context/AppContext'
 import { ShieldCheck, Flag, CheckSquare, Plus, Check, X, FileText, Truck } from 'lucide-react'
+import { RadialProgressRing } from './RadialProgressRing'
+import { NumberTicker } from './NumberTicker'
 import './GovernanceView.css'
 
 export const GovernanceView: React.FC = () => {
@@ -195,6 +197,43 @@ export const GovernanceView: React.FC = () => {
                   <div className="closure-detail-row">
                     <span className="closure-detail-label">Statut Final :</span>
                     <span className="closure-detail-value text-success">ACCEPTED & CLOSED</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Project Overview Card (Premium Widget) */}
+            {activeProject && (
+              <div className="gov-card project-overview-premium-card" style={{ marginBottom: '20px' }}>
+                <div className="project-overview-layout">
+                  <div className="project-overview-info">
+                    <span className="project-meta-label">Vue d'ensemble</span>
+                    <h3 className="project-overview-title">{activeProject.name}</h3>
+                    <p className="project-overview-description">
+                      {activeProject.description || "Aucune description fournie pour ce projet."}
+                    </p>
+                    <div className="project-quick-stats">
+                      <div className="quick-stat-item">
+                        <span className="quick-stat-label">Tâches</span>
+                        <span className="quick-stat-value">
+                          <NumberTicker value={completedTasksCount} /> / {totalTasksCount}
+                        </span>
+                      </div>
+                      <div className="quick-stat-item">
+                        <span className="quick-stat-label">Livrables</span>
+                        <span className="quick-stat-value">
+                          <NumberTicker value={acceptedDeliverablesCount} /> / {totalDeliverablesCount}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="project-overview-ring-container">
+                    <RadialProgressRing 
+                      value={totalTasksCount > 0 ? (completedTasksCount / totalTasksCount) * 100 : 0} 
+                      status={activeProject.status} 
+                      size={130}
+                      strokeWidth={11}
+                    />
                   </div>
                 </div>
               </div>
