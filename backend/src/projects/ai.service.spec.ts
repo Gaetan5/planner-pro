@@ -23,6 +23,7 @@ describe('AiService', () => {
   const mockGeminiService = {
     parseCommand: jest.fn(),
     transcribeAudio: jest.fn(),
+    analyzeImage: jest.fn(),
     isAvailable: jest.fn(),
   };
 
@@ -249,6 +250,68 @@ describe('AiService', () => {
       expect(result.actions[0].type).toBe('CREATE_TASK');
       expect(result.actions[0].taskTitle).toBe('Configurer la sécurité globale');
       expect(result.actions[0].assigneeId).toBe('alice-id');
+    });
+  });
+
+  describe('analyzeImageAndResolve', () => {
+    const userId = 'user-auth';
+    const workspaceId = 'workspace-123';
+    const projectId = 'project-123';
+
+    it('devrait appeler analyzeImage de GeminiService si non mocké et disponible', async () => {
+      mockGeminiService.isAvailable.mockReturnValue(true);
+      mockGeminiService.analyzeImage.mockResolvedValue([
+        {
+          type: 'CREATE_TASK',
+          taskTitle: 'Dessiner le diagramme',
+          assigneeName: 'Alice',
+        },
+      ]);
+
+      mockPrisma.membership.findMany.mockResolvedValue([
+        { userId: 'alice-id', user: { id: 'alice-id', name: 'Alice Smith', email: 'alice@test.com' } },
+      ]);
+      mockPrisma.task.findMany.mockResolvedValue([]);
+
+      const imageBuffer = Buffer.from('fake-image-data');
+      const result = await service.analyzeImageAndResolve(
+        userId,
+        workspaceId,
+        projectId,
+        imageBuffer,
+        'image/png',
+        false,
+      );
+
+      expect(mockGeminiService.analyzeImage).toHaveBeenCalledWith(imageBuffer, 'image/png');
+      expect(result).toHaveLength(1);
+      expect(result[0].type).toBe('CREATE_TASK');
+      expect(result[0].taskTitle).toBe('Dessiner le diagramme');
+      expect(result[0].assigneeId).toBe('alice-id');
+    });
+
+    it('devrait retourner le mock si isMock est true', async () => {
+      mockGeminiService.isAvailable.mockReturnValue(true);
+      mockPrisma.membership.findMany.mockResolvedValue([
+        { userId: 'alice-id', user: { id: 'alice-id', name: 'Alice Smith', email: 'alice@test.com' } },
+      ]);
+      mockPrisma.task.findMany.mockResolvedValue([]);
+
+      const imageBuffer = Buffer.from('fake-image-data');
+      const result = await service.analyzeImageAndResolve(
+        userId,
+        workspaceId,
+        projectId,
+        imageBuffer,
+        'image/png',
+        true,
+      );
+
+      expect(mockGeminiService.analyzeImage).not.toHaveBeenCalled();
+      expect(result).toHaveLength(1);
+      expect(result[0].type).toBe('CREATE_TASK');
+      expect(result[0].taskTitle).toBe("Implémenter l'OCR");
+      expect(result[0].assigneeId).toBe('alice-id');
     });
   });
 });

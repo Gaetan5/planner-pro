@@ -91,4 +91,31 @@ export class AiController {
 
     return result;
   }
+
+  /**
+   * Analyse une image et retourne les actions résolues à valider.
+   */
+  @Post('vision')
+  @UseInterceptors(FileInterceptor('file'))
+  @HttpCode(HttpStatus.OK)
+  async analyzeVision(
+    @Req() req: any,
+    @UploadedFile() file: any,
+    @Body('workspaceId') workspaceId: string,
+    @Body('projectId') projectId?: string,
+    @Body('isMock') isMock?: string,
+  ) {
+    if (!file) {
+      throw new Error("Fichier image manquant.");
+    }
+    const mockBool = isMock === 'true' || isMock === '1';
+    return this.aiService.analyzeImageAndResolve(
+      req.user.id,
+      workspaceId,
+      projectId || null,
+      file.buffer,
+      file.mimetype,
+      mockBool,
+    );
+  }
 }

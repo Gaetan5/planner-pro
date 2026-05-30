@@ -218,6 +218,7 @@ interface AppContextType {
   parseAiCommand: (workspaceId: string, projectId: string | null, command: string) => Promise<any[]>
   executeAiActions: (workspaceId: string, projectId: string | null, actions: any[]) => Promise<{ success: boolean; executedCount: number }>
   parseAiVoiceCommand: (workspaceId: string, projectId: string | null, audioBlob: Blob) => Promise<{ transcription: string; actions: any[] }>
+  parseAiImageCommand: (workspaceId: string, projectId: string | null, imageBlob: Blob) => Promise<any[]>
 }
 const AppContext = createContext<AppContextType | undefined>(undefined)
 
@@ -850,6 +851,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return res.json()
   }
 
+  const parseAiImageCommand = async (workspaceId: string, projectId: string | null, imageBlob: Blob) => {
+    const formData = new FormData()
+    formData.append('file', imageBlob, 'whiteboard.png')
+    formData.append('workspaceId', workspaceId)
+    if (projectId) {
+      formData.append('projectId', projectId)
+    }
+
+    const res = await fetch(`${BACKEND_URL}/projects/ai/vision`, {
+      method: 'POST',
+      headers: {
+        'Authorization': user?.token ? `Bearer ${user.token}` : ''
+      },
+      body: formData
+    })
+
+    if (!res.ok) {
+      throw new Error(await res.text() || "Erreur lors de l'analyse de l'image.")
+    }
+    return res.json()
+  }
+
   // Demander la permission de notification au login
   useEffect(() => {
     if (user) {
@@ -950,7 +973,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createInvitation, listInvitations, revokeInvitation, checkInvitation, acceptInvitation,
       // Commentaires & Communication
       socket, addComment, getComments, deleteComment, updateComment,
-      parseAiCommand, executeAiActions, parseAiVoiceCommand
+      parseAiCommand, executeAiActions, parseAiVoiceCommand, parseAiImageCommand
     }}>
       {children}
     </AppContext.Provider>

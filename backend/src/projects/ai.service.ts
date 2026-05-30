@@ -77,6 +77,49 @@ export class AiService {
       parsedActions = await this.geminiService.parseCommand(commandText, new Date());
     }
     
+    return this.resolveActions(workspaceId, parsedActions);
+  }
+
+  /**
+   * Analyse une image de projet (tableau blanc, capture d'écran) avec Gemini 1.5 Flash Vision
+   * et extrait/résout des intentions d'actions d'automatisation.
+   */
+  async analyzeImageAndResolve(
+    userId: string,
+    workspaceId: string,
+    projectId: string | null,
+    imageBuffer: Buffer,
+    mimeType: string,
+    isMock: boolean = false,
+  ): Promise<ResolvedAiAction[]> {
+    this.logger.log(`Analyse d'image de projet demandée par l'utilisateur ${userId}`);
+
+    let parsedActions: ParsedAiAction[] = [];
+
+    if (isMock || !this.geminiService.isAvailable()) {
+      this.logger.log("Mode mock ou Gemini indisponible détecté pour la vision. Utilisation d'actions simulées.");
+      parsedActions = [{
+        type: 'CREATE_TASK',
+        taskTitle: "Implémenter l'OCR",
+        priority: 'HIGH',
+        dueDate: '2026-06-05',
+        estimatedMinutes: 240,
+        assigneeName: 'Alice',
+      }];
+    } else {
+      parsedActions = await this.geminiService.analyzeImage(imageBuffer, mimeType);
+    }
+
+    return this.resolveActions(workspaceId, parsedActions);
+  }
+
+  /**
+   * Résout les entités (membres d'équipe, tâches) en base de données pour un lot d'actions.
+   */
+  private async resolveActions(
+    workspaceId: string,
+    parsedActions: ParsedAiAction[]
+  ): Promise<ResolvedAiAction[]> {
     // Charger tous les membres et les tâches pour la résolution d'entités
     const workspaceMembers = await this.prisma.membership.findMany({
       where: { workspaceId },
