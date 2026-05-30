@@ -219,6 +219,8 @@ interface AppContextType {
   executeAiActions: (workspaceId: string, projectId: string | null, actions: any[]) => Promise<{ success: boolean; executedCount: number }>
   parseAiVoiceCommand: (workspaceId: string, projectId: string | null, audioBlob: Blob) => Promise<{ transcription: string; actions: any[] }>
   parseAiImageCommand: (workspaceId: string, projectId: string | null, imageBlob: Blob) => Promise<any[]>
+  getCopilotAlerts: (workspaceId: string) => Promise<any[]>
+  getCopilotBriefing: (workspaceId: string, isMock?: boolean) => Promise<{ briefing: string }>
 }
 const AppContext = createContext<AppContextType | undefined>(undefined)
 
@@ -873,6 +875,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return res.json()
   }
 
+  const getCopilotAlerts = async (workspaceId: string) => {
+    const res = await fetch(`${BACKEND_URL}/projects/ai/copilot/alerts?workspaceId=${workspaceId}`, {
+      method: 'GET',
+      headers: getHeaders(),
+    })
+    if (!res.ok) {
+      throw new Error(await res.text() || "Erreur lors de la récupération des alertes.")
+    }
+    return res.json()
+  }
+
+  const getCopilotBriefing = async (workspaceId: string, isMock: boolean = false) => {
+    const res = await fetch(`${BACKEND_URL}/projects/ai/copilot/briefing?workspaceId=${workspaceId}&isMock=${isMock}`, {
+      method: 'GET',
+      headers: getHeaders(),
+    })
+    if (!res.ok) {
+      throw new Error(await res.text() || "Erreur lors de la génération du briefing.")
+    }
+    return res.json()
+  }
+
   // Demander la permission de notification au login
   useEffect(() => {
     if (user) {
@@ -973,7 +997,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createInvitation, listInvitations, revokeInvitation, checkInvitation, acceptInvitation,
       // Commentaires & Communication
       socket, addComment, getComments, deleteComment, updateComment,
-      parseAiCommand, executeAiActions, parseAiVoiceCommand, parseAiImageCommand
+      parseAiCommand, executeAiActions, parseAiVoiceCommand, parseAiImageCommand,
+      getCopilotAlerts, getCopilotBriefing
     }}>
       {children}
     </AppContext.Provider>

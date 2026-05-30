@@ -7,13 +7,15 @@ import { CommentsService } from './comments.service';
 import { CommentsController } from './comments.controller';
 import { AiService } from './ai.service';
 import { AiController } from './ai.controller';
+import { CopilotService } from './copilot.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { NotesModule } from '../notes/notes.module';
 import { TrackingModule } from '../tracking/tracking.module';
 
 @Module({
   imports: [PrismaModule, NotesModule, TrackingModule],
-  providers: [ProjectsService, InvitationsService, CommentsService, AiService],
+  providers: [ProjectsService, InvitationsService, CommentsService, AiService, CopilotService],
   controllers: [ProjectsController, InvitationsController, CommentsController, AiController],
+  exports: [ProjectsService, CopilotService],
 })
 export class ProjectsModule {}

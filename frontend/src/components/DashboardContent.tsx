@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useApp } from '../context/AppContext'
 import { Clock, Square, ListTodo, Calendar as CalendarIcon } from 'lucide-react'
+import { CopilotWidget } from './CopilotWidget'
 import './DashboardContent.css'
 
 export const DashboardContent: React.FC = () => {
@@ -63,6 +64,9 @@ export const DashboardContent: React.FC = () => {
           </button>
         </div>
       )}
+
+      {/* Copilote IA Proactif */}
+      <CopilotWidget />
 
       {/* Grid widgets */}
       <div className="dashboard-grid">

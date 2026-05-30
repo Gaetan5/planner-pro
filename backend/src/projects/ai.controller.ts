@@ -1,7 +1,8 @@
-import { Controller, Post, Body, UseGuards, Req, HttpCode, HttpStatus, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { Controller, Post, Get, Query, Body, UseGuards, Req, HttpCode, HttpStatus, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { AiService } from './ai.service';
+import { CopilotService } from './copilot.service';
 import { AiCommandDto } from './dto/ai-command.dto';
 import { TrackingGateway } from '../tracking/tracking.gateway';
 
@@ -10,6 +11,7 @@ import { TrackingGateway } from '../tracking/tracking.gateway';
 export class AiController {
   constructor(
     private readonly aiService: AiService,
+    private readonly copilotService: CopilotService,
     private readonly trackingGateway: TrackingGateway,
   ) {}
 
@@ -117,5 +119,39 @@ export class AiController {
       file.mimetype,
       mockBool,
     );
+  }
+
+  /**
+   * Retourne les alertes prédictives calculées pour le workspace.
+   */
+  @Get('copilot/alerts')
+  async getCopilotAlerts(
+    @Query('workspaceId') workspaceId: string,
+  ) {
+    if (!workspaceId) {
+      throw new BadRequestException("workspaceId requis.");
+    }
+    return this.copilotService.calculatePredictiveAlerts(workspaceId);
+  }
+
+  /**
+   * Retourne le briefing matinal personnalisé.
+   */
+  @Get('copilot/briefing')
+  async getCopilotBriefing(
+    @Req() req: any,
+    @Query('workspaceId') workspaceId: string,
+    @Query('isMock') isMock?: string,
+  ) {
+    if (!workspaceId) {
+      throw new BadRequestException("workspaceId requis.");
+    }
+    const mockBool = isMock === 'true' || isMock === '1';
+    const briefingText = await this.copilotService.generateBriefing(
+      req.user.id,
+      workspaceId,
+      mockBool,
+    );
+    return { briefing: briefingText };
   }
 }

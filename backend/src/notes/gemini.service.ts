@@ -47,6 +47,16 @@ export class GeminiService {
   }
 
   /**
+   * Retourne l'instance du modèle de génération de contenu.
+   */
+  getGenerativeModel(config?: { model: string }) {
+    if (!this.genAI) {
+      throw new Error("L'API Gemini n'est pas initialisée.");
+    }
+    return this.genAI.getGenerativeModel({ model: config?.model || 'gemini-1.5-flash' });
+  }
+
+  /**
    * Extrait des tâches structurées à partir d'un texte Markdown en utilisant Gemini.
    */
   async extractTasksFromText(content: string, referenceDate: Date): Promise<ExtractedTask[]> {
