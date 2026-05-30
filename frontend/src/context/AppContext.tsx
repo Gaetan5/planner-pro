@@ -215,6 +215,8 @@ interface AppContextType {
   getComments: (taskId: string) => Promise<any[]>
   deleteComment: (commentId: string) => Promise<void>
   updateComment: (commentId: string, content: string) => Promise<any>
+  parseAiCommand: (workspaceId: string, projectId: string | null, command: string) => Promise<any[]>
+  executeAiActions: (workspaceId: string, projectId: string | null, actions: any[]) => Promise<{ success: boolean; executedCount: number }>
 }
 const AppContext = createContext<AppContextType | undefined>(undefined)
 
@@ -799,6 +801,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }
 
+  const parseAiCommand = async (workspaceId: string, projectId: string | null, command: string) => {
+    const res = await fetch(`${BACKEND_URL}/projects/ai/command`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ workspaceId, projectId, command })
+    })
+    if (!res.ok) {
+      throw new Error(await res.text() || "Erreur lors du traitement de la commande par l'IA.")
+    }
+    return res.json()
+  }
+
+  const executeAiActions = async (workspaceId: string, projectId: string | null, actions: any[]) => {
+    const res = await fetch(`${BACKEND_URL}/projects/ai/execute`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ workspaceId, projectId, actions })
+    })
+    if (!res.ok) {
+      throw new Error(await res.text() || "Erreur lors de l'exécution des actions IA.")
+    }
+    const data = await res.json()
+    refreshData()
+    return data
+  }
+
   // Demander la permission de notification au login
   useEffect(() => {
     if (user) {
@@ -898,7 +926,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Invitations / Collaboration
       createInvitation, listInvitations, revokeInvitation, checkInvitation, acceptInvitation,
       // Commentaires & Communication
-      socket, addComment, getComments, deleteComment, updateComment
+      socket, addComment, getComments, deleteComment, updateComment,
+      parseAiCommand, executeAiActions
     }}>
       {children}
     </AppContext.Provider>

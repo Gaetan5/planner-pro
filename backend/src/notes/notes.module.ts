@@ -10,6 +10,6 @@ import { GeminiService } from './gemini.service';
   imports: [PrismaModule, RedisModule],
   providers: [NotesService, GeminiService],
   controllers: [NotesController],
-  exports: [NotesService],
+  exports: [NotesService, GeminiService],
 })
 export class NotesModule {}

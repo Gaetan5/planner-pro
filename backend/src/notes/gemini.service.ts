@@ -9,6 +9,21 @@ export interface ExtractedTask {
   assigneeName?: string;
 }
 
+export interface ParsedAiAction {
+  type: 'CREATE_TASK' | 'ASSIGN_TASK' | 'CREATE_DEPENDENCY' | 'CREATE_TIMEBLOCK' | 'UPDATE_TASK_STATUS';
+  taskTitle?: string;
+  taskDescription?: string;
+  priority?: 'LOW' | 'MEDIUM' | 'HIGH';
+  dueDate?: string; // YYYY-MM-DD
+  estimatedMinutes?: number;
+  assigneeName?: string;
+  dependsOnTaskTitle?: string;
+  dependencyType?: 'FINISH_TO_START' | 'START_TO_START' | 'FINISH_TO_FINISH';
+  timeBlockStart?: string; // ISO
+  timeBlockEnd?: string; // ISO
+  status?: 'TODO' | 'IN_PROGRESS' | 'DONE';
+}
+
 @Injectable()
 export class GeminiService {
   private readonly logger = new Logger(GeminiService.name);
@@ -102,6 +117,126 @@ ${content}
       return tasks;
     } catch (error) {
       this.logger.error(`Erreur lors de l'extraction des tâches via Gemini: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
+  /**
+   * Analyse une commande en langage naturel et extrait les actions d'automatisation structurées.
+   */
+  async parseCommand(content: string, referenceDate: Date): Promise<ParsedAiAction[]> {
+    if (!this.genAI) {
+      return [];
+    }
+
+    try {
+      const model = this.genAI.getGenerativeModel({
+        model: 'gemini-1.5-flash',
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: 'object' as any,
+            properties: {
+              actions: {
+                type: 'array' as any,
+                description: "Liste des actions d'automatisation identifiées à partir de la commande en langage naturel.",
+                items: {
+                  type: 'object' as any,
+                  properties: {
+                    type: {
+                      type: 'string' as any,
+                      enum: ['CREATE_TASK', 'ASSIGN_TASK', 'CREATE_DEPENDENCY', 'CREATE_TIMEBLOCK', 'UPDATE_TASK_STATUS'],
+                      description: "Le type de l'action à exécuter."
+                    },
+                    taskTitle: {
+                      type: 'string' as any,
+                      description: "Le titre de la tâche ciblée. Requis pour toutes les actions sauf CREATE_TASK si aucun titre n'est défini. Pour CREATE_TASK, c'est le titre de la nouvelle tâche."
+                    },
+                    taskDescription: {
+                      type: 'string' as any,
+                      description: "Description de la tâche (optionnel, utilisé pour CREATE_TASK)."
+                    },
+                    priority: {
+                      type: 'string' as any,
+                      enum: ['LOW', 'MEDIUM', 'HIGH'],
+                      description: "La priorité de la tâche (pour CREATE_TASK)."
+                    },
+                    dueDate: {
+                      type: 'string' as any,
+                      description: "Date d'échéance calculée au format YYYY-MM-DD en se basant sur la date de référence. (pour CREATE_TASK)."
+                    },
+                    estimatedMinutes: {
+                      type: 'number' as any,
+                      description: "Temps estimé pour faire la tâche, en minutes (pour CREATE_TASK)."
+                    },
+                    assigneeName: {
+                      type: 'string' as any,
+                      description: "Nom, prénom ou email de l'utilisateur à assigner à la tâche (pour ASSIGN_TASK ou CREATE_TASK)."
+                    },
+                    dependsOnTaskTitle: {
+                      type: 'string' as any,
+                      description: "Le titre de la tâche dont dépend la tâche cible (requis pour CREATE_DEPENDENCY)."
+                    },
+                    dependencyType: {
+                      type: 'string' as any,
+                      enum: ['FINISH_TO_START', 'START_TO_START', 'FINISH_TO_FINISH'],
+                      description: "Le type de dépendance (pour CREATE_DEPENDENCY). Par défaut 'FINISH_TO_START'."
+                    },
+                    timeBlockStart: {
+                      type: 'string' as any,
+                      description: "Date et heure de début du créneau horaire au format ISO (ex: YYYY-MM-DDTHH:mm:ss) (pour CREATE_TIMEBLOCK)."
+                    },
+                    timeBlockEnd: {
+                      type: 'string' as any,
+                      description: "Date et heure de fin du créneau horaire au format ISO (ex: YYYY-MM-DDTHH:mm:ss) (pour CREATE_TIMEBLOCK)."
+                    },
+                    status: {
+                      type: 'string' as any,
+                      enum: ['TODO', 'IN_PROGRESS', 'DONE'],
+                      description: "Le nouveau statut de la tâche (pour UPDATE_TASK_STATUS)."
+                    }
+                  },
+                  required: ['type']
+                }
+              }
+            },
+            required: ['actions']
+          }
+        }
+      });
+
+      const formattedRefDate = referenceDate.toISOString().split('T')[0];
+      const prompt = `
+Analyse la commande en langage naturel suivante pour en extraire des actions d'automatisation structurées.
+Date de référence pour le calcul des dates et heures relatives (ex: "demain à 14h", "vendredi prochain", "de 10h à 12h") : ${formattedRefDate} (Aujourd'hui).
+Il est important de traduire précisément les mentions de temps relatives en dates/heures ISO complètes.
+
+Exemples de commandes et de résultats attendus :
+- "Créer une tâche sécurité pour demain estimée à 3 heures"
+  -> Action: CREATE_TASK, taskTitle: "sécurité", dueDate: [date du lendemain], estimatedMinutes: 180
+- "Assigne Gaëtan sur la tâche sécurité"
+  -> Action: ASSIGN_TASK, taskTitle: "sécurité", assigneeName: "Gaëtan"
+- "Bloque 2 heures demain matin de 10h à 12h pour la tâche sécurité"
+  -> Action: CREATE_TIMEBLOCK, taskTitle: "sécurité", timeBlockStart: "[date du lendemain]T10:00:00", timeBlockEnd: "[date du lendemain]T12:00:00"
+- "La tâche sécurité dépend de la tâche BDD"
+  -> Action: CREATE_DEPENDENCY, taskTitle: "sécurité", dependsOnTaskTitle: "BDD", dependencyType: "FINISH_TO_START"
+- "Passe la tâche sécurité à DONE"
+  -> Action: UPDATE_TASK_STATUS, taskTitle: "sécurité", status: "DONE"
+
+Commande utilisateur à analyser :
+"""
+${content}
+"""
+`;
+
+      const result = await model.generateContent(prompt);
+      const responseText = result.response.text();
+      this.logger.debug(`Réponse commande IA brute: ${responseText}`);
+      
+      const parsed = JSON.parse(responseText);
+      return parsed.actions || [];
+    } catch (error) {
+      this.logger.error(`Erreur lors de l'analyse de la commande IA via Gemini: ${error.message}`, error.stack);
       throw error;
     }
   }
