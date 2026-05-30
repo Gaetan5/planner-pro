@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useApp } from '../context/AppContext'
 import { Users, AlertTriangle, Sliders, Clock, Award } from 'lucide-react'
+import { NumberTicker } from './NumberTicker'
 import './CapacityView.css'
 
 export const CapacityView: React.FC = () => {
@@ -131,22 +132,26 @@ export const CapacityView: React.FC = () => {
                   {/* Metrics grid */}
                   <div className="member-metrics-grid">
                     <div className="metric-card-item">
-                      <div className="metric-value">{capHours}h</div>
+                      <div className="metric-value">
+                        <NumberTicker value={capHours} suffix="h" />
+                      </div>
                       <div className="metric-label">Capacité Hebdo</div>
                     </div>
                     <div className="metric-card-item">
                       <div className={`metric-value ${item.plannedMinutes > item.weeklyCapacityMinutes ? 'metric-value--over' : ''}`}>
-                        {plannedHours}h
+                        <NumberTicker value={plannedHours} suffix="h" />
                       </div>
                       <div className="metric-label">Planifié (Calendrier)</div>
                     </div>
                     <div className="metric-card-item">
-                      <div className="metric-value">{item.allocationPercent}%</div>
+                      <div className="metric-value">
+                        <NumberTicker value={item.allocationPercent} suffix="%" />
+                      </div>
                       <div className="metric-label">Taux d'Allocation</div>
                     </div>
                     <div className="metric-card-item">
                       <div className={`metric-value ${item.loadPercent > 100 ? 'metric-value--over' : ''}`}>
-                        {item.loadPercent}%
+                        <NumberTicker value={item.loadPercent} suffix="%" />
                       </div>
                       <div className="metric-label">Taux de Charge</div>
                     </div>

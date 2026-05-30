@@ -1,0 +1,40 @@
+.radial-progress-ring-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto;
+}
+
+.radial-progress-ring-svg {
+  transform: rotate(0deg);
+  overflow: visible;
+}
+
+.radial-progress-ring-bg {
+  stroke-dasharray: 0;
+}
+
+.radial-progress-ring-label {
+  position: absolute;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  font-family: 'Outfit', sans-serif;
+  color: var(--text-primary);
+  pointer-events: none;
+}
+
+.radial-progress-ring-number {
+  font-size: 1.8rem;
+  font-weight: 700;
+  text-shadow: 0 0 10px rgba(255, 255, 255, 0.15);
+  letter-spacing: -0.05em;
+}
+
+.radial-progress-ring-percent {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-left: 2px;
+}
