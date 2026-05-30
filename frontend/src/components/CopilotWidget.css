@@ -1,0 +1,488 @@
+/* --- CopilotWidget.css - Style Premium Glassmorphism --- */
+
+.copilot-widget-container {
+  width: 100%;
+  margin-bottom: 24px;
+  background: rgba(22, 22, 33, 0.7) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35),
+              0 0 20px rgba(139, 92, 246, 0.05) !important;
+  border-radius: 16px !important;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+[data-theme='light'] .copilot-widget-container {
+  background: rgba(255, 255, 255, 0.8) !important;
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.08),
+              0 0 15px rgba(139, 92, 246, 0.02) !important;
+}
+
+/* Header */
+.copilot-widget-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+[data-theme='light'] .copilot-widget-header {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.copilot-title-glow-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.copilot-icon-container {
+  background: linear-gradient(135deg, #a78bfa, #f472b6);
+  padding: 6px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 10px rgba(139, 92, 246, 0.3);
+}
+
+.copilot-brain-icon {
+  color: #ffffff;
+}
+
+.animated-pulse-glow {
+  animation: copilot-pulse 2s infinite ease-in-out alternate;
+}
+
+.copilot-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  background: linear-gradient(to right, #ffffff, #d8b4fe);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+[data-theme='light'] .copilot-title {
+  background: linear-gradient(to right, #1f2937, #6d28d9);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.copilot-subtitle {
+  margin: 1px 0 0 0;
+  font-size: 0.75rem;
+  color: #9ca3af;
+}
+
+/* Onglets */
+.copilot-tab-bar {
+  display: flex;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 3px;
+  border-radius: 10px;
+  gap: 4px;
+}
+[data-theme='light'] .copilot-tab-bar {
+  background: rgba(0, 0, 0, 0.05);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.copilot-tab-btn {
+  background: transparent;
+  border: none;
+  color: #9ca3af;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.copilot-tab-btn:hover {
+  color: #ffffff;
+}
+.copilot-tab-btn.active {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+[data-theme='light'] .copilot-tab-btn:hover {
+  color: #1f2937;
+}
+[data-theme='light'] .copilot-tab-btn.active {
+  background: #ffffff;
+  color: #1f2937;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+}
+
+.alerts-count-badge {
+  background: #f59e0b;
+  color: #ffffff;
+  font-size: 0.7rem;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-weight: 700;
+}
+.alerts-count-badge.critical {
+  background: #ef4444;
+  animation: count-pulse-glow 1.5s infinite alternate;
+}
+
+/* Body */
+.copilot-widget-body {
+  padding: 20px;
+  min-height: 180px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Placeholders & Loaders */
+.copilot-briefing-placeholder, 
+.copilot-loading-briefing,
+.copilot-loading-alerts,
+.copilot-alerts-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 20px 40px;
+  flex: 1;
+}
+
+.placeholder-brain {
+  color: rgba(139, 92, 246, 0.25);
+  margin-bottom: 12px;
+  animation: brain-bounce 3s infinite ease-in-out;
+}
+
+.copilot-briefing-placeholder p,
+.copilot-alerts-empty-state p {
+  font-size: 0.85rem;
+  color: #9ca3af;
+  margin: 0 0 16px 0;
+  max-width: 420px;
+}
+
+.copilot-generate-btn {
+  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.25);
+}
+
+.copilot-loading-briefing p,
+.copilot-loading-alerts p {
+  margin: 12px 0 0 0;
+  font-size: 0.85rem;
+  color: #9ca3af;
+}
+
+/* Affichage du Briefing */
+.copilot-briefing-display-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.briefing-actions-panel {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.tts-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.tts-action-btn {
+  background: rgba(139, 92, 246, 0.1);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  color: #a78bfa;
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.tts-action-btn:hover {
+  background: rgba(139, 92, 246, 0.18);
+  border-color: rgba(139, 92, 246, 0.35);
+  transform: translateY(-1px);
+}
+.tts-action-btn.active {
+  background: linear-gradient(135deg, #8b5cf6, #ec4899);
+  border-color: #8b5cf6;
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+}
+.tts-action-btn.stop {
+  padding: 7px;
+  width: 32px;
+  height: 32px;
+  justify-content: center;
+}
+
+.briefing-refresh-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #9ca3af;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+.briefing-refresh-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #ffffff;
+}
+[data-theme='light'] .briefing-refresh-btn {
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+[data-theme='light'] .briefing-refresh-btn:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.briefing-text-content {
+  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 12px;
+  padding: 16px 20px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+[data-theme='light'] .briefing-text-content {
+  background: rgba(0, 0, 0, 0.02);
+  border: 1px solid rgba(0, 0, 0, 0.03);
+}
+
+.briefing-section-title {
+  margin: 16px 0 8px 0;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #ffffff;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding-bottom: 4px;
+}
+.briefing-section-title:first-of-type {
+  margin-top: 0;
+}
+[data-theme='light'] .briefing-section-title {
+  color: #1f2937;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.briefing-list-item {
+  font-size: 0.85rem;
+  color: #d1d5db;
+  line-height: 1.5;
+  margin-bottom: 6px;
+  list-style-type: square;
+  margin-left: 16px;
+}
+[data-theme='light'] .briefing-list-item {
+  color: #4b5563;
+}
+
+.briefing-para-text {
+  font-size: 0.85rem;
+  color: #d1d5db;
+  line-height: 1.6;
+  margin: 0 0 10px 0;
+}
+[data-theme='light'] .briefing-para-text {
+  color: #4b5563;
+}
+
+/* Alertes de Risques */
+.copilot-alerts-empty-state .green-checkmark-glow {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: rgba(16, 185, 129, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+  box-shadow: 0 0 15px rgba(16, 185, 129, 0.2);
+}
+
+.green-check {
+  color: #10b981;
+}
+
+.copilot-alerts-empty-state h4 {
+  margin: 0 0 4px 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #ffffff;
+}
+[data-theme='light'] .copilot-alerts-empty-state h4 {
+  color: #1f2937;
+}
+
+.copilot-alerts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.alerts-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.7rem;
+  color: #9ca3af;
+  margin-bottom: 2px;
+}
+
+.alerts-refresh-icon-btn {
+  background: transparent;
+  border: none;
+  color: #9ca3af;
+  cursor: pointer;
+  padding: 4px;
+}
+.alerts-refresh-icon-btn:hover {
+  color: #ffffff;
+}
+
+/* Cartes d'alertes */
+.copilot-alert-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  transition: all 0.2s ease;
+}
+
+.copilot-alert-card.critical {
+  background: rgba(239, 68, 68, 0.06);
+  border-color: rgba(239, 68, 68, 0.15);
+}
+.copilot-alert-card.high {
+  background: rgba(245, 158, 11, 0.05);
+  border-color: rgba(245, 158, 11, 0.15);
+}
+.copilot-alert-card.medium {
+  background: rgba(59, 130, 246, 0.04);
+  border-color: rgba(59, 130, 246, 0.12);
+}
+
+.alert-card-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  flex: 1;
+}
+
+.alert-badge-icon {
+  margin-top: 3px;
+}
+.alert-badge-icon.text-red { color: #f87171; }
+.alert-badge-icon.text-orange { color: #fbbf24; }
+.alert-badge-icon.text-yellow { color: #60a5fa; }
+
+.alert-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.alert-severity-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.critical .alert-severity-badge { color: #f87171; }
+.high .alert-severity-badge { color: #fbbf24; }
+.medium .alert-severity-badge { color: #60a5fa; }
+
+.alert-message {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #e5e7eb;
+  line-height: 1.4;
+}
+[data-theme='light'] .alert-message {
+  color: #374151;
+}
+
+.alert-action-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #d1d5db;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+.alert-action-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+[data-theme='light'] .alert-action-btn {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  color: #4b5563;
+}
+[data-theme='light'] .alert-action-btn:hover {
+  background: rgba(0, 0, 0, 0.03);
+  color: #1f2937;
+}
+
+/* Animations Keyframes */
+@keyframes copilot-pulse {
+  from {
+    box-shadow: 0 0 6px rgba(139, 92, 246, 0.2);
+  }
+  to {
+    box-shadow: 0 0 14px rgba(139, 92, 246, 0.5);
+  }
+}
+
+@keyframes count-pulse-glow {
+  from { box-shadow: 0 0 2px rgba(239, 68, 68, 0.3); }
+  to { box-shadow: 0 0 8px rgba(239, 68, 68, 0.6); }
+}
+
+@keyframes brain-bounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+.copilot-error-box {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.15);
+  border-radius: 8px;
+  color: #f87171;
+  padding: 8px 12px;
+  font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
