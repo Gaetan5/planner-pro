@@ -3,11 +3,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { randomUUID } from 'crypto';
 
+import { GeminiService } from './gemini.service';
+
 @Injectable()
 export class NotesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
+    private readonly gemini: GeminiService,
   ) {}
 
   private getCacheKey(userId: string): string {
@@ -187,6 +190,17 @@ export class NotesService {
     // Regex pour détecter une tâche avec case à cocher : "- [ ] Tâche" ou "- [x] Tâche"
     const taskLineRegex = /^(\s*-\s*\[([ xX])\]\s+)(.+)$/;
 
+    // Appel à Gemini si disponible pour enrichir l'extraction (NLP)
+    let aiTasks: any[] = [];
+    if (this.gemini.isAvailable()) {
+      try {
+        aiTasks = await this.gemini.extractTasksFromText(content, new Date());
+        console.log(`[Gemini NLP] ${aiTasks.length} tâches analysées par l'IA.`);
+      } catch (err) {
+        console.error('Erreur lors de l\'appel de Gemini pour l\'extraction NLP, bascule sur le mode standard:', err.message);
+      }
+    }
+
     let inCodeBlock = false;
     for (const line of lines) {
       if (line.trim().startsWith('```')) {
@@ -214,6 +228,32 @@ export class NotesService {
         if (idMatch) {
           taskText = idMatch[1].trim();
           taskId = idMatch[2];
+        }
+
+        // Nettoyer le titre du hashtag de projet éventuel pour chercher dans les tâches IA
+        const cleanText = taskText.replace(/#\w+/g, '').trim();
+        const aiTask = aiTasks.find(t => {
+          const aiCleanTitle = t.title.toLowerCase().trim();
+          const localCleanTitle = cleanText.toLowerCase().trim();
+          return aiCleanTitle.includes(localCleanTitle) || localCleanTitle.includes(aiCleanTitle);
+        });
+
+        // Déterminer la date limite (dueDate) et l'assigné si trouvés par l'IA
+        const dueDate = aiTask && aiTask.dueDate ? new Date(aiTask.dueDate) : null;
+        let assigneeId: string | null = null;
+
+        if (aiTask && aiTask.assigneeName) {
+          const user = await this.prisma.user.findFirst({
+            where: {
+              OR: [
+                { name: { equals: aiTask.assigneeName } },
+                { githubUsername: { equals: aiTask.assigneeName } }
+              ]
+            }
+          });
+          if (user) {
+            assigneeId = user.id;
+          }
         }
 
         // Extraire un tag de projet (ex: #ProjetA ou #Startup)
@@ -252,22 +292,37 @@ export class NotesService {
           });
 
           if (existingTask) {
-            // Mettre à jour si le statut, le titre ou le projet a changé dans la note
+            // Mettre à jour si le statut, le titre, la date limite ou le projet a changé dans la note
             const statusChanged = (existingTask.status === 'DONE' && !isDone) ? 'TODO' : ((existingTask.status !== 'DONE' && isDone) ? 'DONE' : null);
             const titleChanged = existingTask.title !== taskText;
             const projectChanged = existingTask.projectId !== project.id;
+            const dateChanged = dueDate ? (existingTask.dueDate ? existingTask.dueDate.toISOString().split('T')[0] !== dueDate.toISOString().split('T')[0] : true) : false;
 
-            if (statusChanged || titleChanged || projectChanged) {
+            if (statusChanged || titleChanged || projectChanged || dateChanged) {
               await this.prisma.task.update({
                 where: { id: taskId },
                 data: {
                   title: taskText,
                   status: statusChanged || existingTask.status as any,
                   projectId: project.id,
+                  dueDate: dueDate || undefined,
                 },
               });
               console.log(`Tâche "${taskId}" mise à jour depuis la note.`);
             }
+
+            if (assigneeId) {
+              const existingAssignee = await this.prisma.taskAssignee.findUnique({
+                where: { taskId_userId: { taskId, userId: assigneeId } }
+              });
+              if (!existingAssignee) {
+                await this.prisma.taskAssignee.deleteMany({ where: { taskId } });
+                await this.prisma.taskAssignee.create({
+                  data: { taskId, userId: assigneeId }
+                });
+              }
+            }
+
             updatedLines.push(line);
           } else {
             // Recréer la tâche si elle a été supprimée accidentellement
@@ -279,8 +334,14 @@ export class NotesService {
                 projectId: project.id,
                 userId,
                 noteId,
+                dueDate,
               },
             });
+            if (assigneeId) {
+              await this.prisma.taskAssignee.create({
+                data: { taskId, userId: assigneeId }
+              });
+            }
             console.log(`Tâche "${taskId}" recréée avec l'ID de la note.`);
             updatedLines.push(line);
           }
@@ -296,8 +357,15 @@ export class NotesService {
               projectId: project.id,
               userId,
               noteId,
+              dueDate,
             },
           });
+
+          if (assigneeId) {
+            await this.prisma.taskAssignee.create({
+              data: { taskId: newTaskId, userId: assigneeId }
+            });
+          }
 
           console.log(`Tâche créée automatiquement : "${taskText}" avec l'ID "${newTaskId}"`);
 

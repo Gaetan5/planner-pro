@@ -3,10 +3,17 @@ import { NotesService } from './notes.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 
+import { GeminiService } from './gemini.service';
+
 describe('NotesService', () => {
   let service: NotesService;
   let prisma: PrismaService;
   let redis: RedisService;
+
+  const mockGemini = {
+    isAvailable: jest.fn().mockReturnValue(false),
+    extractTasksFromText: jest.fn().mockResolvedValue([]),
+  };
 
   const mockPrisma = {
     note: {
@@ -24,6 +31,14 @@ describe('NotesService', () => {
       findFirst: jest.fn(),
       create: jest.fn(),
     },
+    taskAssignee: {
+      create: jest.fn(),
+      deleteMany: jest.fn(),
+      findUnique: jest.fn(),
+    },
+    user: {
+      findFirst: jest.fn(),
+    },
   };
 
   const mockRedis = {
@@ -38,6 +53,7 @@ describe('NotesService', () => {
         NotesService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: RedisService, useValue: mockRedis },
+        { provide: GeminiService, useValue: mockGemini },
       ],
     }).compile();
 
