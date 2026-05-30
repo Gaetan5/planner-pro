@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotesService } from '../notes/notes.service';
+import { IntegrationService } from './integration.service';
 import { Prisma, TaskPriority, ProjectStatus, DeliverableStatus, DependencyType, DeliveryStatus, WorkspaceRole, TaskStatus } from '@prisma/client';
 import * as crypto from 'crypto';
 import { UpdateTaskDto } from './dto/update-task.dto';
@@ -12,6 +13,7 @@ export class ProjectsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notesService: NotesService,
+    private readonly integrationService: IntegrationService,
   ) {}
 
   private async ensureDefaultWorkspace(userId: string) {
@@ -301,7 +303,7 @@ export class ProjectsService {
     });
 
     await this.replaceTaskAssignees(task.id, project.workspaceId, options.assigneeIds);
-    return this.prisma.task.findUnique({
+    const finalTask = await this.prisma.task.findUnique({
       where: { id: task.id },
       include: {
         assignees: {
@@ -311,6 +313,16 @@ export class ProjectsService {
         dependents: { include: { task: true } },
       },
     });
+
+    if (finalTask) {
+      this.integrationService.sendNotification(
+        project.workspaceId,
+        'Nouvelle Tâche',
+        `La tâche "${finalTask.title}" a été créée dans le projet "${project.name}". Priorité : ${finalTask.priority}.`,
+      );
+    }
+
+    return finalTask;
   }
 
   async getTasks(projectId: string, userId: string) {
@@ -365,7 +377,7 @@ export class ProjectsService {
       await this.notesService.syncTaskStatusToNote(taskId, updatedTask.status);
     }
 
-    return this.prisma.task.findUnique({
+    const finalTask = await this.prisma.task.findUnique({
       where: { id: taskId },
       include: {
         assignees: {
@@ -375,6 +387,18 @@ export class ProjectsService {
         dependents: { include: { task: true } },
       },
     });
+
+    if (finalTask) {
+      if (data.status === 'DONE' && task.status !== 'DONE') {
+        this.integrationService.sendNotification(
+          task.project.workspaceId,
+          'Tâche Terminée',
+          `La tâche "${finalTask.title}" du projet "${task.project.name}" a été marquée comme terminée.`,
+        );
+      }
+    }
+
+    return finalTask;
   }
 
   async deleteTask(taskId: string, userId: string) {

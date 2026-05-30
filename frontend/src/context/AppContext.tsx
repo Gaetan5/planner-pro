@@ -221,6 +221,13 @@ interface AppContextType {
   parseAiImageCommand: (workspaceId: string, projectId: string | null, imageBlob: Blob) => Promise<any[]>
   getCopilotAlerts: (workspaceId: string) => Promise<any[]>
   getCopilotBriefing: (workspaceId: string, isMock?: boolean) => Promise<{ briefing: string }>
+  // Intégrations & Synchronisation Réelle
+  listIntegrations: (workspaceId: string) => Promise<any[]>
+  createIntegration: (workspaceId: string, type: 'SLACK' | 'TEAMS' | 'GOOGLE_CALENDAR' | 'OUTLOOK', name: string, url?: string, calendarId?: string) => Promise<any>
+  toggleIntegration: (integrationId: string) => Promise<any>
+  deleteIntegration: (integrationId: string) => Promise<any>
+  exportToCalendar: (workspaceId: string, integrationId: string) => Promise<any>
+  getCalendarConflicts: (workspaceId: string) => Promise<any[]>
 }
 const AppContext = createContext<AppContextType | undefined>(undefined)
 
@@ -897,6 +904,73 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return res.json()
   }
 
+  const listIntegrations = async (workspaceId: string) => {
+    const res = await fetch(`${BACKEND_URL}/projects/workspaces/${workspaceId}/integrations`, {
+      headers: getHeaders(),
+    })
+    if (res.ok) return res.json()
+    return []
+  }
+
+  const createIntegration = async (
+    workspaceId: string,
+    type: 'SLACK' | 'TEAMS' | 'GOOGLE_CALENDAR' | 'OUTLOOK',
+    name: string,
+    url?: string,
+    calendarId?: string
+  ) => {
+    const res = await fetch(`${BACKEND_URL}/projects/workspaces/${workspaceId}/integrations`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ type, name, url, calendarId }),
+    })
+    if (!res.ok) {
+      throw new Error(await res.text() || "Erreur lors de la création de l'intégration.")
+    }
+    return res.json()
+  }
+
+  const toggleIntegration = async (integrationId: string) => {
+    const res = await fetch(`${BACKEND_URL}/projects/integrations/${integrationId}/toggle`, {
+      method: 'POST',
+      headers: getHeaders(),
+    })
+    if (!res.ok) {
+      throw new Error(await res.text() || "Erreur lors de l'activation/désactivation de l'intégration.")
+    }
+    return res.json()
+  }
+
+  const deleteIntegration = async (integrationId: string) => {
+    const res = await fetch(`${BACKEND_URL}/projects/integrations/${integrationId}`, {
+      method: 'DELETE',
+      headers: getHeaders(),
+    })
+    if (!res.ok) {
+      throw new Error(await res.text() || "Erreur lors de la suppression de l'intégration.")
+    }
+    return res.json()
+  }
+
+  const exportToCalendar = async (workspaceId: string, integrationId: string) => {
+    const res = await fetch(`${BACKEND_URL}/projects/workspaces/${workspaceId}/integrations/${integrationId}/export`, {
+      method: 'POST',
+      headers: getHeaders(),
+    })
+    if (!res.ok) {
+      throw new Error(await res.text() || "Erreur lors de l'exportation vers le calendrier externe.")
+    }
+    return res.json()
+  }
+
+  const getCalendarConflicts = async (workspaceId: string) => {
+    const res = await fetch(`${BACKEND_URL}/projects/workspaces/${workspaceId}/calendar-conflicts`, {
+      headers: getHeaders(),
+    })
+    if (res.ok) return res.json()
+    return []
+  }
+
   // Demander la permission de notification au login
   useEffect(() => {
     if (user) {
@@ -998,7 +1072,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Commentaires & Communication
       socket, addComment, getComments, deleteComment, updateComment,
       parseAiCommand, executeAiActions, parseAiVoiceCommand, parseAiImageCommand,
-      getCopilotAlerts, getCopilotBriefing
+      getCopilotAlerts, getCopilotBriefing,
+      // Intégrations & Calendrier
+      listIntegrations, createIntegration, toggleIntegration, deleteIntegration, exportToCalendar, getCalendarConflicts
     }}>
       {children}
     </AppContext.Provider>

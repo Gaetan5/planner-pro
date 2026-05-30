@@ -4,6 +4,8 @@ import { DeliverableStatus } from '@prisma/client';
 import { ProjectsService } from './projects.service';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { TrackingGateway } from '../tracking/tracking.gateway';
+import { IntegrationService, IntegrationDto } from './integration.service';
+import { CalendarSyncService } from './calendar-sync.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { CreateTaskDto } from './dto/create-task.dto';
@@ -23,6 +25,8 @@ export class ProjectsController {
   constructor(
     private readonly projectsService: ProjectsService,
     private readonly trackingGateway: TrackingGateway,
+    private readonly integrationService: IntegrationService,
+    private readonly calendarSyncService: CalendarSyncService,
   ) {}
 
   @Get('workspaces')
@@ -288,5 +292,41 @@ export class ProjectsController {
       }
     }
     return result;
+  }
+
+  @Get('workspaces/:workspaceId/integrations')
+  listIntegrations(@Param('workspaceId') workspaceId: string) {
+    return this.integrationService.listIntegrations(workspaceId);
+  }
+
+  @Post('workspaces/:workspaceId/integrations')
+  createIntegration(
+    @Param('workspaceId') workspaceId: string,
+    @Body() body: IntegrationDto,
+  ) {
+    return this.integrationService.createIntegration(workspaceId, body);
+  }
+
+  @Post('integrations/:integrationId/toggle')
+  toggleIntegration(@Param('integrationId') integrationId: string) {
+    return this.integrationService.toggleIntegration(integrationId);
+  }
+
+  @Delete('integrations/:integrationId')
+  deleteIntegration(@Param('integrationId') integrationId: string) {
+    return this.integrationService.deleteIntegration(integrationId);
+  }
+
+  @Post('workspaces/:workspaceId/integrations/:integrationId/export')
+  exportToCalendar(
+    @Param('workspaceId') workspaceId: string,
+    @Param('integrationId') integrationId: string,
+  ) {
+    return this.calendarSyncService.exportToCalendar(workspaceId, integrationId);
+  }
+
+  @Get('workspaces/:workspaceId/calendar-conflicts')
+  getCalendarConflicts(@Param('workspaceId') workspaceId: string) {
+    return this.calendarSyncService.detectCalendarConflicts(workspaceId);
   }
 }
