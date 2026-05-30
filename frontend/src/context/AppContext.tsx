@@ -203,6 +203,12 @@ interface AppContextType {
   updateResourceProfile: (userId: string, weeklyCapacityMinutes?: number, skills?: string, costRateCents?: number) => Promise<void>
   createResourceAllocation: (projectId: string, userId: string, allocationPercent: number, roleLabel?: string, startDate?: string, endDate?: string) => Promise<void>
   refreshData: () => Promise<void>
+  // Invitations / Collaboration
+  createInvitation: (workspaceId: string, email: string | null, role: 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER', projectId?: string, durationDays?: number) => Promise<{ invitation: any; rawToken: string } | null>
+  listInvitations: (workspaceId: string) => Promise<any[]>
+  revokeInvitation: (invitationId: string) => Promise<void>
+  checkInvitation: (token: string) => Promise<{ workspaceName: string; invitedByName: string; role: string }>
+  acceptInvitation: (token: string) => Promise<{ workspaceId: string; message: string }>
 }
 const AppContext = createContext<AppContextType | undefined>(undefined)
 
@@ -619,6 +625,63 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (res.ok) refreshData()
   }
 
+  const createInvitation = async (
+    workspaceId: string,
+    email: string | null,
+    role: 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER',
+    projectId?: string,
+    durationDays?: number
+  ) => {
+    const res = await fetch(`${BACKEND_URL}/projects/workspaces/${workspaceId}/invitations`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ email, role, projectId, durationDays })
+    })
+    if (res.ok) {
+      return res.json()
+    }
+    return null
+  }
+
+  const listInvitations = async (workspaceId: string) => {
+    const res = await fetch(`${BACKEND_URL}/projects/workspaces/${workspaceId}/invitations`, {
+      headers: getHeaders()
+    })
+    if (res.ok) {
+      return res.json()
+    }
+    return []
+  }
+
+  const revokeInvitation = async (invitationId: string) => {
+    const res = await fetch(`${BACKEND_URL}/projects/invitations/${invitationId}`, {
+      method: 'DELETE',
+      headers: getHeaders()
+    })
+    if (res.ok) refreshData()
+  }
+
+  const checkInvitation = async (token: string) => {
+    const res = await fetch(`${BACKEND_URL}/projects/invitations/check/${token}`)
+    if (!res.ok) {
+      throw new Error(await res.text() || "Lien d'invitation invalide ou expiré.")
+    }
+    return res.json()
+  }
+
+  const acceptInvitation = async (token: string) => {
+    const res = await fetch(`${BACKEND_URL}/projects/invitations/accept/${token}`, {
+      method: 'POST',
+      headers: getHeaders()
+    })
+    if (!res.ok) {
+      throw new Error(await res.text() || "Impossible d'accepter l'invitation.")
+    }
+    const data = await res.json()
+    refreshData()
+    return data
+  }
+
   // Thème logic
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -767,7 +830,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Professional features
       createMilestone, completeMilestone, createDeliverable, updateDeliverableStatus,
       createDelivery, updateDeliveryStatus, toggleDeliveryChecklistItem, addTaskDependency, removeTaskDependency,
-      updateResourceProfile, createResourceAllocation, refreshData
+      updateResourceProfile, createResourceAllocation, refreshData,
+      // Invitations / Collaboration
+      createInvitation, listInvitations, revokeInvitation, checkInvitation, acceptInvitation
     }}>
       {children}
     </AppContext.Provider>
