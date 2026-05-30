@@ -6,12 +6,53 @@ import './CapacityView.css'
 
 export const CapacityView: React.FC = () => {
   const {
+    user,
     projects,
+    workspaces,
     workspaceMembers,
     resourceCapacity,
     updateResourceProfile,
     createResourceAllocation,
+    refreshData,
   } = useApp()
+
+  const [isOptimizing, setIsOptimizing] = useState(false)
+
+  const handleOptimize = async () => {
+    const activeWorkspaceId = workspaces[0]?.id
+    if (!activeWorkspaceId) {
+      alert('Aucun espace de travail disponible pour l\'optimisation.')
+      return
+    }
+
+    setIsOptimizing(true)
+    try {
+      const token = localStorage.getItem('token') || user?.token
+      const res = await fetch(
+        `${import.meta.env.VITE_API_URL || 'http://localhost:3002'}/projects/workspaces/${activeWorkspaceId}/resources/optimize`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+        }
+      )
+
+      if (!res.ok) {
+        throw new Error('Échec de la réallocation des ressources.')
+      }
+
+      const result = await res.json()
+      alert(result.message || 'Optimisation des ressources effectuée avec succès !')
+      await refreshData()
+    } catch (err) {
+      console.error(err)
+      alert('Erreur lors de l\'optimisation des ressources d\'équipe.')
+    } finally {
+      setIsOptimizing(false)
+    }
+  }
 
   // Form 1 states (Profile Config)
   const [profileUserId, setProfileUserId] = useState('')
@@ -66,13 +107,32 @@ export const CapacityView: React.FC = () => {
 
   return (
     <div className="capacity-container">
-      <div className="capacity-title-section">
-        <h2 className="panel-title" style={{ fontSize: 'var(--font-3xl)', marginBottom: 'var(--space-xs)' }}>
-          <Users size={28} color="var(--accent-primary)" /> Gestion des Ressources & Capacité
-        </h2>
-        <p className="workspace-meta" style={{ fontSize: 'var(--font-base)' }}>
-          Supervisez la charge hebdomadaire, identifiez les surcharges et allouez vos membres aux projets stratégiques.
-        </p>
+      <div className="capacity-title-section" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-xl)', flexWrap: 'wrap', gap: 'var(--space-md)' }}>
+        <div>
+          <h2 className="panel-title" style={{ fontSize: 'var(--font-3xl)', marginBottom: 'var(--space-xs)', display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
+            <Users size={28} color="var(--accent-primary)" /> Gestion des Ressources & Capacité
+          </h2>
+          <p className="workspace-meta" style={{ fontSize: 'var(--font-base)', margin: 0 }}>
+            Supervisez la charge hebdomadaire, identifiez les surcharges et allouez vos membres aux projets stratégiques.
+          </p>
+        </div>
+        <button
+          onClick={handleOptimize}
+          disabled={isOptimizing}
+          className={`btn-optimize-glowing ${isOptimizing ? 'btn-optimize-glowing--loading' : ''}`}
+        >
+          {isOptimizing ? (
+            <>
+              <span className="spinner-loader"></span>
+              Optimisation IA...
+            </>
+          ) : (
+            <>
+              <Sliders size={16} />
+              Optimiser la charge
+            </>
+          )}
+        </button>
       </div>
 
       <div className="capacity-grid-layout">

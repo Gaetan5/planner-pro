@@ -202,6 +202,7 @@ interface AppContextType {
   removeTaskDependency: (taskId: string, dependsOnTaskId: string) => Promise<void>
   updateResourceProfile: (userId: string, weeklyCapacityMinutes?: number, skills?: string, costRateCents?: number) => Promise<void>
   createResourceAllocation: (projectId: string, userId: string, allocationPercent: number, roleLabel?: string, startDate?: string, endDate?: string) => Promise<void>
+  refreshData: () => Promise<void>
 }
 const AppContext = createContext<AppContextType | undefined>(undefined)
 
@@ -766,7 +767,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Professional features
       createMilestone, completeMilestone, createDeliverable, updateDeliverableStatus,
       createDelivery, updateDeliveryStatus, toggleDeliveryChecklistItem, addTaskDependency, removeTaskDependency,
-      updateResourceProfile, createResourceAllocation
+      updateResourceProfile, createResourceAllocation, refreshData
     }}>
       {children}
     </AppContext.Provider>

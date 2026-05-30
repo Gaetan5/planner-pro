@@ -1022,4 +1022,108 @@ export class ProjectsService {
 
     return closedIds;
   }
+
+  async optimizeWorkspaceResources(workspaceId: string, userId: string) {
+    await this.assertWorkspaceRole(workspaceId, userId, ['OWNER', 'ADMIN']);
+
+    const memberships = await this.prisma.membership.findMany({
+      where: { workspaceId },
+      include: { user: true },
+    });
+
+    await this.ensureResourceProfiles(workspaceId);
+    const profiles = await this.prisma.resourceProfile.findMany({
+      where: { workspaceId },
+    });
+
+    const openTasks = await this.prisma.task.findMany({
+      where: {
+        deletedAt: null,
+        status: { not: 'DONE' },
+        project: { workspaceId, deletedAt: null },
+      },
+      include: { assignees: true },
+    });
+
+    if (openTasks.length === 0 || memberships.length === 0) {
+      return { success: true, message: 'Aucune tâche à optimiser.', reallocatedCount: 0 };
+    }
+
+    const developerLoads = new Map<string, number>();
+    memberships.forEach((m) => {
+      developerLoads.set(m.userId, 0);
+    });
+
+    const developerCapacities = new Map<string, number>();
+    memberships.forEach((m) => {
+      const profile = profiles.find((p) => p.userId === m.userId);
+      developerCapacities.set(m.userId, profile?.weeklyCapacityMinutes ?? 2400);
+    });
+
+    const priorityWeight = {
+      HIGH: 3,
+      MEDIUM: 2,
+      LOW: 1,
+    };
+
+    const sortedTasks = [...openTasks].sort((a, b) => {
+      const pA = priorityWeight[a.priority] || 2;
+      const pB = priorityWeight[b.priority] || 2;
+      if (pB !== pA) {
+        return pB - pA;
+      }
+      const tA = a.estimatedMinutes ?? 120;
+      const tB = b.estimatedMinutes ?? 120;
+      return tB - tA;
+    });
+
+    const reallocations: { taskId: string; userId: string }[] = [];
+
+    for (const task of sortedTasks) {
+      const taskMinutes = task.estimatedMinutes ?? 120;
+
+      let bestUserId = memberships[0].userId;
+      let lowestLoadRatio = Infinity;
+
+      for (const m of memberships) {
+        const currentLoad = developerLoads.get(m.userId) || 0;
+        const capacity = developerCapacities.get(m.userId) || 2400;
+        const ratio = capacity > 0 ? currentLoad / capacity : Infinity;
+
+        if (ratio < lowestLoadRatio) {
+          lowestLoadRatio = ratio;
+          bestUserId = m.userId;
+        }
+      }
+
+      const isAlreadyAssignedOnlyToBest =
+        task.assignees.length === 1 && task.assignees[0].userId === bestUserId;
+
+      if (!isAlreadyAssignedOnlyToBest) {
+        reallocations.push({ taskId: task.id, userId: bestUserId });
+      }
+
+      const currentLoad = developerLoads.get(bestUserId) || 0;
+      developerLoads.set(bestUserId, currentLoad + taskMinutes);
+    }
+
+    for (const realloc of reallocations) {
+      await this.prisma.taskAssignee.deleteMany({
+        where: { taskId: realloc.taskId },
+      });
+      await this.prisma.taskAssignee.create({
+        data: {
+          taskId: realloc.taskId,
+          userId: realloc.userId,
+        },
+      });
+    }
+
+    return {
+      success: true,
+      message: `Optimisation réussie. ${reallocations.length} tâches réallouées.`,
+      reallocatedCount: reallocations.length,
+      reallocatedTaskIds: reallocations.map((r) => r.taskId),
+    };
+  }
 }
