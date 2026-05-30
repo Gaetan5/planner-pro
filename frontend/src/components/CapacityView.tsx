@@ -1,6 +1,6 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useApp } from '../context/AppContext'
-import { Users, AlertTriangle, Sliders, Clock, Award } from 'lucide-react'
+import { Users, AlertTriangle, Sliders, Clock, Award, Mail, Trash2, Copy, Check, Link } from 'lucide-react'
 import { NumberTicker } from './NumberTicker'
 import './CapacityView.css'
 
@@ -14,6 +14,9 @@ export const CapacityView: React.FC = () => {
     updateResourceProfile,
     createResourceAllocation,
     refreshData,
+    createInvitation,
+    listInvitations,
+    revokeInvitation,
   } = useApp()
 
   const [isOptimizing, setIsOptimizing] = useState(false)
@@ -67,6 +70,71 @@ export const CapacityView: React.FC = () => {
   const [allocPercent, setAllocPercent] = useState('100')
   const [allocStartDate, setAllocStartDate] = useState('')
   const [allocEndDate, setAllocEndDate] = useState('')
+
+  // Collaboration / Invitation states
+  const [invitations, setInvitations] = useState<any[]>([])
+  const [inviteEmail, setInviteEmail] = useState('')
+  const [inviteRole, setInviteRole] = useState('MEMBER')
+  const [inviteProjId, setInviteProjId] = useState('')
+  const [inviteDuration, setInviteDuration] = useState('2')
+  const [generatedLink, setGeneratedLink] = useState('')
+  const [copiedId, setCopiedId] = useState<string | null>(null)
+
+  const activeWorkspaceId = workspaces[0]?.id
+
+  const loadInvitationsList = async () => {
+    if (activeWorkspaceId) {
+      try {
+        const list = await listInvitations(activeWorkspaceId)
+        setInvitations(list)
+      } catch (err) {
+        console.error("Erreur lors de la récupération des invitations :", err)
+      }
+    }
+  }
+
+  useEffect(() => {
+    loadInvitationsList()
+  }, [activeWorkspaceId])
+
+  const handleCreateInvitation = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!activeWorkspaceId) {
+      alert("Aucun workspace actif sélectionné.")
+      return
+    }
+
+    const result = await createInvitation(
+      activeWorkspaceId,
+      inviteEmail || null,
+      inviteRole as any,
+      inviteProjId || undefined,
+      Number(inviteDuration)
+    )
+
+    if (result) {
+      const joinUrl = `${window.location.origin}/?token=${result.rawToken}`
+      setGeneratedLink(joinUrl)
+      setInviteEmail('')
+      alert("Invitation générée avec succès !")
+      loadInvitationsList()
+    } else {
+      alert("Une erreur s'est produite lors de la génération de l'invitation.")
+    }
+  }
+
+  const handleRevokeInvitation = async (invitationId: string) => {
+    if (window.confirm("Voulez-vous vraiment révoquer cette invitation active ?")) {
+      await revokeInvitation(invitationId)
+      loadInvitationsList()
+    }
+  }
+
+  const copyToClipboard = (text: string, id: string) => {
+    navigator.clipboard.writeText(text)
+    setCopiedId(id)
+    setTimeout(() => setCopiedId(null), 2000)
+  }
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -378,6 +446,145 @@ export const CapacityView: React.FC = () => {
                 Créer l'affectation
               </button>
             </form>
+          </div>
+
+          {/* Form 3 : Inviter un collaborateur */}
+          <div className="config-form-card">
+            <h3 className="form-title-small">
+              <Mail size={16} color="var(--accent-primary)" style={{ marginRight: '8px' }} />
+              Inviter un Collaborateur
+            </h3>
+            
+            <form onSubmit={handleCreateInvitation} className="form-grid">
+              <div className="form-group">
+                <label className="form-label">Adresse E-mail (Optionnel)</label>
+                <input
+                  type="email"
+                  value={inviteEmail}
+                  onChange={e => setInviteEmail(e.target.value)}
+                  className="gov-input"
+                  placeholder="nom@exemple.com (laisser vide pour lien magique)"
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Rôle Workspace</label>
+                <select
+                  value={inviteRole}
+                  onChange={e => setInviteRole(e.target.value)}
+                  className="gov-select"
+                >
+                  <option value="MEMBER">Membre (Lecture/Écriture)</option>
+                  <option value="ADMIN">Administrateur</option>
+                  <option value="VIEWER">Observateur (Lecture seule)</option>
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Assignation Projet Initiale (Optionnel)</label>
+                <select
+                  value={inviteProjId}
+                  onChange={e => setInviteProjId(e.target.value)}
+                  className="gov-select"
+                >
+                  <option value="">Aucun projet</option>
+                  {projects.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Validité de l'invitation</label>
+                <select
+                  value={inviteDuration}
+                  onChange={e => setInviteDuration(e.target.value)}
+                  className="gov-select"
+                >
+                  <option value="1">24 heures (Sécurité renforcée)</option>
+                  <option value="2">48 heures (Standard)</option>
+                  <option value="7">7 jours</option>
+                </select>
+              </div>
+
+              <button type="submit" className="btn-full btn-full-primary">
+                Générer l'Invitation
+              </button>
+            </form>
+
+            {generatedLink && (
+              <div className="invitation-link-box" style={{ marginTop: 'var(--space-md)', padding: 'var(--space-sm)', backgroundColor: 'rgba(235, 94, 85, 0.1)', borderRadius: 'var(--radius-md)', border: '1px solid var(--accent-primary)', display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)' }}>
+                <p className="form-label" style={{ color: 'var(--accent-primary)', marginBottom: 'var(--space-xs)', fontWeight: 'bold' }}>Lien magique généré :</p>
+                <div style={{ display: 'flex', gap: 'var(--space-xs)' }}>
+                  <input
+                    type="text"
+                    readOnly
+                    value={generatedLink}
+                    className="gov-input"
+                    style={{ fontSize: 'var(--font-xs)', flex: 1 }}
+                  />
+                  <button
+                    onClick={() => copyToClipboard(generatedLink, 'new-link')}
+                    className="btn-icon"
+                    title="Copier le lien"
+                    style={{ flexShrink: 0 }}
+                  >
+                    {copiedId === 'new-link' ? <Check size={16} color="green" /> : <Copy size={16} />}
+                  </button>
+                </div>
+                <button
+                  onClick={() => setGeneratedLink('')}
+                  className="btn-text"
+                  style={{ marginTop: 'var(--space-xs)', fontSize: 'var(--font-xs)', color: 'var(--text-muted)' }}
+                >
+                  Masquer le lien
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Liste des Invitations actives */}
+          <div className="config-form-card">
+            <h3 className="form-title-small">
+              <Link size={16} color="var(--accent-primary)" style={{ marginRight: '8px' }} />
+              Invitations en Attente ({invitations.length})
+            </h3>
+            
+            {invitations.length === 0 ? (
+              <p className="workspace-meta" style={{ fontSize: 'var(--font-xs)', textAlign: 'center', margin: 'var(--space-md) 0' }}>Aucune invitation en attente.</p>
+            ) : (
+              <div className="invitations-list-container" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
+                {invitations.map(inv => {
+                  const expiryDate = new Date(inv.expiresAt).toLocaleDateString()
+                  
+                  return (
+                    <div key={inv.id} className="invitation-item-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 'var(--space-xs)', backgroundColor: 'rgba(255, 255, 255, 0.03)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}>
+                      <div style={{ flex: 1, minWidth: 0, marginRight: 'var(--space-xs)' }}>
+                        <p style={{ margin: 0, fontWeight: '500', fontSize: 'var(--font-xs)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                          {inv.email || "Lien Magique Générique"}
+                        </p>
+                        <p style={{ margin: 0, fontSize: '10px', color: 'var(--text-muted)' }}>
+                          Rôle : {inv.role} • Expire le {expiryDate}
+                        </p>
+                      </div>
+                      
+                      <div style={{ display: 'flex', gap: '4px' }}>
+                        <button
+                          onClick={() => handleRevokeInvitation(inv.id)}
+                          className="btn-icon btn-icon--danger"
+                          title="Révoquer l'invitation"
+                          style={{ padding: '4px' }}
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         </div>
       </div>

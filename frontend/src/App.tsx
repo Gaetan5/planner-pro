@@ -1,5 +1,7 @@
+import { useState } from 'react'
 import { AppProvider, useApp } from './context/AppContext'
 import { Login } from './components/Login'
+import { InvitationAcceptance } from './components/InvitationAcceptance'
 import { KanbanBoard } from './components/KanbanBoard'
 import { CalendarView } from './components/CalendarView'
 import { Notepad } from './components/Notepad'
@@ -14,6 +16,14 @@ import './App.css'
 
 function AppWithSession() {
   const { user, logout, activeTab, setActiveTab, isConnected, theme, toggleTheme } = useApp()
+  const [inviteToken, setInviteToken] = useState<string | null>(() => {
+    const params = new URLSearchParams(window.location.search)
+    return params.get('token')
+  })
+
+  if (inviteToken) {
+    return <InvitationAcceptance token={inviteToken} onClose={() => setInviteToken(null)} />
+  }
 
   if (!user) {
     return <Login />
