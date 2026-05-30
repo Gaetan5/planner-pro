@@ -1,4 +1,5 @@
-import { Controller, Post, Body, UseGuards, Req, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Req, HttpCode, HttpStatus, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { AiService } from './ai.service';
 import { AiCommandDto } from './dto/ai-command.dto';
@@ -26,6 +27,33 @@ export class AiController {
       body.workspaceId,
       body.projectId || null,
       body.command,
+    );
+  }
+
+  /**
+   * Transcrit un fichier audio et retourne la transcription et les actions résolues.
+   */
+  @Post('voice')
+  @UseInterceptors(FileInterceptor('file'))
+  @HttpCode(HttpStatus.OK)
+  async analyzeVoice(
+    @Req() req: any,
+    @UploadedFile() file: any,
+    @Body('workspaceId') workspaceId: string,
+    @Body('projectId') projectId?: string,
+    @Body('isMock') isMock?: string,
+  ) {
+    if (!file) {
+      throw new Error("Fichier audio manquant.");
+    }
+    const mockBool = isMock === 'true' || isMock === '1';
+    return this.aiService.transcribeAndAnalyzeVoice(
+      req.user.id,
+      workspaceId,
+      projectId || null,
+      file.buffer,
+      file.mimetype,
+      mockBool,
     );
   }
 

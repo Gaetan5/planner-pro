@@ -240,4 +240,35 @@ ${content}
       throw error;
     }
   }
+
+  /**
+   * Transcrit un fichier audio en français en utilisant Gemini 1.5 Flash.
+   */
+  async transcribeAudio(audioBuffer: Buffer, mimeType: string): Promise<string> {
+    if (!this.genAI) {
+      throw new Error("Le service Gemini n'est pas configuré (GEMINI_API_KEY manquante).");
+    }
+
+    try {
+      this.logger.log(`Transcription audio demandée. Taille : ${audioBuffer.length} octets, Type : ${mimeType}`);
+      const model = this.genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+
+      const response = await model.generateContent([
+        {
+          inlineData: {
+            data: audioBuffer.toString('base64'),
+            mimeType: mimeType,
+          },
+        },
+        "Transcris exactement cet enregistrement audio en français. Ne retourne rien d'autre que la transcription.",
+      ]);
+
+      const transcription = response.response.text();
+      this.logger.log(`Transcription réussie : "${transcription.trim()}"`);
+      return transcription.trim();
+    } catch (error) {
+      this.logger.error(`Erreur lors de la transcription audio via Gemini: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
 }

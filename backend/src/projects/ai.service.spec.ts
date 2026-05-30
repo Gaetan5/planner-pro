@@ -22,6 +22,8 @@ describe('AiService', () => {
 
   const mockGeminiService = {
     parseCommand: jest.fn(),
+    transcribeAudio: jest.fn(),
+    isAvailable: jest.fn(),
   };
 
   const mockProjectsService = {
@@ -182,6 +184,71 @@ describe('AiService', () => {
       expect(mockProjectsService.updateTask).toHaveBeenCalledWith('task-123', userId, {
         status: 'DONE',
       });
+    });
+  });
+
+  describe('transcribeAndAnalyzeVoice', () => {
+    const userId = 'user-auth';
+    const workspaceId = 'workspace-123';
+    const projectId = 'project-123';
+
+    it('devrait appeler transcribeAudio si isAvailable et non mocké', async () => {
+      mockGeminiService.isAvailable.mockReturnValue(true);
+      mockGeminiService.transcribeAudio.mockResolvedValue('créer tâche Maquetter la DB pour Alice');
+      
+      mockGeminiService.parseCommand.mockResolvedValue([
+        {
+          type: 'CREATE_TASK',
+          taskTitle: 'Maquetter la DB',
+          assigneeName: 'Alice',
+        },
+      ]);
+
+      mockPrisma.membership.findMany.mockResolvedValue([
+        { userId: 'alice-id', user: { id: 'alice-id', name: 'Alice Smith', email: 'alice@test.com' } },
+      ]);
+      mockPrisma.task.findMany.mockResolvedValue([]);
+
+      const audioBuffer = Buffer.from('fake-audio-data');
+      const result = await service.transcribeAndAnalyzeVoice(
+        userId,
+        workspaceId,
+        projectId,
+        audioBuffer,
+        'audio/webm',
+        false,
+      );
+
+      expect(mockGeminiService.transcribeAudio).toHaveBeenCalledWith(audioBuffer, 'audio/webm');
+      expect(result.transcription).toBe('créer tâche Maquetter la DB pour Alice');
+      expect(result.actions).toHaveLength(1);
+      expect(result.actions[0].type).toBe('CREATE_TASK');
+      expect(result.actions[0].assigneeId).toBe('alice-id');
+    });
+
+    it('devrait utiliser une transcription mockée si isMock est vrai', async () => {
+      mockGeminiService.isAvailable.mockReturnValue(true);
+      mockPrisma.membership.findMany.mockResolvedValue([
+        { userId: 'alice-id', user: { id: 'alice-id', name: 'Alice Smith', email: 'alice@test.com' } },
+      ]);
+      mockPrisma.task.findMany.mockResolvedValue([]);
+
+      const audioBuffer = Buffer.from('fake-audio-data');
+      const result = await service.transcribeAndAnalyzeVoice(
+        userId,
+        workspaceId,
+        projectId,
+        audioBuffer,
+        'audio/webm',
+        true, // isMock = true
+      );
+
+      expect(mockGeminiService.transcribeAudio).not.toHaveBeenCalled();
+      expect(result.transcription).toBe('MOCK: créer tâche Configurer la sécurité globale pour Alice');
+      expect(result.actions).toHaveLength(1);
+      expect(result.actions[0].type).toBe('CREATE_TASK');
+      expect(result.actions[0].taskTitle).toBe('Configurer la sécurité globale');
+      expect(result.actions[0].assigneeId).toBe('alice-id');
     });
   });
 });
