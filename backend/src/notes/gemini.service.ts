@@ -271,4 +271,112 @@ ${content}
       throw error;
     }
   }
+
+  /**
+   * Analyse une image de projet (tableau blanc, capture d'écran) avec Gemini 1.5 Flash Vision
+   * et extrait des intentions d'actions d'automatisation structurées.
+   */
+  async analyzeImage(imageBuffer: Buffer, mimeType: string): Promise<ParsedAiAction[]> {
+    if (!this.genAI) {
+      throw new Error("Le service Gemini n'est pas configuré (GEMINI_API_KEY manquante).");
+    }
+
+    try {
+      this.logger.log(`Analyse d'image demandée. Taille : ${imageBuffer.length} octets, Type : ${mimeType}`);
+      
+      const model = this.genAI.getGenerativeModel({
+        model: 'gemini-1.5-flash',
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: 'object' as any,
+            properties: {
+              actions: {
+                type: 'array' as any,
+                description: "Liste des actions d'automatisation identifiées à partir de l'image.",
+                items: {
+                  type: 'object' as any,
+                  properties: {
+                    type: {
+                      type: 'string' as any,
+                      enum: ['CREATE_TASK', 'ASSIGN_TASK', 'CREATE_DEPENDENCY', 'CREATE_TIMEBLOCK', 'UPDATE_TASK_STATUS'],
+                      description: "Le type de l'action à exécuter."
+                    },
+                    taskTitle: {
+                      type: 'string' as any,
+                      description: "Le titre de la tâche ciblée ou créée."
+                    },
+                    taskDescription: {
+                      type: 'string' as any,
+                      description: "Description optionnelle."
+                    },
+                    priority: {
+                      type: 'string' as any,
+                      enum: ['LOW', 'MEDIUM', 'HIGH'],
+                      description: "La priorité (optionnel)."
+                    },
+                    dueDate: {
+                      type: 'string' as any,
+                      description: "Date d'échéance calculée au format YYYY-MM-DD (optionnel)."
+                    },
+                    estimatedMinutes: {
+                      type: 'number' as any,
+                      description: "Estimation en minutes (optionnel)."
+                    },
+                    assigneeName: {
+                      type: 'string' as any,
+                      description: "Nom de la personne à assigner (optionnel)."
+                    },
+                    dependsOnTaskTitle: {
+                      type: 'string' as any,
+                      description: "Titre de la tâche dont dépend la tâche cible (optionnel)."
+                    },
+                    dependencyType: {
+                      type: 'string' as any,
+                      enum: ['FINISH_TO_START', 'START_TO_START', 'FINISH_TO_FINISH'],
+                      description: "Le type de dépendance (optionnel)."
+                    },
+                    timeBlockStart: {
+                      type: 'string' as any,
+                      description: "Début du créneau au format ISO (optionnel)."
+                    },
+                    timeBlockEnd: {
+                      type: 'string' as any,
+                      description: "Fin du créneau au format ISO (optionnel)."
+                    },
+                    status: {
+                      type: 'string' as any,
+                      enum: ['TODO', 'IN_PROGRESS', 'DONE'],
+                      description: "Nouveau statut (optionnel)."
+                    }
+                  },
+                  required: ['type']
+                }
+              }
+            },
+            required: ['actions']
+          }
+        }
+      });
+
+      const response = await model.generateContent([
+        {
+          inlineData: {
+            data: imageBuffer.toString('base64'),
+            mimeType: mimeType,
+          },
+        },
+        "Analyse cette image de tableau blanc, schéma manuscrit ou capture d'écran de projet. Identifie toutes les tâches, assignations, créations de tâches, dépendances ou mises à jour de statut qui y figurent. Traduis ces informations en actions d'automatisation structurées en respectant strictement le format JSON demandé.",
+      ]);
+
+      const responseText = response.response.text();
+      this.logger.debug(`Réponse vision brute de Gemini: ${responseText}`);
+      
+      const parsed = JSON.parse(responseText);
+      return parsed.actions || [];
+    } catch (error) {
+      this.logger.error(`Erreur lors de l'analyse d'image via Gemini: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
 }
