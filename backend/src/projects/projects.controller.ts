@@ -275,4 +275,18 @@ export class ProjectsController {
     }
     return { closedTaskIds };
   }
+
+  @Post('workspaces/:workspaceId/resources/optimize')
+  async optimizeResources(
+    @Req() req: any,
+    @Param('workspaceId') workspaceId: string,
+  ) {
+    const result = await this.projectsService.optimizeWorkspaceResources(workspaceId, req.user.id);
+    if (result.success && result.reallocatedTaskIds && this.trackingGateway.server) {
+      for (const taskId of result.reallocatedTaskIds) {
+        this.trackingGateway.server.emit('task-status-changed', { taskId });
+      }
+    }
+    return result;
+  }
 }

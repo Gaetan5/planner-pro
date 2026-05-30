@@ -212,3 +212,65 @@
     box-shadow: 0 12px 36px rgba(239, 68, 68, 0.25);
   }
 }
+
+/* Bouton d'optimisation glowing et moderne */
+.btn-optimize-glowing {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-sm) var(--space-lg);
+  border-radius: var(--radius-md);
+  font-weight: 600;
+  font-size: var(--font-base);
+  font-family: inherit;
+  cursor: pointer;
+  border: 1px solid rgba(139, 92, 246, 0.4);
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.2) 0%, rgba(99, 102, 241, 0.2) 100%);
+  color: #c084fc;
+  box-shadow: 0 0 15px rgba(139, 92, 246, 0.15);
+  backdrop-filter: var(--glass-blur);
+  transition: all var(--transition-normal);
+}
+
+.btn-optimize-glowing:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.4) 0%, rgba(99, 102, 241, 0.4) 100%);
+  color: #fff;
+  border-color: rgba(139, 92, 246, 0.6);
+  box-shadow: 0 0 25px rgba(139, 92, 246, 0.4);
+  transform: translateY(-1px);
+}
+
+.btn-optimize-glowing:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-optimize-glowing--loading {
+  animation: breatheGlow 2s infinite alternate;
+}
+
+@keyframes breatheGlow {
+  0% {
+    box-shadow: 0 0 10px rgba(139, 92, 246, 0.2);
+  }
+  100% {
+    box-shadow: 0 0 25px rgba(139, 92, 246, 0.6);
+  }
+}
+
+/* Spinner Loader */
+.spinner-loader {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: #fff;
+  animation: spin 0.8s linear infinite;
+  display: inline-block;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

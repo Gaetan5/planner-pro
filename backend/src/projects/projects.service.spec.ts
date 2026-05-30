@@ -13,6 +13,20 @@ describe('ProjectsService - GitHub Webhooks', () => {
     task: {
       findFirst: jest.fn(),
       update: jest.fn(),
+      findMany: jest.fn(),
+    },
+    membership: {
+      findFirst: jest.fn(),
+      findMany: jest.fn(),
+    },
+    resourceProfile: {
+      findMany: jest.fn(),
+      create: jest.fn(),
+      upsert: jest.fn(),
+    },
+    taskAssignee: {
+      deleteMany: jest.fn(),
+      create: jest.fn(),
     },
   };
 
@@ -167,6 +181,63 @@ describe('ProjectsService - GitHub Webhooks', () => {
       const closedIds = await service.handleGitHubWebhook(payload);
       expect(closedIds).toHaveLength(0);
       expect(mockPrisma.task.findFirst).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('optimizeWorkspaceResources', () => {
+    const workspaceId = 'workspace-123';
+    const userId = 'user-owner';
+
+    it('devrait jeter une erreur si le rôle de l\'utilisateur n\'est ni OWNER ni ADMIN', async () => {
+      mockPrisma.membership.findFirst.mockResolvedValue({
+        userId: 'user-member',
+        role: 'MEMBER',
+      });
+
+      await expect(
+        service.optimizeWorkspaceResources(workspaceId, 'user-member')
+      ).rejects.toThrow(/Unauthorized/);
+    });
+
+    it('devrait répartir les tâches selon l\'algorithme glouton (priorité et temps)', async () => {
+      mockPrisma.membership.findFirst.mockResolvedValue({
+        userId,
+        role: 'OWNER',
+      });
+
+      mockPrisma.membership.findMany.mockResolvedValue([
+        { userId: 'dev-A', user: { id: 'dev-A', name: 'Développeur A' } },
+        { userId: 'dev-B', user: { id: 'dev-B', name: 'Développeur B' } },
+      ]);
+
+      mockPrisma.resourceProfile.findMany.mockResolvedValue([
+        { userId: 'dev-A', weeklyCapacityMinutes: 1000 },
+        { userId: 'dev-B', weeklyCapacityMinutes: 2000 },
+      ]);
+
+      mockPrisma.task.findMany.mockResolvedValue([
+        { id: 'task-1', priority: 'HIGH', estimatedMinutes: 600, assignees: [] },
+        { id: 'task-2', priority: 'HIGH', estimatedMinutes: 400, assignees: [] },
+        { id: 'task-3', priority: 'MEDIUM', estimatedMinutes: 500, assignees: [] },
+      ]);
+
+      mockPrisma.taskAssignee.deleteMany.mockResolvedValue({ count: 1 });
+      mockPrisma.taskAssignee.create.mockResolvedValue({});
+
+      const result = await service.optimizeWorkspaceResources(workspaceId, userId);
+
+      expect(result.success).toBe(true);
+      expect(result.reallocatedCount).toBe(3);
+
+      expect(mockPrisma.taskAssignee.create).toHaveBeenCalledWith({
+        data: { taskId: 'task-1', userId: 'dev-A' },
+      });
+      expect(mockPrisma.taskAssignee.create).toHaveBeenCalledWith({
+        data: { taskId: 'task-2', userId: 'dev-B' },
+      });
+      expect(mockPrisma.taskAssignee.create).toHaveBeenCalledWith({
+        data: { taskId: 'task-3', userId: 'dev-B' },
+      });
     });
   });
 });
