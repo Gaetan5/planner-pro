@@ -246,4 +246,80 @@ describe('ProjectsService - GitHub Webhooks', () => {
       });
     });
   });
+
+  describe('ProjectsService - Auto-scheduling (Effet Domino)', () => {
+    it('devrait propager récursivement les décalages de dates aux tâches dépendantes', async () => {
+      const taskB = {
+        id: 'task-B',
+        startDate: new Date('2026-06-01T08:00:00Z'),
+        dueDate: new Date('2026-06-01T12:00:00Z'),
+      };
+
+      const mockTx = {
+        taskDependency: {
+          findMany: jest.fn().mockResolvedValue([
+            {
+              taskId: 'task-B',
+              dependsOnTaskId: 'task-A',
+              type: 'FINISH_TO_START',
+              task: taskB,
+            },
+          ]),
+        },
+        task: {
+          update: jest.fn().mockResolvedValue({}),
+        },
+      };
+
+      const visited = new Set<string>(['task-A']);
+      const impactedIds: string[] = [];
+      const newDueDateA = new Date('2026-06-01T10:00:00Z');
+
+      // @ts-ignore
+      await service.propagateScheduleUpdates('task-A', newDueDateA, visited, mockTx, impactedIds);
+
+      expect(mockTx.task.update).toHaveBeenCalledWith({
+        where: { id: 'task-B' },
+        data: {
+          startDate: new Date('2026-06-01T10:00:00Z'),
+          dueDate: new Date('2026-06-01T14:00:00Z'),
+        },
+      });
+      expect(impactedIds).toContain('task-B');
+    });
+
+    it('ne devrait pas décaler si la fin du parent ne dépasse pas le début de l\'enfant', async () => {
+      const taskB = {
+        id: 'task-B',
+        startDate: new Date('2026-06-01T12:00:00Z'),
+        dueDate: new Date('2026-06-01T16:00:00Z'),
+      };
+
+      const mockTx = {
+        taskDependency: {
+          findMany: jest.fn().mockResolvedValue([
+            {
+              taskId: 'task-B',
+              dependsOnTaskId: 'task-A',
+              type: 'FINISH_TO_START',
+              task: taskB,
+            },
+          ]),
+        },
+        task: {
+          update: jest.fn(),
+        },
+      };
+
+      const visited = new Set<string>(['task-A']);
+      const impactedIds: string[] = [];
+      const newDueDateA = new Date('2026-06-01T10:00:00Z');
+
+      // @ts-ignore
+      await service.propagateScheduleUpdates('task-A', newDueDateA, visited, mockTx, impactedIds);
+
+      expect(mockTx.task.update).not.toHaveBeenCalled();
+      expect(impactedIds.length).toBe(0);
+    });
+  });
 });

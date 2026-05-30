@@ -89,12 +89,17 @@ export class ProjectsService {
       ...(data.title !== undefined ? { title: data.title } : {}),
       ...(data.description !== undefined ? { description: data.description } : {}),
       ...(data.priority !== undefined ? { priority: data.priority } : {}),
-      ...('status' in data && data.status !== undefined ? { status: data.status } : {}),
+      ...('status' in data && data.status !== undefined ? {
+        status: data.status,
+        completedAt: data.status === 'DONE' ? new Date() : null,
+      } : {}),
       ...(dates.startDate !== undefined ? { startDate: dates.startDate } : {}),
       ...(dates.dueDate !== undefined ? { dueDate: dates.dueDate } : {}),
       ...(data.estimatedMinutes !== undefined ? { estimatedMinutes: data.estimatedMinutes } : {}),
       ...(data.progress !== undefined ? { progress: data.progress } : {}),
       ...(data.labels !== undefined ? { labels: data.labels } : {}),
+      ...(data.storyPoints !== undefined ? { storyPoints: data.storyPoints } : {}),
+      ...(data.sprintId !== undefined ? { sprintId: data.sprintId } : {}),
     };
   }
 
@@ -292,6 +297,8 @@ export class ProjectsService {
         labels: options.labels,
         projectId,
         userId,
+        storyPoints: options.storyPoints,
+        sprintId: options.sprintId,
       },
       include: {
         assignees: {
@@ -359,16 +366,32 @@ export class ProjectsService {
       throw new Error('Task not found or unauthorized');
     }
 
-    const updatedTask = await this.prisma.task.update({
-      where: { id: taskId },
-      data: this.buildTaskMutationData(data),
-      include: {
-        assignees: {
-          include: { user: { select: { id: true, name: true, email: true } } },
+    const impactedTaskIds: string[] = [];
+
+    // Exécuter l'update et l'auto-scheduling dans une transaction interactive Prisma
+    const updatedTask = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.task.update({
+        where: { id: taskId },
+        data: this.buildTaskMutationData(data),
+        include: {
+          assignees: {
+            include: { user: { select: { id: true, name: true, email: true } } },
+          },
+          dependencies: { include: { dependsOnTask: true } },
+          dependents: { include: { task: true } },
         },
-        dependencies: { include: { dependsOnTask: true } },
-        dependents: { include: { task: true } },
-      },
+      });
+
+      // Lancer la propagation (effet domino) si le dueDate a changé
+      const oldDue = task.dueDate ? new Date(task.dueDate) : null;
+      const newDue = data.dueDate ? new Date(data.dueDate) : null;
+
+      if (newDue && (!oldDue || oldDue.getTime() !== newDue.getTime())) {
+        const visited = new Set<string>([taskId]);
+        await this.propagateScheduleUpdates(taskId, newDue, visited, tx, impactedTaskIds);
+      }
+
+      return updated;
     });
 
     await this.replaceTaskAssignees(taskId, task.project.workspaceId, data.assigneeIds);
@@ -398,7 +421,10 @@ export class ProjectsService {
       }
     }
 
-    return finalTask;
+    return {
+      ...finalTask,
+      impactedTaskIds,
+    };
   }
 
   async deleteTask(taskId: string, userId: string) {
@@ -521,6 +547,61 @@ export class ProjectsService {
     }
 
     return false;
+  }
+
+  /**
+   * Propage récursivement le décalage de planification aux tâches dépendantes (effet domino).
+   */
+  private async propagateScheduleUpdates(
+    taskId: string,
+    newDueDate: Date,
+    visited: Set<string>,
+    tx: any,
+    impactedIds: string[],
+  ): Promise<void> {
+    // 1. Trouver les relations de dépendances où dependsOnTaskId === taskId
+    // (toutes les tâches dépendant de taskId)
+    const dependencies = await tx.taskDependency.findMany({
+      where: {
+        dependsOnTaskId: taskId,
+        type: 'FINISH_TO_START',
+      },
+      include: {
+        task: true,
+      },
+    });
+
+    for (const dep of dependencies) {
+      const childTask = dep.task;
+      if (!childTask || childTask.deletedAt || visited.has(childTask.id)) continue;
+
+      const childStart = childTask.startDate ? new Date(childTask.startDate) : null;
+      const childDue = childTask.dueDate ? new Date(childTask.dueDate) : null;
+
+      if (childStart && childDue) {
+        // Si la date de fin du parent dépasse la date de début de l'enfant
+        if (newDueDate > childStart) {
+          const duration = childDue.getTime() - childStart.getTime();
+          const newStart = new Date(newDueDate.getTime());
+          const newDue = new Date(newStart.getTime() + duration);
+
+          // Enregistrer le décalage de la tâche enfant dans la transaction
+          await tx.task.update({
+            where: { id: childTask.id },
+            data: {
+              startDate: newStart,
+              dueDate: newDue,
+            },
+          });
+
+          impactedIds.push(childTask.id);
+          visited.add(childTask.id);
+
+          // Propager récursivement à partir de la nouvelle fin de l'enfant
+          await this.propagateScheduleUpdates(childTask.id, newDue, visited, tx, impactedIds);
+        }
+      }
+    }
   }
 
   async addTaskDependency(taskId: string, userId: string, dependsOnTaskId: string, type: DependencyType = DependencyType.FINISH_TO_START) {
