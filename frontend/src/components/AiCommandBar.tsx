@@ -12,7 +12,9 @@ import {
   User, 
   Link2, 
   Clock,
-  CheckSquare
+  CheckSquare,
+  Mic,
+  MicOff
 } from 'lucide-react'
 import './AiCommandBar.css'
 
@@ -42,6 +44,7 @@ export const AiCommandBar: React.FC = () => {
     projects,
     parseAiCommand,
     executeAiActions,
+    parseAiVoiceCommand,
     refreshData
   } = useApp()
 
@@ -52,8 +55,90 @@ export const AiCommandBar: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [executionSuccess, setExecutionSuccess] = useState(false)
   
+  const [isRecording, setIsRecording] = useState(false)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
+  
   const overlayRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  const startRecording = async () => {
+    try {
+      setErrorMessage(null)
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      
+      const options = { mimeType: 'audio/webm' }
+      let recorder: MediaRecorder
+      
+      try {
+        recorder = new MediaRecorder(stream, options)
+      } catch (e) {
+        recorder = new MediaRecorder(stream)
+      }
+
+      mediaRecorderRef.current = recorder
+      audioChunksRef.current = []
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data)
+        }
+      }
+
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((track) => track.stop())
+        const audioBlob = new Blob(audioChunksRef.current, { type: recorder.mimeType })
+        if (audioBlob.size > 0) {
+          await handleVoiceSubmit(audioBlob)
+        } else {
+          setErrorMessage("Aucun audio n'a été capturé.")
+        }
+      }
+
+      recorder.start()
+      setIsRecording(true)
+    } catch (err: any) {
+      console.error("Erreur microphone:", err)
+      setErrorMessage("Impossible d'accéder au microphone. Veuillez vérifier vos permissions.")
+    }
+  }
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop()
+      setIsRecording(false)
+    }
+  }
+
+  const handleVoiceSubmit = async (blob: Blob) => {
+    setIsLoading(true)
+    setErrorMessage(null)
+    setActions([])
+    setExecutionSuccess(false)
+
+    try {
+      const workspaceId = workspaces[0]?.id || ''
+      const projectId = projects[0]?.id || null
+
+      if (!workspaceId) {
+        throw new Error("Aucun espace de travail trouvé.")
+      }
+
+      const result = await parseAiVoiceCommand(workspaceId, projectId, blob)
+      
+      setCommandText(result.transcription)
+      setActions(result.actions)
+
+      if (result.actions.length === 0) {
+        setErrorMessage("Aucune action n'a pu être interprétée dans votre enregistrement.")
+      }
+    } catch (err: any) {
+      console.error(err)
+      setErrorMessage(err.message || "Une erreur est survenue lors de l'analyse vocale.")
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   // Écouter le raccourci global Cmd+K / Ctrl+K et ouvrir la barre d'IA
   useEffect(() => {
@@ -241,36 +326,64 @@ export const AiCommandBar: React.FC = () => {
           </button>
         </div>
 
-        {/* Formulaire de commande */}
+        {/* Formulaire de commande ou Onde Sonore de Capture */}
         <div className="ai-input-wrapper">
-          <input
-            ref={inputRef}
-            type="text"
-            className="ai-command-input"
-            placeholder="Ex: créer une tâche 'Design review' pour Alice avec priorité haute..."
-            value={commandText}
-            onChange={(e) => setCommandText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !isLoading) {
-                handleAnalyze()
-              }
-            }}
-            disabled={isLoading || executionSuccess}
-          />
+          {isRecording ? (
+            <div className="ai-voice-recording-container">
+              <div className="waveform">
+                <span className="bar"></span>
+                <span className="bar"></span>
+                <span className="bar"></span>
+                <span className="bar"></span>
+                <span className="bar"></span>
+                <span className="bar"></span>
+                <span className="bar"></span>
+                <span className="bar"></span>
+              </div>
+              <span className="recording-status-text">Écoute en cours... Parlez maintenant</span>
+            </div>
+          ) : (
+            <input
+              ref={inputRef}
+              type="text"
+              className="ai-command-input"
+              placeholder="Ex: créer une tâche 'Design review' pour Alice avec priorité haute..."
+              value={commandText}
+              onChange={(e) => setCommandText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !isLoading) {
+                  handleAnalyze()
+                }
+              }}
+              disabled={isLoading || executionSuccess}
+            />
+          )}
+
           <button 
-            className={`ai-analyze-btn ${(commandText.trim() && !isLoading && !executionSuccess) ? 'active' : ''}`}
-            onClick={handleAnalyze}
-            disabled={!commandText.trim() || isLoading || executionSuccess}
+            className={`ai-voice-btn ${isRecording ? 'recording' : ''}`}
+            onClick={isRecording ? stopRecording : startRecording}
+            disabled={isLoading || executionSuccess}
+            title={isRecording ? "Arrêter l'enregistrement" : "Démarrer l'enregistrement vocal"}
           >
-            {isLoading ? (
-              <Loader2 className="spinner-icon" size={16} />
-            ) : (
-              <>
-                <span>Analyser</span>
-                <Play size={12} style={{ marginLeft: '4px' }} />
-              </>
-            )}
+            {isRecording ? <MicOff size={16} /> : <Mic size={16} />}
           </button>
+
+          {!isRecording && (
+            <button 
+              className={`ai-analyze-btn ${(commandText.trim() && !isLoading && !executionSuccess) ? 'active' : ''}`}
+              onClick={handleAnalyze}
+              disabled={!commandText.trim() || isLoading || executionSuccess}
+            >
+              {isLoading ? (
+                <Loader2 className="spinner-icon" size={16} />
+              ) : (
+                <>
+                  <span>Analyser</span>
+                  <Play size={12} style={{ marginLeft: '4px' }} />
+                </>
+              )}
+            </button>
+          )}
         </div>
 
         {/* Zone de contenu dynamique */}

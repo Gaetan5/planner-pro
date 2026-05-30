@@ -269,6 +269,37 @@ export class AiService {
   }
 
   /**
+   * Transcrit un flux audio et analyse le texte résultant pour en extraire des actions.
+   */
+  async transcribeAndAnalyzeVoice(
+    userId: string,
+    workspaceId: string,
+    projectId: string | null,
+    audioBuffer: Buffer,
+    mimeType: string,
+    isMock: boolean = false,
+  ): Promise<{ transcription: string; actions: ResolvedAiAction[] }> {
+    this.logger.log(`Transcription et analyse vocale demandées par l'utilisateur ${userId}`);
+
+    let transcription = '';
+
+    // Bypass pour le mode test/mock ou si l'API n'est pas configurée
+    if (isMock || !this.geminiService.isAvailable()) {
+      this.logger.log("Mode mock ou Gemini indisponible détecté pour la voix. Utilisation d'une transcription simulée.");
+      transcription = "MOCK: créer tâche Configurer la sécurité globale pour Alice";
+    } else {
+      transcription = await this.geminiService.transcribeAudio(audioBuffer, mimeType);
+    }
+
+    const actions = await this.analyzeCommand(userId, workspaceId, projectId, transcription);
+
+    return {
+      transcription,
+      actions,
+    };
+  }
+
+  /**
    * Exécute les actions validées par l'utilisateur.
    */
   async executeActions(

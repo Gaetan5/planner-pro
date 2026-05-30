@@ -644,3 +644,106 @@
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+
+/* --- Capture vocale et Onde sonore (Waveform) --- */
+
+.ai-voice-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #9ca3af;
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.ai-voice-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.15);
+}
+.ai-voice-btn.recording {
+  background: linear-gradient(135deg, #ef4444, #b91c1c);
+  border-color: #ef4444;
+  color: #ffffff;
+  box-shadow: 0 0 15px rgba(239, 68, 68, 0.5);
+  animation: ai-pulse-recording 1.5s infinite alternate;
+}
+[data-theme='light'] .ai-voice-btn {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  color: #4b5563;
+}
+[data-theme='light'] .ai-voice-btn:hover {
+  background: rgba(0, 0, 0, 0.03);
+  color: #1f2937;
+}
+
+.ai-voice-recording-container {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: rgba(239, 68, 68, 0.04);
+  border: 1px dashed rgba(239, 68, 68, 0.3);
+  border-radius: 12px;
+  padding: 10px 18px;
+}
+[data-theme='light'] .ai-voice-recording-container {
+  background: rgba(239, 68, 68, 0.02);
+}
+
+.recording-status-text {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #ef4444;
+  animation: ai-pulse-opacity 1.5s infinite alternate;
+}
+
+.waveform {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 24px;
+}
+
+.waveform .bar {
+  width: 3px;
+  height: 6px;
+  background: linear-gradient(to top, #ef4444, #ec4899);
+  border-radius: 3px;
+  animation: ai-wave 1.2s ease-in-out infinite alternate;
+}
+
+/* Animations de l'onde avec des délais pour un effet naturel */
+.waveform .bar:nth-child(1) { animation-delay: 0.1s; height: 12px; }
+.waveform .bar:nth-child(2) { animation-delay: 0.4s; height: 18px; }
+.waveform .bar:nth-child(3) { animation-delay: 0.2s; height: 8px; }
+.waveform .bar:nth-child(4) { animation-delay: 0.6s; height: 22px; }
+.waveform .bar:nth-child(5) { animation-delay: 0.3s; height: 14px; }
+.waveform .bar:nth-child(6) { animation-delay: 0.5s; height: 10px; }
+.waveform .bar:nth-child(7) { animation-delay: 0.1s; height: 20px; }
+.waveform .bar:nth-child(8) { animation-delay: 0.7s; height: 6px; }
+
+/* Animations keyframes */
+@keyframes ai-pulse-recording {
+  from { box-shadow: 0 0 10px rgba(239, 68, 68, 0.4); transform: scale(1); }
+  to { box-shadow: 0 0 20px rgba(239, 68, 68, 0.7); transform: scale(1.03); }
+}
+
+@keyframes ai-pulse-opacity {
+  from { opacity: 0.5; }
+  to { opacity: 1; }
+}
+
+@keyframes ai-wave {
+  0% {
+    transform: scaleY(0.4);
+  }
+  100% {
+    transform: scaleY(1.3);
+  }
+}
