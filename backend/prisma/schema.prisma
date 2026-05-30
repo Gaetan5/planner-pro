@@ -43,6 +43,7 @@ model Workspace {
   resourceProfiles ResourceProfile[]
   invitations   Invitation[]
   integrations  Integration[]
+  sprints       Sprint[]
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
   deletedAt   DateTime?
@@ -229,6 +230,10 @@ model Task {
   comments    Comment[]
   noteId      String?
   note        Note?          @relation(fields: [noteId], references: [id], onDelete: SetNull)
+  sprintId    String?
+  sprint      Sprint?        @relation(fields: [sprintId], references: [id], onDelete: SetNull)
+  storyPoints Int?
+  completedAt DateTime?
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
   deletedAt   DateTime?
@@ -236,6 +241,7 @@ model Task {
   @@index([projectId])
   @@index([userId])
   @@index([noteId])
+  @@index([sprintId])
 }
 
 model TaskAssignee {
@@ -420,5 +426,26 @@ model Integration {
   updatedAt   DateTime  @updatedAt
 
   @@index([workspaceId])
+}
+
+model Sprint {
+  id          String       @id @default(uuid())
+  name        String
+  startDate   DateTime
+  endDate     DateTime
+  status      SprintStatus @default(PLANNED)
+  workspaceId String
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  tasks       Task[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([workspaceId])
+}
+
+enum SprintStatus {
+  PLANNED
+  ACTIVE
+  COMPLETED
 }
 

@@ -10,6 +10,7 @@ import { AiController } from './ai.controller';
 import { CopilotService } from './copilot.service';
 import { IntegrationService } from './integration.service';
 import { CalendarSyncService } from './calendar-sync.service';
+import { SprintService } from './sprint.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { NotesModule } from '../notes/notes.module';
 import { TrackingModule } from '../tracking/tracking.module';
@@ -24,8 +25,9 @@ import { TrackingModule } from '../tracking/tracking.module';
     CopilotService,
     IntegrationService,
     CalendarSyncService,
+    SprintService,
   ],
   controllers: [ProjectsController, InvitationsController, CommentsController, AiController],
-  exports: [ProjectsService, CopilotService, IntegrationService, CalendarSyncService],
+  exports: [ProjectsService, CopilotService, IntegrationService, CalendarSyncService, SprintService],
 })
 export class ProjectsModule {}

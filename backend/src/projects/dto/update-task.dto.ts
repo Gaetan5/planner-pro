@@ -48,4 +48,14 @@ export class UpdateTaskDto {
   @IsString({ each: true })
   @IsOptional()
   assigneeIds?: string[];
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  storyPoints?: number;
+
+  @IsString()
+  @IsOptional()
+  sprintId?: string;
 }
