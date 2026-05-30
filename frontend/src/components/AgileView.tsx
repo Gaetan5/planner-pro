@@ -5,6 +5,7 @@ import './AgileView.css'
 
 export const AgileView: React.FC = () => {
   const {
+    user,
     workspaces,
     projects,
     updateTask,
@@ -33,7 +34,7 @@ export const AgileView: React.FC = () => {
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null)
   const [editingPoints, setEditingPoints] = useState<string>('')
 
-  const token = localStorage.getItem('token')
+  const token = user?.token
 
   // Définir le workspace actif initial
   useEffect(() => {
