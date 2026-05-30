@@ -28,6 +28,7 @@ model User {
   notes             Note[]
   refreshTokens     RefreshToken[]
   sentInvitations   Invitation[]   @relation("SentInvitations")
+  comments          Comment[]
   createdAt         DateTime       @default(now())
 }
 
@@ -224,6 +225,7 @@ model Task {
   dependents   TaskDependency[] @relation("TaskDependents")
   timeBlocks  TimeBlock[]
   timeLogs    TimeLog[]
+  comments    Comment[]
   noteId      String?
   note        Note?          @relation(fields: [noteId], references: [id], onDelete: SetNull)
   createdAt   DateTime       @default(now())
@@ -388,5 +390,19 @@ model Invitation {
   @@index([workspaceId])
   @@index([invitedById])
   @@index([projectId])
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  content   String   @db.Text
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([taskId])
+  @@index([userId])
 }
 

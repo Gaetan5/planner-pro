@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useApp, Task } from '../context/AppContext'
-import { Plus, Trash2, Play, Square, FolderPlus } from 'lucide-react'
+import { Plus, Trash2, Play, Square, FolderPlus, MessageSquare } from 'lucide-react'
+import { TaskCommentsPanel } from './TaskCommentsPanel'
 import {
   DndContext,
   DragOverlay,
@@ -47,6 +48,7 @@ function DraggableCard({
   deleteTask,
   moveTaskStatus,
   getPriorityClass,
+  onOpenComments,
 }: {
   task: Task
   col: { status: string }
@@ -56,6 +58,7 @@ function DraggableCard({
   deleteTask: (id: string) => void
   moveTaskStatus: (id: string, status: string) => void
   getPriorityClass: (priority: string) => string
+  onOpenComments: (task: Task) => void
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: task.id,
@@ -100,6 +103,17 @@ function DraggableCard({
               <Play size={12} fill="#fff" style={{ marginLeft: '2px' }} />
             </button>
           )}
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onOpenComments(task)
+            }}
+            className="kanban-card-btn-comments"
+            title="Commentaires"
+            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px', borderRadius: '4px', transition: 'all 0.2s', marginRight: '4px' }}
+          >
+            <MessageSquare size={14} />
+          </button>
           <button
             onClick={() => deleteTask(task.id)}
             className="kanban-card-btn-delete"
@@ -183,6 +197,7 @@ export const KanbanBoard: React.FC = () => {
 
   const [activeDragTask, setActiveDragTask] = useState<Task | null>(null)
   const [overColumnId, setOverColumnId] = useState<string | null>(null)
+  const [commentingTask, setCommentingTask] = useState<Task | null>(null)
 
   const activeProject = projects.find(p => p.id === selectedProjId) || projects[0]
 
@@ -518,6 +533,7 @@ export const KanbanBoard: React.FC = () => {
                         deleteTask={deleteTask}
                         moveTaskStatus={moveTaskStatus}
                         getPriorityClass={getPriorityClass}
+                        onOpenComments={(task) => setCommentingTask(task)}
                       />
                     ))}
                   </DroppableColumn>
@@ -544,6 +560,14 @@ export const KanbanBoard: React.FC = () => {
           </DragOverlay>
         </DndContext>
       </div>
+
+      {commentingTask && (
+        <TaskCommentsPanel
+          taskId={commentingTask.id}
+          taskTitle={commentingTask.title}
+          onClose={() => setCommentingTask(null)}
+        />
+      )}
     </div>
   )
 }

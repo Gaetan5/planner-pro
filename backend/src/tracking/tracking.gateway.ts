@@ -113,4 +113,24 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
     const activeTracking = await this.trackingService.getActiveTracking(userId);
     client.emit('active-timer-state', activeTracking);
   }
+
+  @SubscribeMessage('join-task')
+  async handleJoinTask(
+    @MessageBody() data: { taskId: string },
+    @ConnectedSocket() client: Socket,
+  ) {
+    client.join(`task:${data.taskId}`);
+    console.log(`Socket ${client.id} a rejoint la room task:${data.taskId}`);
+    return { status: 'success' };
+  }
+
+  @SubscribeMessage('leave-task')
+  async handleLeaveTask(
+    @MessageBody() data: { taskId: string },
+    @ConnectedSocket() client: Socket,
+  ) {
+    client.leave(`task:${data.taskId}`);
+    console.log(`Socket ${client.id} a quitté la room task:${data.taskId}`);
+    return { status: 'success' };
+  }
 }
