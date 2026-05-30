@@ -31,6 +31,9 @@ export interface Task {
   dependencies?: TaskDependency[]
   dependents?: { id: string; task: Task }[]
   noteId?: string
+  storyPoints?: number
+  sprintId?: string
+  completedAt?: string
 }
 
 export interface Workspace {
@@ -76,6 +79,18 @@ export interface WorkspaceMember {
   id: string
   role: 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER'
   user: { id: string; name?: string; email: string }
+}
+
+export interface Sprint {
+  id: string
+  name: string
+  startDate: string
+  endDate: string
+  status: 'PLANNED' | 'ACTIVE' | 'COMPLETED'
+  workspaceId: string
+  totalPoints?: number
+  completedPoints?: number
+  tasks?: Task[]
 }
 
 export interface Milestone {
@@ -143,6 +158,8 @@ export type CreateTaskOptions = {
   progress?: number
   labels?: string
   assigneeIds?: string[]
+  storyPoints?: number
+  sprintId?: string
 }
 interface AppContextType {
   user: { id: string; name: string; email: string; token?: string } | null
@@ -153,12 +170,12 @@ interface AppContextType {
   resourceCapacity: ResourceCapacityReportItem[]
   timeBlocks: TimeBlock[]
   activeTimer: { id: string; startTime: string; taskId: string; task?: Task } | null
-  activeTab: 'dashboard' | 'kanban' | 'calendar' | 'notes' | 'pomodoro' | 'governance' | 'resources'
+  activeTab: 'dashboard' | 'kanban' | 'calendar' | 'notes' | 'pomodoro' | 'governance' | 'resources' | 'agile' | 'gantt'
   isConnected: boolean
   login: (code: string) => Promise<void>
   logout: () => void
   mockLogin: (name: string) => Promise<void>
-  setActiveTab: (tab: 'dashboard' | 'kanban' | 'calendar' | 'notes' | 'pomodoro' | 'governance' | 'resources') => void
+  setActiveTab: (tab: 'dashboard' | 'kanban' | 'calendar' | 'notes' | 'pomodoro' | 'governance' | 'resources' | 'agile' | 'gantt') => void
   createProject: (name: string, description?: string, workspaceId?: string, status?: string, startDate?: string, dueDate?: string) => Promise<void>
   deleteProject: (projectId: string) => Promise<void>
   createTask: (projectId: string, title: string, description?: string, priority?: string, options?: CreateTaskOptions) => Promise<any>
@@ -228,6 +245,12 @@ interface AppContextType {
   deleteIntegration: (integrationId: string) => Promise<any>
   exportToCalendar: (workspaceId: string, integrationId: string) => Promise<any>
   getCalendarConflicts: (workspaceId: string) => Promise<any[]>
+  // Agile
+  createSprint: (name: string, startDate: string, endDate: string, workspaceId: string) => Promise<void>
+  updateSprintStatus: (sprintId: string, status: 'PLANNED' | 'ACTIVE' | 'COMPLETED') => Promise<void>
+  associateTasksToSprint: (sprintId: string | null, taskIds: string[]) => Promise<void>
+  getBurndownData: (sprintId: string) => Promise<any>
+  getVelocityData: (workspaceId: string) => Promise<number>
 }
 const AppContext = createContext<AppContextType | undefined>(undefined)
 
@@ -242,7 +265,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [resourceCapacity, setResourceCapacity] = useState<ResourceCapacityReportItem[]>([])
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([])
   const [activeTimer, setActiveTimer] = useState<AppContextType['activeTimer']>(null)
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'kanban' | 'calendar' | 'notes' | 'pomodoro' | 'governance' | 'resources'>('dashboard')
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'kanban' | 'calendar' | 'notes' | 'pomodoro' | 'governance' | 'resources' | 'agile' | 'gantt'>('dashboard')
   const [isConnected, setIsConnected] = useState(false)
   const [socket, setSocket] = useState<Socket | null>(null)
 
@@ -325,6 +348,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const handleTaskStatusChanged = () => {
             refreshData()
           }
+          const handleTaskSchedulePropagated = (data: any) => {
+            refreshData()
+            sendBrowserNotification('Auto-Scheduling Activé', {
+              body: `${data.impactedTaskIds?.length || 'Plusieurs'} tâche(s) ont été décalées par effet domino suite à un changement d'échéance.`
+            })
+          }
           const handleMentionNotification = (data: any) => {
             sendBrowserNotification('Nouvelle Mention !', {
               body: data.message || 'Vous avez été mentionné dans un commentaire.',
@@ -343,6 +372,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           newSocket.on('timer-started', handleTimerStarted)
           newSocket.on('timer-stopped', handleTimerStopped)
           newSocket.on('task-status-changed', handleTaskStatusChanged)
+          newSocket.on('task-schedule-propagated', handleTaskSchedulePropagated)
           newSocket.on('mention-notification', handleMentionNotification)
         } else {
           setIsConnected(false)
@@ -362,6 +392,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         activeSocket.off('timer-started')
         activeSocket.off('timer-stopped')
         activeSocket.off('task-status-changed')
+        activeSocket.off('task-schedule-propagated')
         activeSocket.off('mention-notification')
         activeSocket.disconnect()
       }
@@ -656,6 +687,54 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       body: JSON.stringify({ userId, allocationPercent, roleLabel, startDate, endDate })
     })
     if (res.ok) refreshData()
+  }
+
+  // Agile
+  const createSprint = async (name: string, startDate: string, endDate: string, workspaceId: string) => {
+    const res = await fetch(`${BACKEND_URL}/projects/workspaces/${workspaceId}/sprints`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ name, startDate, endDate })
+    })
+    if (res.ok) refreshData()
+  }
+
+  const updateSprintStatus = async (sprintId: string, status: 'PLANNED' | 'ACTIVE' | 'COMPLETED') => {
+    const res = await fetch(`${BACKEND_URL}/projects/sprints/${sprintId}`, {
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify({ status })
+    })
+    if (res.ok) refreshData()
+  }
+
+  const associateTasksToSprint = async (sprintId: string | null, taskIds: string[]) => {
+    const sId = sprintId === null ? 'backlog' : sprintId
+    const res = await fetch(`${BACKEND_URL}/projects/sprints/${sId}/tasks`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ taskIds })
+    })
+    if (res.ok) refreshData()
+  }
+
+  const getBurndownData = async (sprintId: string) => {
+    const res = await fetch(`${BACKEND_URL}/projects/sprints/${sprintId}/burndown`, {
+      method: 'GET',
+      headers: getHeaders()
+    })
+    if (!res.ok) return null
+    return res.json()
+  }
+
+  const getVelocityData = async (workspaceId: string) => {
+    const res = await fetch(`${BACKEND_URL}/projects/workspaces/${workspaceId}/velocity`, {
+      method: 'GET',
+      headers: getHeaders()
+    })
+    if (!res.ok) return 0
+    const data = await res.json()
+    return typeof data === 'number' ? data : 0
   }
 
   const createInvitation = async (
@@ -1074,7 +1153,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       parseAiCommand, executeAiActions, parseAiVoiceCommand, parseAiImageCommand,
       getCopilotAlerts, getCopilotBriefing,
       // Intégrations & Calendrier
-      listIntegrations, createIntegration, toggleIntegration, deleteIntegration, exportToCalendar, getCalendarConflicts
+      listIntegrations, createIntegration, toggleIntegration, deleteIntegration, exportToCalendar, getCalendarConflicts,
+      // Agile
+      createSprint, updateSprintStatus, associateTasksToSprint, getBurndownData, getVelocityData
     }}>
       {children}
     </AppContext.Provider>

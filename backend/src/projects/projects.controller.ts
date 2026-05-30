@@ -2,6 +2,7 @@ import { Controller, Get, Post, Body, Param, Put, Delete, UseGuards, Req, Query,
 import { Public } from '../auth/public.decorator';
 import { DeliverableStatus } from '@prisma/client';
 import { ProjectsService } from './projects.service';
+import { SprintService } from './sprint.service';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { TrackingGateway } from '../tracking/tracking.gateway';
 import { IntegrationService, IntegrationDto } from './integration.service';
@@ -18,12 +19,15 @@ import { UpdateResourceProfileDto } from './dto/update-resource-profile.dto';
 import { CreateResourceAllocationDto } from './dto/create-resource-allocation.dto';
 import { CreateDeliveryDto } from './dto/create-delivery.dto';
 import { UpdateDeliveryStatusDto } from './dto/update-delivery-status.dto';
+import { CreateSprintDto } from './dto/create-sprint.dto';
+import { UpdateSprintDto } from './dto/update-sprint.dto';
 
 @Controller('projects')
 @UseGuards(JwtAuthGuard)
 export class ProjectsController {
   constructor(
     private readonly projectsService: ProjectsService,
+    private readonly sprintService: SprintService,
     private readonly trackingGateway: TrackingGateway,
     private readonly integrationService: IntegrationService,
     private readonly calendarSyncService: CalendarSyncService,
@@ -231,8 +235,20 @@ export class ProjectsController {
     @Body() body: UpdateTaskDto,
   ) {
     const updated = await this.projectsService.updateTask(taskId, req.user.id, body);
-    if (body.status && this.trackingGateway.server) {
-      this.trackingGateway.server.emit('task-status-changed', { taskId });
+    if (this.trackingGateway.server) {
+      if (body.status) {
+        this.trackingGateway.server.emit('task-status-changed', { taskId });
+      }
+      const impactedTaskIds = (updated as any).impactedTaskIds;
+      if (impactedTaskIds && impactedTaskIds.length > 0) {
+        this.trackingGateway.server.emit('task-schedule-propagated', {
+          projectId: (updated as any).projectId,
+          impactedTaskIds,
+        });
+        for (const id of impactedTaskIds) {
+          this.trackingGateway.server.emit('task-status-changed', { taskId: id });
+        }
+      }
     }
     return updated;
   }
@@ -328,5 +344,60 @@ export class ProjectsController {
   @Get('workspaces/:workspaceId/calendar-conflicts')
   getCalendarConflicts(@Param('workspaceId') workspaceId: string) {
     return this.calendarSyncService.detectCalendarConflicts(workspaceId);
+  }
+
+  @Post('workspaces/:workspaceId/sprints')
+  createSprint(
+    @Req() req: any,
+    @Param('workspaceId') workspaceId: string,
+    @Body() body: CreateSprintDto,
+  ) {
+    return this.sprintService.createSprint(workspaceId, req.user.id, body);
+  }
+
+  @Get('workspaces/:workspaceId/sprints')
+  listSprints(@Req() req: any, @Param('workspaceId') workspaceId: string) {
+    return this.sprintService.listSprints(workspaceId, req.user.id);
+  }
+
+  @Put('sprints/:sprintId')
+  updateSprint(
+    @Req() req: any,
+    @Param('sprintId') sprintId: string,
+    @Body() body: UpdateSprintDto,
+  ) {
+    return this.sprintService.updateSprint(sprintId, req.user.id, body);
+  }
+
+  @Delete('sprints/:sprintId')
+  deleteSprint(@Req() req: any, @Param('sprintId') sprintId: string) {
+    return this.sprintService.deleteSprint(sprintId, req.user.id);
+  }
+
+  @Post('sprints/:sprintId/tasks')
+  async associateTasksToSprint(
+    @Req() req: any,
+    @Param('sprintId') sprintId: string,
+    @Body() body: { taskIds: string[] },
+  ) {
+    const sId = sprintId === 'backlog' ? null : sprintId;
+    await this.sprintService.associateTasksToSprint(sId, body.taskIds, req.user.id);
+    if (this.trackingGateway.server) {
+      for (const id of body.taskIds) {
+        this.trackingGateway.server.emit('task-status-changed', { taskId: id });
+      }
+    }
+    return { success: true };
+  }
+
+  @Get('workspaces/:workspaceId/velocity')
+  async getAverageVelocity(@Req() req: any, @Param('workspaceId') workspaceId: string) {
+    const velocity = await this.sprintService.getAverageVelocity(workspaceId, req.user.id);
+    return { velocity };
+  }
+
+  @Get('sprints/:sprintId/burndown')
+  getBurndownChart(@Req() req: any, @Param('sprintId') sprintId: string) {
+    return this.sprintService.getBurndownChart(sprintId, req.user.id);
   }
 }
