@@ -10,7 +10,9 @@ import { PomodoroTimer } from './components/PomodoroTimer'
 import { AiCommandBar } from './components/AiCommandBar'
 import { GovernanceView } from './components/GovernanceView'
 import { CapacityView } from './components/CapacityView'
-import { LogOut, AlertTriangle, LayoutDashboard, Kanban, Calendar, FileText, Timer, Sun, Moon, ShieldCheck, Users, Sparkles } from 'lucide-react'
+import { AgileView } from './components/AgileView'
+import { GanttView } from './components/GanttView'
+import { LogOut, AlertTriangle, LayoutDashboard, Kanban, Calendar, FileText, Timer, Sun, Moon, ShieldCheck, Users, Sparkles, Milestone, CalendarRange } from 'lucide-react'
 import logo from './logo.png'
 import './App.css'
 
@@ -37,6 +39,8 @@ function AppWithSession() {
       case 'pomodoro': return <PomodoroTimer />
       case 'governance': return <GovernanceView />
       case 'resources': return <CapacityView />
+      case 'agile': return <AgileView />
+      case 'gantt': return <GanttView />
       default: return <DashboardContent />
     }
   }
@@ -76,6 +80,12 @@ function AppWithSession() {
             Calendrier
           </button>
           <button
+            onClick={() => setActiveTab('gantt')}
+            className={`nav-tab ${activeTab === 'gantt' ? 'nav-tab--active' : ''}`}
+          >
+            Gantt
+          </button>
+          <button
             onClick={() => setActiveTab('notes')}
             className={`nav-tab ${activeTab === 'notes' ? 'nav-tab--active' : ''}`}
           >
@@ -98,6 +108,12 @@ function AppWithSession() {
             className={`nav-tab ${activeTab === 'resources' ? 'nav-tab--active' : ''}`}
           >
             Ressources
+          </button>
+          <button
+            onClick={() => setActiveTab('agile')}
+            className={`nav-tab ${activeTab === 'agile' ? 'nav-tab--active' : ''}`}
+          >
+            Agile
           </button>
         </nav>
 
@@ -179,6 +195,13 @@ function AppWithSession() {
           <span>Calendrier</span>
         </button>
         <button
+          onClick={() => setActiveTab('gantt')}
+          className={`bottom-nav-item ${activeTab === 'gantt' ? 'bottom-nav-item--active' : ''}`}
+        >
+          <CalendarRange size={20} />
+          <span>Gantt</span>
+        </button>
+        <button
           onClick={() => setActiveTab('notes')}
           className={`bottom-nav-item ${activeTab === 'notes' ? 'bottom-nav-item--active' : ''}`}
         >
@@ -205,6 +228,13 @@ function AppWithSession() {
         >
           <Users size={20} />
           <span>Ress.</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('agile')}
+          className={`bottom-nav-item ${activeTab === 'agile' ? 'bottom-nav-item--active' : ''}`}
+        >
+          <Milestone size={20} />
+          <span>Agile</span>
         </button>
       </nav>
       <AiCommandBar />
