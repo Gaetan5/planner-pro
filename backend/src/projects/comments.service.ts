@@ -1,9 +1,13 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { IntegrationService } from './integration.service';
 
 @Injectable()
 export class CommentsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly integrationService: IntegrationService,
+  ) {}
 
   private async assertWorkspaceAccess(workspaceId: string, userId: string) {
     const membership = await this.prisma.membership.findFirst({
@@ -53,6 +57,13 @@ export class CommentsService {
 
     // Détecter les mentions
     const mentionedUserIds = await this.parseMentions(content, task.project.workspaceId);
+
+    // Déclencher le webhook de notification pour un nouveau commentaire
+    this.integrationService.sendNotification(
+      task.project.workspaceId,
+      'Nouveau Commentaire',
+      `Un nouveau commentaire a été ajouté par ${comment.user.name || comment.user.email} sur la tâche "${task.title}" : "${content.slice(0, 100)}${content.length > 100 ? '...' : ''}"`,
+    );
 
     return {
       comment,

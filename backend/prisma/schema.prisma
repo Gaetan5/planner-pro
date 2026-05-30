@@ -42,6 +42,7 @@ model Workspace {
   teams       Team[]
   resourceProfiles ResourceProfile[]
   invitations   Invitation[]
+  integrations  Integration[]
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
   deletedAt   DateTime?
@@ -404,5 +405,20 @@ model Comment {
 
   @@index([taskId])
   @@index([userId])
+}
+
+model Integration {
+  id          String    @id @default(uuid())
+  type        String    // "SLACK", "TEAMS", "GOOGLE_CALENDAR", "OUTLOOK"
+  name        String
+  url         String?   @db.Text
+  calendarId  String?
+  active      Boolean   @default(true)
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([workspaceId])
 }
 

@@ -1,8 +1,9 @@
 import React, { useState } from 'react'
 import { useApp } from '../context/AppContext'
-import { ShieldCheck, Flag, CheckSquare, Plus, Check, X, FileText, Truck } from 'lucide-react'
+import { ShieldCheck, Flag, CheckSquare, Plus, Check, X, FileText, Truck, Link } from 'lucide-react'
 import { RadialProgressRing } from './RadialProgressRing'
 import { NumberTicker } from './NumberTicker'
+import { IntegrationsPanel } from './IntegrationsPanel'
 import './GovernanceView.css'
 
 export const GovernanceView: React.FC = () => {
@@ -20,6 +21,7 @@ export const GovernanceView: React.FC = () => {
   } = useApp()
 
   const [selectedProjId, setSelectedProjId] = useState<string>(projects[0]?.id || '')
+  const [activeSubTab, setActiveSubTab] = useState<'project' | 'integrations'>('project')
   
   // Modals / forms states
   const [showMilestoneForm, setShowMilestoneForm] = useState(false)
@@ -155,7 +157,53 @@ export const GovernanceView: React.FC = () => {
 
           {/* Main Governance Content */}
           <main className="main-governance-panel">
-            {/* Clôture Bilan de projet (Phase 4) */}
+            {/* Barre d'onglets moderne */}
+            <div className="gov-tabs-bar" style={{ display: 'flex', gap: '10px', marginBottom: '20px', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '10px' }}>
+              <button
+                onClick={() => setActiveSubTab('project')}
+                className={`gov-tab-btn ${activeSubTab === 'project' ? 'active' : ''}`}
+                style={{
+                  background: activeSubTab === 'project' ? 'linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(236, 72, 153, 0.15))' : 'transparent',
+                  border: activeSubTab === 'project' ? '1px solid rgba(139, 92, 246, 0.3)' : '1px solid transparent',
+                  color: activeSubTab === 'project' ? '#f3f4f6' : '#9ca3af',
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  fontWeight: 600,
+                  fontSize: '0.9rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  transition: 'all 0.2s'
+                }}
+              >
+                <FileText size={16} /> Gouvernance Projet
+              </button>
+              <button
+                onClick={() => setActiveSubTab('integrations')}
+                className={`gov-tab-btn ${activeSubTab === 'integrations' ? 'active' : ''}`}
+                style={{
+                  background: activeSubTab === 'integrations' ? 'linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(236, 72, 153, 0.15))' : 'transparent',
+                  border: activeSubTab === 'integrations' ? '1px solid rgba(139, 92, 246, 0.3)' : '1px solid transparent',
+                  color: activeSubTab === 'integrations' ? '#f3f4f6' : '#9ca3af',
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  fontWeight: 600,
+                  fontSize: '0.9rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  transition: 'all 0.2s'
+                }}
+              >
+                <Link size={16} /> Intégrations & Sync
+              </button>
+            </div>
+
+            {activeSubTab === 'project' && (
+              <>
+                {/* Clôture Bilan de projet (Phase 4) */}
             {activeProject?.status === 'DELIVERED' && (
               <div className="gov-card closure-report-glow">
                 <div className="closure-header">
@@ -596,6 +644,12 @@ export const GovernanceView: React.FC = () => {
                 )}
               </div>
             </section>
+              </>
+            )}
+
+            {activeSubTab === 'integrations' && activeWorkspace && (
+              <IntegrationsPanel workspaceId={activeWorkspace.id} />
+            )}
           </main>
         </div>
       )}

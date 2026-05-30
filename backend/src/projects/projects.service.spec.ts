@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ProjectsService } from './projects.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotesService } from '../notes/notes.service';
+import { IntegrationService } from './integration.service';
 import * as crypto from 'crypto';
 
 describe('ProjectsService - GitHub Webhooks', () => {
@@ -34,12 +35,17 @@ describe('ProjectsService - GitHub Webhooks', () => {
     syncTaskStatusToNote: jest.fn(),
   };
 
+  const mockIntegration = {
+    sendNotification: jest.fn().mockResolvedValue(undefined),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ProjectsService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: NotesService, useValue: mockNotesService },
+        { provide: IntegrationService, useValue: mockIntegration },
       ],
     }).compile();
 
