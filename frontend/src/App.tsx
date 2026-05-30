@@ -7,10 +7,10 @@ import { CalendarView } from './components/CalendarView'
 import { Notepad } from './components/Notepad'
 import { DashboardContent } from './components/DashboardContent'
 import { PomodoroTimer } from './components/PomodoroTimer'
-import { CommandPalette } from './components/CommandPalette'
+import { AiCommandBar } from './components/AiCommandBar'
 import { GovernanceView } from './components/GovernanceView'
 import { CapacityView } from './components/CapacityView'
-import { LogOut, AlertTriangle, LayoutDashboard, Kanban, Calendar, FileText, Timer, Sun, Moon, ShieldCheck, Users } from 'lucide-react'
+import { LogOut, AlertTriangle, LayoutDashboard, Kanban, Calendar, FileText, Timer, Sun, Moon, ShieldCheck, Users, Sparkles } from 'lucide-react'
 import logo from './logo.png'
 import './App.css'
 
@@ -114,6 +114,16 @@ function AppWithSession() {
             </div>
           )}
 
+          {/* Assistant IA Command Button */}
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent('open-ai-command-bar'))}
+            className="btn-icon ai-command-btn"
+            title="Ouvrir l'Assistant IA (⌘+K)"
+            style={{ marginRight: '8px', color: '#8b5cf6' }}
+          >
+            <Sparkles size={16} />
+          </button>
+
           {/* Theme Toggle Switcher */}
           <button
             onClick={toggleTheme}
@@ -197,7 +207,7 @@ function AppWithSession() {
           <span>Ress.</span>
         </button>
       </nav>
-      <CommandPalette />
+      <AiCommandBar />
     </div>
   )
 }
