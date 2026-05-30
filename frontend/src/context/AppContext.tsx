@@ -209,6 +209,12 @@ interface AppContextType {
   revokeInvitation: (invitationId: string) => Promise<void>
   checkInvitation: (token: string) => Promise<{ workspaceName: string; invitedByName: string; role: string }>
   acceptInvitation: (token: string) => Promise<{ workspaceId: string; message: string }>
+  // Commentaires & Communication
+  socket: Socket | null
+  addComment: (taskId: string, content: string) => Promise<any>
+  getComments: (taskId: string) => Promise<any[]>
+  deleteComment: (commentId: string) => Promise<void>
+  updateComment: (commentId: string, content: string) => Promise<any>
 }
 const AppContext = createContext<AppContextType | undefined>(undefined)
 
@@ -306,12 +312,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const handleTaskStatusChanged = () => {
             refreshData()
           }
+          const handleMentionNotification = (data: any) => {
+            sendBrowserNotification('Nouvelle Mention !', {
+              body: data.message || 'Vous avez été mentionné dans un commentaire.',
+            })
+            try {
+              const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-500.wav')
+              audio.volume = 0.5
+              audio.play()
+            } catch (e) {
+              console.log('Impossible de jouer la notification sonore', e)
+            }
+          }
 
           newSocket.on('connect', handleConnect)
           newSocket.on('active-timer-state', handleActiveTimerState)
           newSocket.on('timer-started', handleTimerStarted)
           newSocket.on('timer-stopped', handleTimerStopped)
           newSocket.on('task-status-changed', handleTaskStatusChanged)
+          newSocket.on('mention-notification', handleMentionNotification)
         } else {
           setIsConnected(false)
         }
@@ -330,6 +349,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         activeSocket.off('timer-started')
         activeSocket.off('timer-stopped')
         activeSocket.off('task-status-changed')
+        activeSocket.off('mention-notification')
         activeSocket.disconnect()
       }
     }
@@ -682,6 +702,50 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return data
   }
 
+  const addComment = async (taskId: string, content: string) => {
+    const res = await fetch(`${BACKEND_URL}/projects/tasks/${taskId}/comments`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ content })
+    })
+    if (!res.ok) {
+      throw new Error(await res.text() || "Impossible d'ajouter le commentaire.")
+    }
+    return res.json()
+  }
+
+  const getComments = async (taskId: string) => {
+    const res = await fetch(`${BACKEND_URL}/projects/tasks/${taskId}/comments`, {
+      headers: getHeaders()
+    })
+    if (res.ok) {
+      return res.json()
+    }
+    return []
+  }
+
+  const deleteComment = async (commentId: string) => {
+    const res = await fetch(`${BACKEND_URL}/projects/comments/${commentId}`, {
+      method: 'DELETE',
+      headers: getHeaders()
+    })
+    if (!res.ok) {
+      throw new Error(await res.text() || "Impossible de supprimer le commentaire.")
+    }
+  }
+
+  const updateComment = async (commentId: string, content: string) => {
+    const res = await fetch(`${BACKEND_URL}/projects/comments/${commentId}`, {
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify({ content })
+    })
+    if (!res.ok) {
+      throw new Error(await res.text() || "Impossible de modifier le commentaire.")
+    }
+    return res.json()
+  }
+
   // Thème logic
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -832,7 +896,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createDelivery, updateDeliveryStatus, toggleDeliveryChecklistItem, addTaskDependency, removeTaskDependency,
       updateResourceProfile, createResourceAllocation, refreshData,
       // Invitations / Collaboration
-      createInvitation, listInvitations, revokeInvitation, checkInvitation, acceptInvitation
+      createInvitation, listInvitations, revokeInvitation, checkInvitation, acceptInvitation,
+      // Commentaires & Communication
+      socket, addComment, getComments, deleteComment, updateComment
     }}>
       {children}
     </AppContext.Provider>
