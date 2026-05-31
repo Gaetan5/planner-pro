@@ -472,17 +472,14 @@ Tous les services sont déclarés et exportés dans [projects.module.ts](file://
 
 ### Points Faibles Résiduels
 
-> [!WARNING]
-> **1. Synchronisation Calendar encore partielle**
-> Le parseur iCal est fonctionnel mais aucun flux OAuth2 réel n'existe. Les intégrations Google Calendar et Outlook restent des stubs sans authentification. Le simulateur `/mock-calendar` est un excellent outil de développement, mais pas une solution de production.
+⚠️ **1. Synchronisation Calendar encore partielle**  
+Le parseur iCal est fonctionnel mais aucun flux OAuth2 réel n'existe. Les intégrations Google Calendar et Outlook restent des stubs sans authentification. Le simulateur `/mock-calendar` est un excellent outil de développement, mais pas une solution de production.
 
-> [!WARNING]
-> **2. Pas de rôle par projet**
-> Un `MEMBER` a accès à TOUS les projets du workspace. Le VIEWER est enforced, mais il n'existe pas de granularité intermédiaire (lecture seule sur certains projets, écriture sur d'autres).
+⚠️ **2. Pas de rôle par projet**  
+Un `MEMBER` a accès à TOUS les projets du workspace. Le VIEWER est enforced, mais il n'existe pas de granularité intermédiaire (lecture seule sur certains projets, écriture sur d'autres).
 
-> [!NOTE]
-> **3. Frontend Gantt et Auto-Scheduling sous-exploités**
-> Le Gantt est fonctionnel mais statique (pas de drag & drop). L'auto-scheduling est réactif (effet domino) mais pas proactif (pas de CPM, pas de recalcul global).
+ℹ️ **3. Frontend Gantt et Auto-Scheduling sous-exploités**  
+Le Gantt est fonctionnel mais statique (pas de drag & drop). L'auto-scheduling est réactif (effet domino) mais pas proactif (pas de CPM, pas de recalcul global).
 
 ---
 
