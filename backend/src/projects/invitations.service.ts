@@ -2,10 +2,14 @@ import { Injectable, BadRequestException, ForbiddenException, NotFoundException 
 import { PrismaService } from '../prisma/prisma.service';
 import { WorkspaceRole, InvitationStatus } from '@prisma/client';
 import * as crypto from 'crypto';
+import { MailService } from '../mail/mail.service';
 
 @Injectable()
 export class InvitationsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mailService: MailService,
+  ) {}
 
   private hashToken(token: string): string {
     return crypto.createHash('sha256').update(token).digest('hex');
@@ -65,6 +69,30 @@ export class InvitationsService {
         expiresAt,
       },
     });
+
+    if (email) {
+      // Récupérer le nom du workspace et de l'invitant pour l'email
+      Promise.all([
+        this.prisma.workspace.findUnique({
+          where: { id: workspaceId },
+          select: { name: true },
+        }),
+        this.prisma.user.findUnique({
+          where: { id: invitedById },
+          select: { name: true, email: true },
+        }),
+      ]).then(([workspace, invitedByUser]) => {
+        this.mailService.sendInvitationEmail(
+          email,
+          workspace?.name || 'Planner Pro',
+          invitedByUser?.name || invitedByUser?.email || 'Un collaborateur',
+          rawToken,
+          role,
+        );
+      }).catch(err => {
+        console.error("Erreur lors de la récupération des détails d'invitation pour email :", err);
+      });
+    }
 
     return {
       invitation,
