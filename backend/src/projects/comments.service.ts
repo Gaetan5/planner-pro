@@ -1,12 +1,14 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { IntegrationService } from './integration.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class CommentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly integrationService: IntegrationService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   private async assertWorkspaceAccess(workspaceId: string, userId: string) {
@@ -57,6 +59,22 @@ export class CommentsService {
 
     // Détecter les mentions
     const mentionedUserIds = await this.parseMentions(content, task.project.workspaceId);
+
+    // Envoyer les notifications aux utilisateurs mentionnés (sauf l'auteur)
+    const authorName = comment.user.name || comment.user.email;
+    for (const id of mentionedUserIds) {
+      if (id !== userId) {
+        await this.notificationsService.createNotification({
+          userId: id,
+          senderId: userId,
+          type: 'MENTION',
+          title: 'Nouvelle mention',
+          content: `${authorName} vous a mentionné dans un commentaire sur la tâche "${task.title}".`,
+          taskId: taskId,
+          projectId: task.projectId,
+        });
+      }
+    }
 
     // Déclencher le webhook de notification pour un nouveau commentaire
     this.integrationService.sendNotification(
@@ -176,6 +194,22 @@ export class CommentsService {
 
     // Détecter de nouvelles mentions dans le contenu modifié
     const mentionedUserIds = await this.parseMentions(content, workspaceId);
+
+    // Envoyer les notifications aux utilisateurs mentionnés (sauf l'auteur)
+    const authorName = updatedComment.user.name || updatedComment.user.email;
+    for (const id of mentionedUserIds) {
+      if (id !== userId) {
+        await this.notificationsService.createNotification({
+          userId: id,
+          senderId: userId,
+          type: 'MENTION',
+          title: 'Nouvelle mention',
+          content: `${authorName} vous a mentionné dans un commentaire modifié sur la tâche "${comment.task.title}".`,
+          taskId: comment.taskId,
+          projectId: comment.task.projectId,
+        });
+      }
+    }
 
     return {
       comment: updatedComment,
