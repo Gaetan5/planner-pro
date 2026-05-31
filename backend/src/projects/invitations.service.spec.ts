@@ -1,12 +1,18 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { InvitationsService } from './invitations.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { MailService } from '../mail/mail.service';
 import { WorkspaceRole, InvitationStatus } from '@prisma/client';
 import * as crypto from 'crypto';
 
 describe('InvitationsService', () => {
   let service: InvitationsService;
   let prisma: PrismaService;
+
+  const mockMailService = {
+    sendInvitationEmail: jest.fn().mockResolvedValue(true),
+    sendMentionEmail: jest.fn().mockResolvedValue(true),
+  };
 
   const mockPrisma = {
     membership: {
@@ -22,6 +28,12 @@ describe('InvitationsService', () => {
       findUnique: jest.fn(),
       update: jest.fn(),
     },
+    workspace: {
+      findUnique: jest.fn().mockResolvedValue({ name: 'Test Workspace' }),
+    },
+    user: {
+      findUnique: jest.fn().mockResolvedValue({ name: 'Admin User', email: 'admin@test.com' }),
+    },
     $transaction: jest.fn((promises) => Promise.all(promises)),
   };
 
@@ -30,6 +42,7 @@ describe('InvitationsService', () => {
       providers: [
         InvitationsService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: MailService, useValue: mockMailService },
       ],
     }).compile();
 

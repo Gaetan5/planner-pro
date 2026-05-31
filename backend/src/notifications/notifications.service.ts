@@ -1,12 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsGateway } from './notifications.gateway';
+import { MailService } from '../mail/mail.service';
 
 @Injectable()
 export class NotificationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly gateway: NotificationsGateway,
+    private readonly mailService: MailService,
   ) {}
 
   async createNotification(data: {
@@ -36,7 +38,45 @@ export class NotificationsService {
     // Émettre l'événement temps réel
     this.gateway.sendNotificationToUser(data.userId, 'new-notification', notification);
 
+    // Envoi d'email asynchrone si c'est une mention
+    if (data.type === 'MENTION') {
+      this.sendMentionEmailAsync(notification).catch(err => {
+        console.error("Erreur lors du déclenchement asynchrone de l'email de mention :", err);
+      });
+    }
+
     return notification;
+  }
+
+  private async sendMentionEmailAsync(notification: any) {
+    try {
+      const recipient = await this.prisma.user.findUnique({
+        where: { id: notification.userId },
+        select: { name: true, email: true },
+      });
+
+      if (!recipient || !recipient.email) return;
+
+      let taskTitle = 'Tâche';
+      if (notification.taskId) {
+        const task = await this.prisma.task.findFirst({
+          where: { id: notification.taskId, deletedAt: null },
+          select: { title: true },
+        });
+        if (task) taskTitle = task.title;
+      }
+
+      const senderName = notification.sender?.name || notification.sender?.email || 'Un collaborateur';
+      
+      await this.mailService.sendMentionEmail(
+        recipient.email,
+        senderName,
+        taskTitle,
+        notification.content,
+      );
+    } catch (error) {
+      console.error("Erreur lors de la préparation de l'email de mention :", error);
+    }
   }
 
   async getUserNotifications(userId: string) {
