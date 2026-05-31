@@ -140,7 +140,10 @@ export class ProjectsService {
     billingType?: string,
   ) {
     const workspace = workspaceId ? { id: workspaceId } : await this.ensureDefaultWorkspace(userId);
-    await this.assertWorkspaceMember(workspace.id, userId);
+    const membership = await this.assertWorkspaceMember(workspace.id, userId);
+    if (membership.role === WorkspaceRole.VIEWER) {
+      throw new ForbiddenException('Unauthorized: read-only access (VIEWER)');
+    }
 
     return this.prisma.project.create({
       data: {
@@ -224,6 +227,13 @@ export class ProjectsService {
       throw new Error('Project not found or unauthorized');
     }
 
+    if (project.workspaceId) {
+      const membership = await this.assertWorkspaceMember(project.workspaceId, userId);
+      if (membership.role === WorkspaceRole.VIEWER) {
+        throw new ForbiddenException('Unauthorized: read-only access (VIEWER)');
+      }
+    }
+
     return this.prisma.project.update({
       where: { id: projectId },
       data: {
@@ -242,6 +252,13 @@ export class ProjectsService {
     const project = await this.getProject(projectId, userId);
     if (!project) {
       throw new Error('Project not found or unauthorized');
+    }
+
+    if (project.workspaceId) {
+      const membership = await this.assertWorkspaceMember(project.workspaceId, userId);
+      if (membership.role === WorkspaceRole.VIEWER) {
+        throw new ForbiddenException('Unauthorized: read-only access (VIEWER)');
+      }
     }
 
     await this.prisma.task.updateMany({

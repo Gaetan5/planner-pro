@@ -60,9 +60,11 @@ function DraggableCard({
   getPriorityClass: (priority: string) => string
   onOpenComments: (task: Task) => void
 }) {
+  const { isReadOnly } = useApp()
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: task.id,
     data: { task },
+    disabled: isReadOnly,
   })
 
   const style = transform
@@ -77,10 +79,10 @@ function DraggableCard({
     <div
       ref={setNodeRef}
       style={style}
-      {...listeners}
-      {...attributes}
-      className={`glass-panel kanban-card ${isDragging ? 'kanban-card--dragging' : ''}`}
-      onClick={() => moveTaskStatus(task.id, task.status)}
+      {...(isReadOnly ? {} : listeners)}
+      {...(isReadOnly ? {} : attributes)}
+      className={`glass-panel kanban-card ${isDragging ? 'kanban-card--dragging' : ''} ${isReadOnly ? 'kanban-card--readonly' : ''}`}
+      onClick={() => !isReadOnly && moveTaskStatus(task.id, task.status)}
     >
       <div className="kanban-card-header">
         <span className={`kanban-card-priority ${getPriorityClass(task.priority)}`}>
@@ -88,20 +90,22 @@ function DraggableCard({
         </span>
 
         <div className="kanban-card-controls" onClick={e => e.stopPropagation()}>
-          {isTrackingThis ? (
-            <button
-              onClick={stopTimer}
-              className="kanban-card-btn-timer kanban-card-btn-timer--stop"
-            >
-              <Square size={12} fill="#fff" />
-            </button>
-          ) : (
-            <button
-              onClick={() => startTimer(task.id)}
-              className="kanban-card-btn-timer kanban-card-btn-timer--start"
-            >
-              <Play size={12} fill="#fff" style={{ marginLeft: '2px' }} />
-            </button>
+          {!isReadOnly && (
+            isTrackingThis ? (
+              <button
+                onClick={stopTimer}
+                className="kanban-card-btn-timer kanban-card-btn-timer--stop"
+              >
+                <Square size={12} fill="#fff" />
+              </button>
+            ) : (
+              <button
+                onClick={() => startTimer(task.id)}
+                className="kanban-card-btn-timer kanban-card-btn-timer--start"
+              >
+                <Play size={12} fill="#fff" style={{ marginLeft: '2px' }} />
+              </button>
+            )
           )}
           <button
             onClick={(e) => {
@@ -114,12 +118,14 @@ function DraggableCard({
           >
             <MessageSquare size={14} />
           </button>
-          <button
-            onClick={() => deleteTask(task.id)}
-            className="kanban-card-btn-delete"
-          >
-            <Trash2 size={14} />
-          </button>
+          {!isReadOnly && (
+            <button
+              onClick={() => deleteTask(task.id)}
+              className="kanban-card-btn-delete"
+            >
+              <Trash2 size={14} />
+            </button>
+          )}
         </div>
       </div>
 
@@ -177,6 +183,7 @@ export const KanbanBoard: React.FC = () => {
     activeTimer,
     stopTimer,
     addTaskDependency,
+    isReadOnly,
   } = useApp()
 
   const [selectedProjId, setSelectedProjId] = useState<string>(projects[0]?.id || '')
@@ -302,15 +309,17 @@ export const KanbanBoard: React.FC = () => {
       <aside className="glass-panel kanban-sidebar">
         <div className="kanban-sidebar-header">
           <h3 className="kanban-sidebar-title">Projets</h3>
-          <button
-            onClick={() => setShowNewProjForm(!showNewProjForm)}
-            className="kanban-new-project-btn"
-          >
-            <FolderPlus size={18} />
-          </button>
+          {!isReadOnly && (
+            <button
+              onClick={() => setShowNewProjForm(!showNewProjForm)}
+              className="kanban-new-project-btn"
+            >
+              <FolderPlus size={18} />
+            </button>
+          )}
         </div>
 
-        {showNewProjForm && (
+        {showNewProjForm && !isReadOnly && (
           <form onSubmit={handleCreateProject} className="kanban-new-project-form">
             <input
               type="text"
@@ -333,7 +342,7 @@ export const KanbanBoard: React.FC = () => {
               className={`kanban-project-item ${activeProject?.id === proj.id ? 'kanban-project-item--active' : ''}`}
             >
               <span>{proj.name}</span>
-              {proj.name !== 'Inbox' && (
+              {proj.name !== 'Inbox' && !isReadOnly && (
                 <button
                   className="kanban-project-delete-btn"
                   onClick={e => {
@@ -362,9 +371,11 @@ export const KanbanBoard: React.FC = () => {
             </p>
           </div>
 
-          <button onClick={() => setShowNewTaskForm(true)} className="btn-primary">
-            <Plus size={18} /> Ajouter une tâche
-          </button>
+          {!isReadOnly && (
+            <button onClick={() => setShowNewTaskForm(true)} className="btn-primary">
+              <Plus size={18} /> Ajouter une tâche
+            </button>
+          )}
         </div>
 
         {/* Modal de création de tâche */}

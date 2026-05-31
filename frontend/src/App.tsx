@@ -12,6 +12,8 @@ import { GovernanceView } from './components/GovernanceView'
 import { CapacityView } from './components/CapacityView'
 import { AgileView } from './components/AgileView'
 import { GanttView } from './components/GanttView'
+import { NotificationInbox } from './components/NotificationInbox'
+import { FinancesView } from './components/FinancesView'
 import { LogOut, AlertTriangle, LayoutDashboard, Kanban, Calendar, FileText, Timer, Sun, Moon, ShieldCheck, Users, Sparkles, Milestone, CalendarRange } from 'lucide-react'
 import logo from './logo.png'
 import './App.css'
@@ -41,6 +43,7 @@ function AppWithSession() {
       case 'resources': return <CapacityView />
       case 'agile': return <AgileView />
       case 'gantt': return <GanttView />
+      case 'finances': return <FinancesView />
       default: return <DashboardContent />
     }
   }
@@ -115,6 +118,12 @@ function AppWithSession() {
           >
             Agile
           </button>
+          <button
+            onClick={() => setActiveTab('finances')}
+            className={`nav-tab ${activeTab === 'finances' ? 'nav-tab--active' : ''}`}
+          >
+            Finances
+          </button>
         </nav>
 
         {/* Profil & Mode Info */}
@@ -139,6 +148,9 @@ function AppWithSession() {
           >
             <Sparkles size={16} />
           </button>
+
+          {/* Notification Bell */}
+          <NotificationInbox />
 
           {/* Theme Toggle Switcher */}
           <button

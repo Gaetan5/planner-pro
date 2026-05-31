@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { CommentsService } from './comments.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { IntegrationService } from './integration.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { WorkspaceRole } from '@prisma/client';
 
 describe('CommentsService', () => {
@@ -29,12 +30,17 @@ describe('CommentsService', () => {
     sendNotification: jest.fn().mockResolvedValue(undefined),
   };
 
+  const mockNotifications = {
+    createNotification: jest.fn().mockResolvedValue(undefined),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CommentsService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: IntegrationService, useValue: mockIntegration },
+        { provide: NotificationsService, useValue: mockNotifications },
       ],
     }).compile();
 

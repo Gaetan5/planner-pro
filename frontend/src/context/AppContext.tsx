@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react'
+import React, { createContext, useContext, useState, useEffect, useMemo } from 'react'
 import { io, Socket } from 'socket.io-client'
 
 export interface TaskAssignee {
@@ -170,12 +170,12 @@ interface AppContextType {
   resourceCapacity: ResourceCapacityReportItem[]
   timeBlocks: TimeBlock[]
   activeTimer: { id: string; startTime: string; taskId: string; task?: Task } | null
-  activeTab: 'dashboard' | 'kanban' | 'calendar' | 'notes' | 'pomodoro' | 'governance' | 'resources' | 'agile' | 'gantt'
+  activeTab: 'dashboard' | 'kanban' | 'calendar' | 'notes' | 'pomodoro' | 'governance' | 'resources' | 'agile' | 'gantt' | 'finances'
   isConnected: boolean
   login: (code: string) => Promise<void>
   logout: () => void
   mockLogin: (name: string) => Promise<void>
-  setActiveTab: (tab: 'dashboard' | 'kanban' | 'calendar' | 'notes' | 'pomodoro' | 'governance' | 'resources' | 'agile' | 'gantt') => void
+  setActiveTab: (tab: 'dashboard' | 'kanban' | 'calendar' | 'notes' | 'pomodoro' | 'governance' | 'resources' | 'agile' | 'gantt' | 'finances') => void
   createProject: (name: string, description?: string, workspaceId?: string, status?: string, startDate?: string, dueDate?: string) => Promise<void>
   deleteProject: (projectId: string) => Promise<void>
   createTask: (projectId: string, title: string, description?: string, priority?: string, options?: CreateTaskOptions) => Promise<any>
@@ -251,6 +251,8 @@ interface AppContextType {
   associateTasksToSprint: (sprintId: string | null, taskIds: string[]) => Promise<void>
   getBurndownData: (sprintId: string) => Promise<any>
   getVelocityData: (workspaceId: string) => Promise<number>
+  currentUserRole: 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER' | null
+  isReadOnly: boolean
 }
 const AppContext = createContext<AppContextType | undefined>(undefined)
 
@@ -265,7 +267,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [resourceCapacity, setResourceCapacity] = useState<ResourceCapacityReportItem[]>([])
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([])
   const [activeTimer, setActiveTimer] = useState<AppContextType['activeTimer']>(null)
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'kanban' | 'calendar' | 'notes' | 'pomodoro' | 'governance' | 'resources' | 'agile' | 'gantt'>('dashboard')
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'kanban' | 'calendar' | 'notes' | 'pomodoro' | 'governance' | 'resources' | 'agile' | 'gantt' | 'finances'>('dashboard')
   const [isConnected, setIsConnected] = useState(false)
   const [socket, setSocket] = useState<Socket | null>(null)
 
@@ -1129,6 +1131,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }
 
+  const currentUserRole = useMemo(() => {
+    if (!user || workspaceMembers.length === 0) return null
+    const membership = workspaceMembers.find(m => m.user.id === user.id)
+    return membership ? membership.role : null
+  }, [user, workspaceMembers])
+
+  const isReadOnly = useMemo(() => {
+    return currentUserRole === 'VIEWER'
+  }, [currentUserRole])
+
   return (
     <AppContext.Provider value={{
       user, projects, notes, workspaces, workspaceMembers, resourceCapacity, timeBlocks, activeTimer, activeTab, isConnected,
@@ -1155,7 +1167,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Intégrations & Calendrier
       listIntegrations, createIntegration, toggleIntegration, deleteIntegration, exportToCalendar, getCalendarConflicts,
       // Agile
-      createSprint, updateSprintStatus, associateTasksToSprint, getBurndownData, getVelocityData
+      createSprint, updateSprintStatus, associateTasksToSprint, getBurndownData, getVelocityData,
+      // Permissions
+      currentUserRole, isReadOnly
     }}>
       {children}
     </AppContext.Provider>
