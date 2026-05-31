@@ -241,7 +241,7 @@ Tous les services sont déclarés et exportés dans [projects.module.ts](file://
 - **Pas de synchronisation bidirectionnelle** — zéro import d'événements externes vers les TimeBlocks
 - **Les webhooks Slack/Teams fonctionnent** mais sont fire-and-forget sans retry
 
-### 📊 Maturité : **55%** ↑ (+20%) — Parseur iCal réel et simulateur dynamique remplacent les données hardcodées. Il manque OAuth pour les intégrations de production.
+### 📊 Maturité : **55%** ↑ (+20%) — Parseur iCal réel et simulateur dynamique remplacent les données hardcodées. Il manque OAuth pour les intégrations de production
 
 ---
 
@@ -405,7 +405,7 @@ Tous les services sont déclarés et exportés dans [projects.module.ts](file://
 - **Pas de matrice de permissions fine** — tout est basé sur des `if/else` hardcodés
 - **Pas d'audit log** — aucune traçabilité des actions
 
-### 📊 Maturité : **55%** ↑ (+35%) — Le VIEWER est désormais un vrai rôle en lecture seule. Manque la granularité par projet et les rôles intermédiaires.
+### 📊 Maturité : **55%** ↑ (+35%) — Le VIEWER est désormais un vrai rôle en lecture seule. Manque la granularité par projet et les rôles intermédiaires
 
 ---
 
@@ -473,15 +473,15 @@ Tous les services sont déclarés et exportés dans [projects.module.ts](file://
 ### Points Faibles Résiduels
 
 > [!WARNING]
-> ### 1. Synchronisation Calendar encore partielle
+> **1. Synchronisation Calendar encore partielle**
 > Le parseur iCal est fonctionnel mais aucun flux OAuth2 réel n'existe. Les intégrations Google Calendar et Outlook restent des stubs sans authentification. Le simulateur `/mock-calendar` est un excellent outil de développement, mais pas une solution de production.
 
 > [!WARNING]
-> ### 2. Pas de rôle par projet
+> **2. Pas de rôle par projet**
 > Un `MEMBER` a accès à TOUS les projets du workspace. Le VIEWER est enforced, mais il n'existe pas de granularité intermédiaire (lecture seule sur certains projets, écriture sur d'autres).
 
 > [!NOTE]
-> ### 3. Frontend Gantt et Auto-Scheduling sous-exploités
+> **3. Frontend Gantt et Auto-Scheduling sous-exploités**
 > Le Gantt est fonctionnel mais statique (pas de drag & drop). L'auto-scheduling est réactif (effet domino) mais pas proactif (pas de CPM, pas de recalcul global).
 
 ---

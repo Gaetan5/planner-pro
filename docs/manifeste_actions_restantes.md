@@ -27,12 +27,14 @@ Ce manifeste détaille de manière rigoureuse l'ensemble des tâches résiduelle
 
 ### Lot A — Permissions Granulaires & RBAC (Priorité : P2)
 
-#### 📝 Objectifs
+#### 📝 Objectifs — Lot A
+
 1. Permettre d'assigner des permissions spécifiques au niveau d'un projet, et pas seulement du workspace.
 2. Ajouter le rôle `COMMENTER` (lecture + droit de commenter) et le rôle `CLIENT` (lecture seule sur un périmètre restreint).
 3. Consigner chaque action mutative dans une table d'audit dédiée (`AuditLog`).
 
-#### 🗄️ Évolution du Schéma Prisma
+#### 🗄️ Évolution du Schéma Prisma — Lot A
+
 ```prisma
 model ProjectMembership {
   id          String        @id @default(uuid())
@@ -67,11 +69,13 @@ model AuditLog {
 }
 ```
 
-#### 🧪 Protocole de Tests & Validation
+#### 🧪 Protocole de Tests & Validation — Lot A
+
 1. **Tests unitaires (`ProjectPermissionsService`)** :
    - Valider qu'un utilisateur avec le rôle `CLIENT` sur un projet ne peut pas créer de tâche.
    - Valider qu'un utilisateur avec le rôle `COMMENTER` peut ajouter un commentaire mais pas modifier l'état de la tâche.
    - Valider l'insertion systématique d'une ligne d'audit lors des opérations mutatives.
+
 2. **Tests d'intégration (REST API)** :
    - Tester les routes HTTP avec des jetons JWT porteurs de rôles différents et valider les codes de retour (201 Created vs 403 Forbidden).
 
@@ -79,11 +83,13 @@ model AuditLog {
 
 ### Lot B — Synchronisation Calendar Avancée (Priorité : P2)
 
-#### 📝 Objectifs
+#### 📝 Objectifs — Lot B
+
 1. Implémenter le flux d'authentification OAuth2 (Google API et Microsoft Graph API) pour récupérer et stocker de manière sécurisée les jetons d'accès et de rafraîchissement.
 2. Mettre en place un processus de synchronisation bidirectionnelle (les modifications dans Planner Pro mettent à jour l'agenda externe, et inversement).
 
-#### 🗄️ Évolution du Schéma Prisma
+#### 🗄️ Évolution du Schéma Prisma — Lot B
+
 ```prisma
 model Integration {
   id           String            @id @default(uuid())
@@ -97,10 +103,12 @@ model Integration {
 }
 ```
 
-#### 🧪 Protocole de Tests & Validation
+#### 🧪 Protocole de Tests & Validation — Lot B
+
 1. **Mocking des services tiers** :
    - Créer des mocks stricts pour `google-auth-library` et `@microsoft/microsoft-graph-client`.
    - Simuler le rafraîchissement automatique de token expiré et valider que le nouveau jeton est correctement rechiffré et persisté en base de données.
+
 2. **Tests de concurrence** :
    - Valider le comportement en cas de conflits de dates détectés simultanément des deux côtés.
 
@@ -108,12 +116,14 @@ model Integration {
 
 ### Lot C — Auto-Scheduling Intelligent & Gantt (Priorité : P3)
 
-#### 📝 Objectifs
+#### 📝 Objectifs — Lot C
+
 1. Ajouter le support du glisser-déposer sur le composant visuel Gantt avec calcul des nouvelles dates.
 2. Implémenter la méthode du chemin critique (CPM - Critical Path Method) pour mettre en évidence les tâches qui n'ont aucune marge de retard.
 3. Prendre en compte le calendrier global des disponibilités (jours fériés et congés des ressources) dans le calcul d'auto-planification.
 
-#### 🗄️ Évolution du Schéma Prisma
+#### 🗄️ Évolution du Schéma Prisma — Lot C
+
 ```prisma
 model ResourceLeave {
   id          String   @id @default(uuid())
@@ -125,10 +135,12 @@ model ResourceLeave {
 }
 ```
 
-#### 🧪 Protocole de Tests & Validation
+#### 🧪 Protocole de Tests & Validation — Lot C
+
 1. **Algorithmique & Graphes** :
    - Rédiger des tests de graphes acycliques orientés (DAG) pour s'assurer de l'absence de boucles de dépendance infinies (détection de cycles).
    - Valider que le chemin critique change correctement lorsqu'une tâche secondaire dépasse la marge disponible.
+
 2. **Intégration Frontend** :
    - Simuler le drag & drop dans des tests unitaires frontend (Jest / React Testing Library) pour s'assurer que les dates calculées sont envoyées avec précision à l'API.
 
@@ -139,6 +151,7 @@ model ResourceLeave {
 Pour assurer la stabilité et éviter toute régression sur la suite existante (88 tests unitaires), chaque contributeur devra respecter le flux suivant avant tout commit sur la branche principale :
 
 ### Étape 1 : Exécution locale de la conformité
+
 ```bash
 # 1. Régénérer le client Prisma local après modification du schéma
 npx prisma generate
@@ -151,15 +164,19 @@ pnpm --filter backend test
 ```
 
 ### Étape 2 : Vérification du Build de Production
+
 ```bash
 # Valider que le compilateur TS ne remonte aucune erreur de typage
 pnpm build
 ```
 
 ### Étape 3 : Exécution du script de test E2E
+
 Le script de validation interactive E2E (basé sur Puppeteer headless) doit être exécuté localement pour s'assurer qu'aucun changement n'a altéré le tunnel de base d'un utilisateur de Planner Pro.
 
 ### Étape 4 : Formatage et Standardisation des commits
+
 Tous les commits doivent respecter les spécifications des **Conventional Commits** :
+
 - `feat(auth): ajout du flux oauth2 pour google calendar`
 - `fix(gantt): correction du calcul des marges de retard`
