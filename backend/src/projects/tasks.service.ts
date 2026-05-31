@@ -165,6 +165,15 @@ export class TasksService {
   ) {
     const project = await this.assertProjectAccess(projectId, userId);
 
+    if (project.workspaceId) {
+      const membership = await this.prisma.membership.findFirst({
+        where: { workspaceId: project.workspaceId, userId },
+      });
+      if (membership?.role === WorkspaceRole.VIEWER) {
+        throw new ForbiddenException('Unauthorized: read-only access (VIEWER)');
+      }
+    }
+
     const dates = this.parseTaskDates(options);
     const task = await this.prisma.task.create({
       data: {
@@ -212,6 +221,15 @@ export class TasksService {
 
   async updateTask(taskId: string, userId: string, data: UpdateTaskDto) {
     const task = await this.assertTaskAccess(taskId, userId);
+
+    if (task.project?.workspaceId) {
+      const membership = await this.prisma.membership.findFirst({
+        where: { workspaceId: task.project.workspaceId, userId },
+      });
+      if (membership?.role === WorkspaceRole.VIEWER) {
+        throw new ForbiddenException('Unauthorized: read-only access (VIEWER)');
+      }
+    }
 
     const impactedTaskIds: string[] = [];
 
@@ -263,7 +281,16 @@ export class TasksService {
   }
 
   async deleteTask(taskId: string, userId: string) {
-    await this.assertTaskAccess(taskId, userId);
+    const task = await this.assertTaskAccess(taskId, userId);
+
+    if (task.project?.workspaceId) {
+      const membership = await this.prisma.membership.findFirst({
+        where: { workspaceId: task.project.workspaceId, userId },
+      });
+      if (membership?.role === WorkspaceRole.VIEWER) {
+        throw new ForbiddenException('Unauthorized: read-only access (VIEWER)');
+      }
+    }
 
     return this.prisma.task.update({
       where: { id: taskId },

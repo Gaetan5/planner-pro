@@ -1,0 +1,362 @@
+/* ========================================
+   PORTFOLIO DASHBOARD VIEW
+   ======================================== */
+
+.portfolio-layout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xl);
+  overflow-y: auto;
+  flex: 1;
+  padding-bottom: var(--space-2xl);
+}
+
+.portfolio-header-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.portfolio-title-group {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+}
+
+.portfolio-subtitle {
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  margin-top: 2px;
+}
+
+/* Section KPI globale */
+.portfolio-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-lg);
+}
+
+.portfolio-kpi-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-lg);
+  padding: var(--space-lg);
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s ease;
+}
+
+.portfolio-kpi-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 4px;
+  height: 100%;
+  background: var(--accent-gradient);
+  border-radius: 2px;
+}
+
+.portfolio-kpi-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.portfolio-kpi-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--accent-primary);
+}
+
+.portfolio-kpi-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.portfolio-kpi-val {
+  font-size: var(--font-2xl);
+  font-weight: 700;
+  color: var(--text-main);
+  line-height: 1.1;
+}
+
+.portfolio-kpi-label {
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 4px;
+}
+
+/* Zone Filtres & Contrôles */
+.portfolio-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+  margin-top: var(--space-sm);
+}
+
+.portfolio-sort-select {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  color: var(--text-main);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md);
+  font-size: var(--font-sm);
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.portfolio-sort-select:focus {
+  border-color: var(--accent-primary);
+}
+
+/* Grille de cartes de projet */
+.portfolio-projects-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: var(--space-xl);
+}
+
+.project-health-card {
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-xl);
+  position: relative;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s ease;
+  height: 100%;
+}
+
+.project-health-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-lg);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.project-health-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-md);
+  margin-bottom: var(--space-md);
+}
+
+.project-health-card__title-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.project-health-card__title {
+  font-size: var(--font-lg);
+  font-weight: 600;
+  color: var(--text-main);
+  margin: 0;
+  line-height: 1.2;
+}
+
+.project-health-card__subtitle {
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* Badge Health Score */
+.health-score-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  font-weight: 700;
+  font-size: var(--font-md);
+  box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.2);
+  transition: transform 0.3s;
+}
+
+.health-score-badge:hover {
+  transform: scale(1.1);
+}
+
+.health-score-badge--excellent {
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+  border: 2px solid #10b981;
+}
+
+.health-score-badge--good {
+  background: rgba(59, 130, 246, 0.1);
+  color: #3b82f6;
+  border: 2px solid #3b82f6;
+}
+
+.health-score-badge--warning {
+  background: rgba(245, 158, 11, 0.1);
+  color: #f59e0b;
+  border: 2px solid #f59e0b;
+}
+
+.health-score-badge--danger {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border: 2px solid #ef4444;
+}
+
+.health-score-label {
+  font-size: 8px;
+  text-transform: uppercase;
+  margin-top: -2px;
+  opacity: 0.8;
+}
+
+/* Indicateur de statut textuel */
+.project-health-status-desc {
+  font-size: var(--font-xs);
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  margin-top: var(--space-xs);
+  align-self: flex-start;
+}
+
+.project-health-status-desc--excellent {
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+}
+
+.project-health-status-desc--good {
+  background: rgba(59, 130, 246, 0.1);
+  color: #3b82f6;
+}
+
+.project-health-status-desc--warning {
+  background: rgba(245, 158, 11, 0.1);
+  color: #f59e0b;
+}
+
+.project-health-status-desc--danger {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+}
+
+/* Grille de métriques pour le projet */
+.project-health-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-md);
+  margin: var(--space-md) 0;
+  padding: var(--space-md) 0;
+  border-top: 1px solid var(--panel-border);
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.health-metric-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.health-metric-label {
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+
+.health-metric-val {
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.health-metric-val--alert {
+  color: #ef4444;
+}
+
+/* Barres de progression */
+.project-health-progress-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin-top: var(--space-xs);
+}
+
+.health-progress-bar-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.health-progress-bar-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+}
+
+.health-progress-bar-bg {
+  width: 100%;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 3px;
+  overflow: hidden;
+  position: relative;
+}
+
+.health-progress-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Rapport d'évaluation rapide (Smart AI assessment) */
+.project-health-assessment {
+  margin-top: var(--space-md);
+  padding: var(--space-md);
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.03);
+  border-radius: var(--radius-md);
+  font-size: var(--font-xs);
+  line-height: 1.4;
+  color: var(--text-muted);
+  display: flex;
+  gap: var(--space-sm);
+  align-items: flex-start;
+}
+
+.project-health-assessment-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.project-health-assessment-text {
+  flex: 1;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .portfolio-projects-grid {
+    grid-template-columns: 1fr;
+  }
+  .portfolio-kpi-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .portfolio-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+}
