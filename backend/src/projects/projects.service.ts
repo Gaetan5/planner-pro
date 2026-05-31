@@ -287,7 +287,10 @@ export class ProjectsService {
       const hmac = crypto.createHmac('sha256', secret);
       const bodyStr = JSON.stringify(payload);
       const digest = 'sha256=' + hmac.update(bodyStr).digest('hex');
-      return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(digest));
+      return crypto.timingSafeEqual(
+        new Uint8Array(Buffer.from(signature)),
+        new Uint8Array(Buffer.from(digest))
+      );
     } catch (e) {
       return false;
     }
