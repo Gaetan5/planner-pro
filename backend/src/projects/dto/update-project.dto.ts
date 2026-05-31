@@ -1,5 +1,6 @@
-import { IsString, IsOptional, IsEnum, IsISO8601 } from 'class-validator';
+import { IsString, IsOptional, IsEnum, IsISO8601, IsInt, Min } from 'class-validator';
 import { ProjectStatus } from '@prisma/client';
+import { Type } from 'class-transformer';
 
 export class UpdateProjectDto {
   @IsString()
@@ -21,4 +22,14 @@ export class UpdateProjectDto {
   @IsISO8601()
   @IsOptional()
   dueDate?: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  budgetCents?: number;
+
+  @IsString()
+  @IsOptional()
+  billingType?: string;
 }

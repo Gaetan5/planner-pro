@@ -2,19 +2,43 @@ import { Injectable, BadRequestException, ForbiddenException } from '@nestjs/com
 import { PrismaService } from '../prisma/prisma.service';
 import { NotesService } from '../notes/notes.service';
 import { IntegrationService } from './integration.service';
+import { TasksService } from './tasks.service';
+import { DependenciesService } from './dependencies.service';
+import { TimeBlocksService } from './timeblocks.service';
+import { MilestonesService } from './milestones.service';
+import { ResourcesService } from './resources.service';
+import { FinancesService } from './finances.service';
 import { Prisma, TaskPriority, ProjectStatus, DeliverableStatus, DependencyType, DeliveryStatus, WorkspaceRole, TaskStatus } from '@prisma/client';
 import * as crypto from 'crypto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 
+/**
+ * ProjectsService — Façade d'Orchestration
+ * 
+ * Responsabilités propres : Workspace, Memberships, Projects CRUD, GitHub Webhooks.
+ * Délègue aux sous-services spécialisés pour tâches, dépendances, timeblocks, jalons, ressources, finances.
+ * 
+ * Expose des méthodes de délégation pour compatibilité ascendante avec le contrôleur et l'AiService.
+ */
 @Injectable()
 export class ProjectsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notesService: NotesService,
     private readonly integrationService: IntegrationService,
+    private readonly tasksService: TasksService,
+    private readonly dependenciesService: DependenciesService,
+    private readonly timeBlocksService: TimeBlocksService,
+    private readonly milestonesService: MilestonesService,
+    private readonly resourcesService: ResourcesService,
+    private readonly financesService: FinancesService,
   ) {}
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  WORKSPACE & MEMBERSHIP (logique propre)
+  // ═══════════════════════════════════════════════════════════════════
 
   private async ensureDefaultWorkspace(userId: string) {
     const existingMembership = await this.prisma.membership.findFirst({
@@ -68,57 +92,6 @@ export class ProjectsService {
     return membership;
   }
 
-  private async getAccessibleUserIds(workspaceId: string) {
-    const memberships = await this.prisma.membership.findMany({
-      where: { workspaceId },
-      select: { userId: true },
-    });
-    return memberships.map((membership) => membership.userId);
-  }
-
-  private parseTaskDates(data: CreateTaskDto | UpdateTaskDto) {
-    return {
-      startDate: data.startDate ? new Date(data.startDate) : undefined,
-      dueDate: data.dueDate ? new Date(data.dueDate) : undefined,
-    };
-  }
-
-  private buildTaskMutationData(data: CreateTaskDto | UpdateTaskDto): Prisma.TaskUpdateInput {
-    const dates = this.parseTaskDates(data);
-    return {
-      ...(data.title !== undefined ? { title: data.title } : {}),
-      ...(data.description !== undefined ? { description: data.description } : {}),
-      ...(data.priority !== undefined ? { priority: data.priority } : {}),
-      ...('status' in data && data.status !== undefined ? {
-        status: data.status,
-        completedAt: data.status === 'DONE' ? new Date() : null,
-      } : {}),
-      ...(dates.startDate !== undefined ? { startDate: dates.startDate } : {}),
-      ...(dates.dueDate !== undefined ? { dueDate: dates.dueDate } : {}),
-      ...(data.estimatedMinutes !== undefined ? { estimatedMinutes: data.estimatedMinutes } : {}),
-      ...(data.progress !== undefined ? { progress: data.progress } : {}),
-      ...(data.labels !== undefined ? { labels: data.labels } : {}),
-      ...(data.storyPoints !== undefined ? { storyPoints: data.storyPoints } : {}),
-      ...(data.sprintId !== undefined ? { sprintId: data.sprintId } : {}),
-    };
-  }
-
-  private async replaceTaskAssignees(taskId: string, workspaceId: string | null, assigneeIds?: string[]) {
-    if (!assigneeIds) return;
-
-    const allowedUserIds = workspaceId ? await this.getAccessibleUserIds(workspaceId) : [];
-    const uniqueAssigneeIds = [...new Set(assigneeIds)].filter((id) => allowedUserIds.includes(id));
-
-    await this.prisma.taskAssignee.deleteMany({ where: { taskId } });
-
-    if (uniqueAssigneeIds.length > 0) {
-      await this.prisma.taskAssignee.createMany({
-        data: uniqueAssigneeIds.map((userId) => ({ taskId, userId })),
-        skipDuplicates: true,
-      });
-    }
-  }
-
   async getWorkspaces(userId: string) {
     await this.ensureDefaultWorkspace(userId);
     return this.prisma.workspace.findMany({
@@ -151,6 +124,10 @@ export class ProjectsService {
     });
   }
 
+  // ═══════════════════════════════════════════════════════════════════
+  //  PROJECTS CRUD (logique propre)
+  // ═══════════════════════════════════════════════════════════════════
+
   async createProject(
     userId: string,
     name: string,
@@ -159,6 +136,8 @@ export class ProjectsService {
     status: ProjectStatus = ProjectStatus.PLANNING,
     startDate?: string,
     dueDate?: string,
+    budgetCents?: number,
+    billingType?: string,
   ) {
     const workspace = workspaceId ? { id: workspaceId } : await this.ensureDefaultWorkspace(userId);
     await this.assertWorkspaceMember(workspace.id, userId);
@@ -172,6 +151,8 @@ export class ProjectsService {
         status,
         startDate: startDate ? new Date(startDate) : undefined,
         dueDate: dueDate ? new Date(dueDate) : undefined,
+        budgetCents: budgetCents !== undefined ? budgetCents : null,
+        billingType: billingType !== undefined ? billingType : 'TIME_AND_MATERIALS',
       },
     });
   }
@@ -251,6 +232,8 @@ export class ProjectsService {
         ...(data.status !== undefined ? { status: data.status } : {}),
         ...(data.startDate !== undefined ? { startDate: new Date(data.startDate) } : {}),
         ...(data.dueDate !== undefined ? { dueDate: new Date(data.dueDate) } : {}),
+        ...(data.budgetCents !== undefined ? { budgetCents: data.budgetCents } : {}),
+        ...(data.billingType !== undefined ? { billingType: data.billingType } : {}),
       },
     });
   }
@@ -271,781 +254,13 @@ export class ProjectsService {
     });
   }
 
-  async createTask(
-    projectId: string,
-    userId: string,
-    title: string,
-    description?: string,
-    priority: TaskPriority = TaskPriority.MEDIUM,
-    options: Omit<CreateTaskDto, 'title' | 'description' | 'priority'> = {},
-  ) {
-    const project = await this.getProject(projectId, userId);
-    if (!project) {
-      throw new Error('Project not found or unauthorized');
-    }
-
-    const dates = this.parseTaskDates(options);
-    const task = await this.prisma.task.create({
-      data: {
-        title,
-        description,
-        priority,
-        startDate: dates.startDate,
-        dueDate: dates.dueDate,
-        estimatedMinutes: options.estimatedMinutes,
-        progress: options.progress ?? 0,
-        labels: options.labels,
-        projectId,
-        userId,
-        storyPoints: options.storyPoints,
-        sprintId: options.sprintId,
-      },
-      include: {
-        assignees: {
-          include: { user: { select: { id: true, name: true, email: true } } },
-        },
-        dependencies: { include: { dependsOnTask: true } },
-        dependents: { include: { task: true } },
-      },
-    });
-
-    await this.replaceTaskAssignees(task.id, project.workspaceId, options.assigneeIds);
-    const finalTask = await this.prisma.task.findUnique({
-      where: { id: task.id },
-      include: {
-        assignees: {
-          include: { user: { select: { id: true, name: true, email: true } } },
-        },
-        dependencies: { include: { dependsOnTask: true } },
-        dependents: { include: { task: true } },
-      },
-    });
-
-    if (finalTask) {
-      this.integrationService.sendNotification(
-        project.workspaceId,
-        'Nouvelle Tâche',
-        `La tâche "${finalTask.title}" a été créée dans le projet "${project.name}". Priorité : ${finalTask.priority}.`,
-      );
-    }
-
-    return finalTask;
-  }
-
-  async getTasks(projectId: string, userId: string) {
-    const project = await this.getProject(projectId, userId);
-    if (!project) {
-      throw new Error('Project not found or unauthorized');
-    }
-
-    return this.prisma.task.findMany({
-      where: { projectId, deletedAt: null },
-      include: {
-        assignees: {
-          include: { user: { select: { id: true, name: true, email: true } } },
-        },
-        dependencies: { include: { dependsOnTask: true } },
-        dependents: { include: { task: true } },
-      },
-    });
-  }
-
-  async updateTask(taskId: string, userId: string, data: UpdateTaskDto) {
-    const task = await this.prisma.task.findFirst({
-      where: {
-        id: taskId,
-        deletedAt: null,
-        OR: [
-          { userId },
-          { project: { workspace: { memberships: { some: { userId } } } } },
-        ],
-      },
-      include: { project: true },
-    });
-    if (!task) {
-      throw new Error('Task not found or unauthorized');
-    }
-
-    const impactedTaskIds: string[] = [];
-
-    // Exécuter l'update et l'auto-scheduling dans une transaction interactive Prisma
-    const updatedTask = await this.prisma.$transaction(async (tx) => {
-      const updated = await tx.task.update({
-        where: { id: taskId },
-        data: this.buildTaskMutationData(data),
-        include: {
-          assignees: {
-            include: { user: { select: { id: true, name: true, email: true } } },
-          },
-          dependencies: { include: { dependsOnTask: true } },
-          dependents: { include: { task: true } },
-        },
-      });
-
-      // Lancer la propagation (effet domino) si le dueDate a changé
-      const oldDue = task.dueDate ? new Date(task.dueDate) : null;
-      const newDue = data.dueDate ? new Date(data.dueDate) : null;
-
-      if (newDue && (!oldDue || oldDue.getTime() !== newDue.getTime())) {
-        const visited = new Set<string>([taskId]);
-        await this.propagateScheduleUpdates(taskId, newDue, visited, tx, impactedTaskIds);
-      }
-
-      return updated;
-    });
-
-    await this.replaceTaskAssignees(taskId, task.project.workspaceId, data.assigneeIds);
-
-    if ((data.status || data.title) && updatedTask.noteId) {
-      await this.notesService.syncTaskStatusToNote(taskId, updatedTask.status);
-    }
-
-    const finalTask = await this.prisma.task.findUnique({
-      where: { id: taskId },
-      include: {
-        assignees: {
-          include: { user: { select: { id: true, name: true, email: true } } },
-        },
-        dependencies: { include: { dependsOnTask: true } },
-        dependents: { include: { task: true } },
-      },
-    });
-
-    if (finalTask) {
-      if (data.status === 'DONE' && task.status !== 'DONE') {
-        this.integrationService.sendNotification(
-          task.project.workspaceId,
-          'Tâche Terminée',
-          `La tâche "${finalTask.title}" du projet "${task.project.name}" a été marquée comme terminée.`,
-        );
-      }
-    }
-
-    return {
-      ...finalTask,
-      impactedTaskIds,
-    };
-  }
-
-  async deleteTask(taskId: string, userId: string) {
-    const task = await this.prisma.task.findFirst({
-      where: {
-        id: taskId,
-        deletedAt: null,
-        OR: [
-          { userId },
-          { project: { workspace: { memberships: { some: { userId } } } } },
-        ],
-      },
-    });
-    if (!task) {
-      throw new Error('Task not found or unauthorized');
-    }
-
-    return this.prisma.task.update({
-      where: { id: taskId },
-      data: { deletedAt: new Date() },
-    });
-  }
-
-  async createMilestone(projectId: string, userId: string, name: string, description?: string, dueDate?: string) {
-    const project = await this.getProject(projectId, userId);
-    if (!project || !project.workspaceId) {
-      throw new BadRequestException('Project or workspace not found');
-    }
-    await this.assertWorkspaceRole(project.workspaceId, userId, [WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
-
-    return this.prisma.milestone.create({
-      data: {
-        projectId,
-        name,
-        description,
-        dueDate: dueDate ? new Date(dueDate) : undefined,
-      },
-    });
-  }
-
-  async completeMilestone(milestoneId: string, userId: string) {
-    const milestone = await this.prisma.milestone.findFirst({
-      where: {
-        id: milestoneId,
-        project: { deletedAt: null },
-      },
-      include: { project: true },
-    });
-    if (!milestone || !milestone.project || !milestone.project.workspaceId) {
-      throw new BadRequestException('Milestone or workspace not found');
-    }
-    await this.assertWorkspaceRole(milestone.project.workspaceId, userId, [WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
-
-    return this.prisma.milestone.update({
-      where: { id: milestoneId },
-      data: { completedAt: new Date() },
-    });
-  }
-
-  async createDeliverable(
-    projectId: string,
-    userId: string,
-    title: string,
-    description?: string,
-    status: DeliverableStatus = DeliverableStatus.DRAFT,
-    dueDate?: string,
-  ) {
-    const project = await this.getProject(projectId, userId);
-    if (!project || !project.workspaceId) {
-      throw new BadRequestException('Project or workspace not found');
-    }
-    await this.assertWorkspaceRole(project.workspaceId, userId, [WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
-
-    return this.prisma.deliverable.create({
-      data: {
-        projectId,
-        title,
-        description,
-        status,
-        dueDate: dueDate ? new Date(dueDate) : undefined,
-      },
-    });
-  }
-
-  async updateDeliverableStatus(deliverableId: string, userId: string, status: DeliverableStatus) {
-    const deliverable = await this.prisma.deliverable.findFirst({
-      where: {
-        id: deliverableId,
-        project: { deletedAt: null },
-      },
-      include: { project: true },
-    });
-    if (!deliverable || !deliverable.project || !deliverable.project.workspaceId) {
-      throw new BadRequestException('Deliverable or workspace not found');
-    }
-    await this.assertWorkspaceRole(deliverable.project.workspaceId, userId, [WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
-
-    return this.prisma.deliverable.update({
-      where: { id: deliverableId },
-      data: {
-        status,
-        acceptedAt: status === DeliverableStatus.ACCEPTED ? new Date() : deliverable.acceptedAt,
-      },
-    });
-  }
-
-  private async hasPath(startTaskId: string, targetTaskId: string, visited: Set<string>): Promise<boolean> {
-    if (startTaskId === targetTaskId) return true;
-    if (visited.has(startTaskId)) return false;
-    visited.add(startTaskId);
-
-    const dependencies = await this.prisma.taskDependency.findMany({
-      where: { taskId: startTaskId },
-    });
-
-    for (const dep of dependencies) {
-      if (await this.hasPath(dep.dependsOnTaskId, targetTaskId, visited)) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  /**
-   * Propage récursivement le décalage de planification aux tâches dépendantes (effet domino).
-   */
-  private async propagateScheduleUpdates(
-    taskId: string,
-    newDueDate: Date,
-    visited: Set<string>,
-    tx: any,
-    impactedIds: string[],
-  ): Promise<void> {
-    // 1. Trouver les relations de dépendances où dependsOnTaskId === taskId
-    // (toutes les tâches dépendant de taskId)
-    const dependencies = await tx.taskDependency.findMany({
-      where: {
-        dependsOnTaskId: taskId,
-        type: 'FINISH_TO_START',
-      },
-      include: {
-        task: true,
-      },
-    });
-
-    for (const dep of dependencies) {
-      const childTask = dep.task;
-      if (!childTask || childTask.deletedAt || visited.has(childTask.id)) continue;
-
-      const childStart = childTask.startDate ? new Date(childTask.startDate) : null;
-      const childDue = childTask.dueDate ? new Date(childTask.dueDate) : null;
-
-      if (childStart && childDue) {
-        // Si la date de fin du parent dépasse la date de début de l'enfant
-        if (newDueDate > childStart) {
-          const duration = childDue.getTime() - childStart.getTime();
-          const newStart = new Date(newDueDate.getTime());
-          const newDue = new Date(newStart.getTime() + duration);
-
-          // Enregistrer le décalage de la tâche enfant dans la transaction
-          await tx.task.update({
-            where: { id: childTask.id },
-            data: {
-              startDate: newStart,
-              dueDate: newDue,
-            },
-          });
-
-          impactedIds.push(childTask.id);
-          visited.add(childTask.id);
-
-          // Propager récursivement à partir de la nouvelle fin de l'enfant
-          await this.propagateScheduleUpdates(childTask.id, newDue, visited, tx, impactedIds);
-        }
-      }
-    }
-  }
-
-  async addTaskDependency(taskId: string, userId: string, dependsOnTaskId: string, type: DependencyType = DependencyType.FINISH_TO_START) {
-    if (taskId === dependsOnTaskId) {
-      throw new BadRequestException('A task cannot depend on itself');
-    }
-
-    const [task, dependsOnTask] = await Promise.all([
-      this.prisma.task.findFirst({
-        where: {
-          id: taskId,
-          deletedAt: null,
-          OR: [
-            { userId },
-            { project: { workspace: { memberships: { some: { userId } } } } },
-          ],
-        },
-      }),
-      this.prisma.task.findFirst({
-        where: {
-          id: dependsOnTaskId,
-          deletedAt: null,
-          OR: [
-            { userId },
-            { project: { workspace: { memberships: { some: { userId } } } } },
-          ],
-        },
-      }),
-    ]);
-
-    if (!task || !dependsOnTask || task.projectId !== dependsOnTask.projectId) {
-      throw new BadRequestException('Dependency tasks not found, unauthorized, or not in the same project');
-    }
-
-    // Vérifier si dependsOnTaskId dépend déjà de taskId (ce qui créerait un cycle)
-    const isCyclic = await this.hasPath(dependsOnTaskId, taskId, new Set<string>());
-    if (isCyclic) {
-      throw new BadRequestException('Creating this dependency would create a cycle (circular dependency detected)');
-    }
-
-    return this.prisma.taskDependency.create({
-      data: { taskId, dependsOnTaskId, type },
-    });
-  }
-
-  async removeTaskDependency(taskId: string, userId: string, dependsOnTaskId: string) {
-    const dependency = await this.prisma.taskDependency.findFirst({
-      where: {
-        taskId,
-        dependsOnTaskId,
-        task: {
-          deletedAt: null,
-          OR: [
-            { userId },
-            { project: { workspace: { memberships: { some: { userId } } } } },
-          ],
-        },
-      },
-    });
-    if (!dependency) {
-      throw new Error('Dependency not found or unauthorized');
-    }
-
-    return this.prisma.taskDependency.delete({ where: { id: dependency.id } });
-  }
-
-  async createDelivery(projectId: string, userId: string, summary?: string, checklist: string[] = []) {
-    const project = await this.getProject(projectId, userId);
-    if (!project || !project.workspaceId) {
-      throw new BadRequestException('Project or workspace not found');
-    }
-    await this.assertWorkspaceRole(project.workspaceId, userId, [WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
-
-    return this.prisma.deliveryRecord.create({
-      data: {
-        projectId,
-        summary,
-        checklist: {
-          create: checklist.map((title) => ({ title })),
-        },
-      },
-      include: { checklist: true },
-    });
-  }
-
-  async updateDeliveryStatus(deliveryId: string, userId: string, status: DeliveryStatus) {
-    const delivery = await this.prisma.deliveryRecord.findFirst({
-      where: {
-        id: deliveryId,
-        project: { deletedAt: null },
-      },
-      include: { project: true },
-    });
-    if (!delivery || !delivery.project || !delivery.project.workspaceId) {
-      throw new BadRequestException('Delivery or workspace not found');
-    }
-    await this.assertWorkspaceRole(delivery.project.workspaceId, userId, [WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
-
-    const now = new Date();
-    const updated = await this.prisma.deliveryRecord.update({
-      where: { id: deliveryId },
-      data: {
-        status,
-        deliveredAt: status === DeliveryStatus.READY_FOR_ACCEPTANCE ? now : delivery.deliveredAt,
-        acceptedAt: status === DeliveryStatus.ACCEPTED ? now : delivery.acceptedAt,
-      },
-      include: { checklist: true },
-    });
-
-    if (status === DeliveryStatus.ACCEPTED) {
-      await this.prisma.project.update({
-        where: { id: delivery.projectId },
-        data: { status: ProjectStatus.DELIVERED },
-      });
-    }
-
-    return updated;
-  }
-
-  async toggleDeliveryChecklistItem(itemId: string, userId: string) {
-    const item = await this.prisma.deliveryChecklistItem.findFirst({
-      where: {
-        id: itemId,
-        delivery: {
-          project: { deletedAt: null },
-        },
-      },
-      include: { delivery: { include: { project: true } } },
-    });
-    if (!item || !item.delivery || !item.delivery.project || !item.delivery.project.workspaceId) {
-      throw new BadRequestException('Checklist item or workspace not found');
-    }
-    await this.assertWorkspaceRole(item.delivery.project.workspaceId, userId, [WorkspaceRole.OWNER, WorkspaceRole.ADMIN, WorkspaceRole.MEMBER]);
-
-    return this.prisma.deliveryChecklistItem.update({
-      where: { id: itemId },
-      data: { checked: !item.checked },
-    });
-  }
-
-  async getDeliveryReport(projectId: string, userId: string) {
-    const project = await this.prisma.project.findFirst({
-      where: {
-        id: projectId,
-        deletedAt: null,
-        OR: [
-          { userId },
-          { workspace: { memberships: { some: { userId } } } },
-        ],
-      },
-      include: {
-        tasks: { where: { deletedAt: null }, include: { timeLogs: true } },
-        milestones: true,
-        deliverables: true,
-        deliveries: { include: { checklist: true } },
-      },
-    });
-    if (!project) {
-      throw new Error('Project not found or unauthorized');
-    }
-
-    const totalTasks = project.tasks.length;
-    const completedTasks = project.tasks.filter((task) => task.status === 'DONE').length;
-    const totalTrackedSeconds = project.tasks.reduce(
-      (total, task) => total + task.timeLogs.reduce((sum, log) => sum + (log.duration ?? 0), 0),
-      0,
-    );
-    const acceptedDeliverables = project.deliverables.filter((item) => item.status === 'ACCEPTED' || item.status === 'DELIVERED').length;
-    const completedMilestones = project.milestones.filter((item) => item.completedAt).length;
-
-    return {
-      project: {
-        id: project.id,
-        name: project.name,
-        status: project.status,
-        startDate: project.startDate,
-        dueDate: project.dueDate,
-      },
-      tasks: {
-        total: totalTasks,
-        completed: completedTasks,
-        completionRate: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0,
-      },
-      milestones: {
-        total: project.milestones.length,
-        completed: completedMilestones,
-      },
-      deliverables: {
-        total: project.deliverables.length,
-        accepted: acceptedDeliverables,
-      },
-      time: {
-        trackedSeconds: totalTrackedSeconds,
-        trackedHours: Math.round((totalTrackedSeconds / 3600) * 100) / 100,
-      },
-      deliveries: project.deliveries,
-      readyForClosure: totalTasks === completedTasks && project.deliverables.length === acceptedDeliverables,
-    };
-  }
-
-  private async ensureResourceProfiles(workspaceId: string) {
-    const memberships = await this.prisma.membership.findMany({
-      where: { workspaceId },
-      select: { userId: true },
-    });
-
-    for (const membership of memberships) {
-      await this.prisma.resourceProfile.upsert({
-        where: { workspaceId_userId: { workspaceId, userId: membership.userId } },
-        update: {},
-        create: { workspaceId, userId: membership.userId },
-      });
-    }
-  }
-
-  async getResourceCapacityReport(userId: string, workspaceId?: string) {
-    const workspace = workspaceId ? { id: workspaceId } : await this.ensureDefaultWorkspace(userId);
-    await this.assertWorkspaceMember(workspace.id, userId);
-    await this.ensureResourceProfiles(workspace.id);
-
-    const windowStart = new Date();
-    const windowEnd = new Date(windowStart.getTime() + 7 * 24 * 60 * 60 * 1000);
-
-    const [memberships, profiles, openTasks, timeBlocks, allocations] = await Promise.all([
-      this.prisma.membership.findMany({
-        where: { workspaceId: workspace.id },
-        include: { user: { select: { id: true, name: true, email: true } } },
-      }),
-      this.prisma.resourceProfile.findMany({ where: { workspaceId: workspace.id } }),
-      this.prisma.task.findMany({
-        where: {
-          deletedAt: null,
-          status: { not: 'DONE' },
-          project: { workspaceId: workspace.id, deletedAt: null },
-        },
-        include: { assignees: true },
-      }),
-      this.prisma.timeBlock.findMany({
-        where: {
-          startTime: { gte: windowStart, lt: windowEnd },
-          task: { project: { workspaceId: workspace.id, deletedAt: null }, deletedAt: null },
-        },
-        include: { task: { include: { assignees: true } } },
-      }),
-      this.prisma.resourceAllocation.findMany({
-        where: {
-          project: { workspaceId: workspace.id, deletedAt: null },
-          OR: [
-            { endDate: null },
-            { endDate: { gte: windowStart } },
-          ],
-        },
-        include: { project: true },
-      }),
-    ]);
-
-    return memberships.map((membership) => {
-      const profile = profiles.find((item) => item.userId === membership.userId);
-      const weeklyCapacityMinutes = profile?.weeklyCapacityMinutes ?? 2400;
-      const assignedTaskIds = new Set(
-        openTasks
-          .filter((task) => task.userId === membership.userId || task.assignees.some((assignee) => assignee.userId === membership.userId))
-          .map((task) => task.id),
-      );
-      const estimatedOpenMinutes = openTasks
-        .filter((task) => assignedTaskIds.has(task.id))
-        .reduce((total, task) => total + (task.estimatedMinutes ?? 0), 0);
-      const plannedMinutes = timeBlocks
-        .filter((block) => block.task.userId === membership.userId || block.task.assignees.some((assignee) => assignee.userId === membership.userId))
-        .reduce((total, block) => total + Math.max(0, Math.round((block.endTime.getTime() - block.startTime.getTime()) / 60000)), 0);
-      const allocationPercent = allocations
-        .filter((allocation) => allocation.userId === membership.userId)
-        .reduce((total, allocation) => total + allocation.allocationPercent, 0);
-      const loadPercent = weeklyCapacityMinutes > 0 ? Math.round((plannedMinutes / weeklyCapacityMinutes) * 100) : 0;
-
-      return {
-        user: membership.user,
-        role: membership.role,
-        profile,
-        weeklyCapacityMinutes,
-        plannedMinutes,
-        estimatedOpenMinutes,
-        allocationPercent,
-        loadPercent,
-        overloaded: plannedMinutes > weeklyCapacityMinutes || allocationPercent > 100,
-        conflicts: [
-          ...(plannedMinutes > weeklyCapacityMinutes ? ['CAPACITY_EXCEEDED'] : []),
-          ...(allocationPercent > 100 ? ['ALLOCATION_EXCEEDED'] : []),
-        ],
-      };
-    });
-  }
-
-  async updateResourceProfile(
-    actingUserId: string,
-    memberUserId: string,
-    data: { weeklyCapacityMinutes?: number; skills?: string; costRateCents?: number },
-    workspaceId?: string,
-  ) {
-    const workspace = workspaceId ? { id: workspaceId } : await this.ensureDefaultWorkspace(actingUserId);
-    await this.assertWorkspaceRole(workspace.id, actingUserId, [WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
-    await this.assertWorkspaceMember(workspace.id, memberUserId);
-
-    return this.prisma.resourceProfile.upsert({
-      where: { workspaceId_userId: { workspaceId: workspace.id, userId: memberUserId } },
-      update: data,
-      create: { workspaceId: workspace.id, userId: memberUserId, ...data },
-    });
-  }
-
-  async createResourceAllocation(
-    projectId: string,
-    actingUserId: string,
-    userId: string,
-    allocationPercent: number,
-    roleLabel?: string,
-    startDate?: string,
-    endDate?: string,
-  ) {
-    const project = await this.getProject(projectId, actingUserId);
-    if (!project || !project.workspaceId) {
-      throw new BadRequestException('Project or workspace not found');
-    }
-    await this.assertWorkspaceRole(project.workspaceId, actingUserId, [WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
-    await this.assertWorkspaceMember(project.workspaceId, userId);
-
-    return this.prisma.resourceAllocation.create({
-      data: {
-        projectId,
-        userId,
-        allocationPercent,
-        roleLabel,
-        startDate: startDate ? new Date(startDate) : undefined,
-        endDate: endDate ? new Date(endDate) : undefined,
-      },
-    });
-  }
-
-  async createTimeBlock(taskId: string, userId: string, startTime: Date, endTime: Date) {
-    const task = await this.prisma.task.findFirst({
-      where: {
-        id: taskId,
-        deletedAt: null,
-        OR: [
-          { userId },
-          { project: { workspace: { memberships: { some: { userId } } } } },
-        ],
-      },
-    });
-    if (!task) {
-      throw new Error('Task not found or unauthorized');
-    }
-
-    return this.prisma.timeBlock.create({
-      data: {
-        taskId,
-        startTime,
-        endTime,
-      },
-    });
-  }
-
-  async getTimeBlocks(userId: string, start?: Date, end?: Date) {
-    return this.prisma.timeBlock.findMany({
-      where: {
-        task: {
-          deletedAt: null,
-          OR: [
-            { userId },
-            { project: { workspace: { memberships: { some: { userId } } } } },
-          ],
-        },
-        ...(start || end ? {
-          startTime: {
-            ...(start ? { gte: start } : {}),
-            ...(end ? { lt: end } : {}),
-          }
-        } : {})
-      },
-      include: {
-        task: {
-          include: {
-            project: true,
-            assignees: {
-              include: { user: { select: { id: true, name: true, email: true } } },
-            },
-          },
-        },
-      },
-    });
-  }
-
-  async updateTimeBlock(timeBlockId: string, userId: string, startTime: Date, endTime: Date) {
-    const timeBlock = await this.prisma.timeBlock.findFirst({
-      where: {
-        id: timeBlockId,
-        task: {
-          deletedAt: null,
-          OR: [
-            { userId },
-            { project: { workspace: { memberships: { some: { userId } } } } },
-          ],
-        },
-      },
-    });
-    if (!timeBlock) {
-      throw new Error('Time block not found or unauthorized');
-    }
-
-    return this.prisma.timeBlock.update({
-      where: { id: timeBlockId },
-      data: {
-        startTime,
-        endTime,
-      },
-    });
-  }
-
-  async deleteTimeBlock(timeBlockId: string, userId: string) {
-    const timeBlock = await this.prisma.timeBlock.findFirst({
-      where: {
-        id: timeBlockId,
-        task: {
-          deletedAt: null,
-          OR: [
-            { userId },
-            { project: { workspace: { memberships: { some: { userId } } } } },
-          ],
-        },
-      },
-    });
-    if (!timeBlock) {
-      throw new Error('Time block not found or unauthorized');
-    }
-
-    return this.prisma.timeBlock.delete({
-      where: { id: timeBlockId },
-    });
-  }
+  // ═══════════════════════════════════════════════════════════════════
+  //  GITHUB WEBHOOKS (logique propre)
+  // ═══════════════════════════════════════════════════════════════════
 
   private verifyGitHubSignature(payload: any, signature?: string): boolean {
     const secret = process.env.GITHUB_WEBHOOK_SECRET;
     if (!secret) {
-      // Si aucun secret n'est configuré, validation passive par défaut
       return true;
     }
     if (!signature) {
@@ -1070,26 +285,6 @@ export class ProjectsService {
       taskIds.push(match[1]);
     }
     return taskIds;
-  }
-
-  private async closeTaskFromWebhook(taskId: string): Promise<boolean> {
-    const task = await this.prisma.task.findFirst({
-      where: { id: taskId, deletedAt: null },
-    });
-    if (!task) {
-      return false;
-    }
-    if (task.status === TaskStatus.DONE) {
-      return false;
-    }
-    await this.prisma.task.update({
-      where: { id: taskId },
-      data: { status: TaskStatus.DONE, progress: 100 },
-    });
-    if (task.noteId) {
-      await this.notesService.syncTaskStatusToNote(taskId, TaskStatus.DONE);
-    }
-    return true;
   }
 
   async handleGitHubWebhook(payload: any, signature?: string): Promise<string[]> {
@@ -1119,7 +314,7 @@ export class ProjectsService {
 
     const closedIds: string[] = [];
     for (const taskId of taskIdsToClose) {
-      const success = await this.closeTaskFromWebhook(taskId);
+      const success = await this.tasksService.closeTaskFromWebhook(taskId);
       if (success) {
         closedIds.push(taskId);
       }
@@ -1128,107 +323,91 @@ export class ProjectsService {
     return closedIds;
   }
 
-  async optimizeWorkspaceResources(workspaceId: string, userId: string) {
-    await this.assertWorkspaceRole(workspaceId, userId, ['OWNER', 'ADMIN']);
+  // ═══════════════════════════════════════════════════════════════════
+  //  DÉLÉGATION AUX SOUS-SERVICES (compatibilité ascendante)
+  // ═══════════════════════════════════════════════════════════════════
 
-    const memberships = await this.prisma.membership.findMany({
-      where: { workspaceId },
-      include: { user: true },
-    });
+  // --- Tasks ---
+  createTask(projectId: string, userId: string, title: string, description?: string, priority?: TaskPriority, options?: any) {
+    return this.tasksService.createTask(projectId, userId, title, description, priority, options);
+  }
+  getTasks(projectId: string, userId: string) {
+    return this.tasksService.getTasks(projectId, userId);
+  }
+  updateTask(taskId: string, userId: string, data: UpdateTaskDto) {
+    return this.tasksService.updateTask(taskId, userId, data);
+  }
+  deleteTask(taskId: string, userId: string) {
+    return this.tasksService.deleteTask(taskId, userId);
+  }
 
-    await this.ensureResourceProfiles(workspaceId);
-    const profiles = await this.prisma.resourceProfile.findMany({
-      where: { workspaceId },
-    });
+  // --- Dependencies ---
+  addTaskDependency(taskId: string, userId: string, dependsOnTaskId: string, type?: DependencyType) {
+    return this.dependenciesService.addTaskDependency(taskId, userId, dependsOnTaskId, type);
+  }
+  removeTaskDependency(taskId: string, userId: string, dependsOnTaskId: string) {
+    return this.dependenciesService.removeTaskDependency(taskId, userId, dependsOnTaskId);
+  }
 
-    const openTasks = await this.prisma.task.findMany({
-      where: {
-        deletedAt: null,
-        status: { not: 'DONE' },
-        project: { workspaceId, deletedAt: null },
-      },
-      include: { assignees: true },
-    });
+  // --- TimeBlocks ---
+  createTimeBlock(taskId: string, userId: string, startTime: Date, endTime: Date) {
+    return this.timeBlocksService.createTimeBlock(taskId, userId, startTime, endTime);
+  }
+  getTimeBlocks(userId: string, start?: Date, end?: Date) {
+    return this.timeBlocksService.getTimeBlocks(userId, start, end);
+  }
+  updateTimeBlock(timeBlockId: string, userId: string, startTime: Date, endTime: Date) {
+    return this.timeBlocksService.updateTimeBlock(timeBlockId, userId, startTime, endTime);
+  }
+  deleteTimeBlock(timeBlockId: string, userId: string) {
+    return this.timeBlocksService.deleteTimeBlock(timeBlockId, userId);
+  }
 
-    if (openTasks.length === 0 || memberships.length === 0) {
-      return { success: true, message: 'Aucune tâche à optimiser.', reallocatedCount: 0 };
-    }
+  // --- Milestones & Governance ---
+  createMilestone(projectId: string, userId: string, name: string, description?: string, dueDate?: string) {
+    return this.milestonesService.createMilestone(projectId, userId, name, description, dueDate);
+  }
+  completeMilestone(milestoneId: string, userId: string) {
+    return this.milestonesService.completeMilestone(milestoneId, userId);
+  }
+  createDeliverable(projectId: string, userId: string, title: string, description?: string, status?: DeliverableStatus, dueDate?: string) {
+    return this.milestonesService.createDeliverable(projectId, userId, title, description, status, dueDate);
+  }
+  updateDeliverableStatus(deliverableId: string, userId: string, status: DeliverableStatus) {
+    return this.milestonesService.updateDeliverableStatus(deliverableId, userId, status);
+  }
+  createDelivery(projectId: string, userId: string, summary?: string, checklist?: string[]) {
+    return this.milestonesService.createDelivery(projectId, userId, summary, checklist);
+  }
+  updateDeliveryStatus(deliveryId: string, userId: string, status: DeliveryStatus) {
+    return this.milestonesService.updateDeliveryStatus(deliveryId, userId, status);
+  }
+  toggleDeliveryChecklistItem(itemId: string, userId: string) {
+    return this.milestonesService.toggleDeliveryChecklistItem(itemId, userId);
+  }
+  getDeliveryReport(projectId: string, userId: string) {
+    return this.milestonesService.getDeliveryReport(projectId, userId);
+  }
 
-    const developerLoads = new Map<string, number>();
-    memberships.forEach((m) => {
-      developerLoads.set(m.userId, 0);
-    });
+  // --- Resources ---
+  getResourceCapacityReport(userId: string, workspaceId?: string) {
+    return this.resourcesService.getResourceCapacityReport(userId, workspaceId);
+  }
+  updateResourceProfile(actingUserId: string, memberUserId: string, data: any, workspaceId?: string) {
+    return this.resourcesService.updateResourceProfile(actingUserId, memberUserId, data, workspaceId);
+  }
+  createResourceAllocation(projectId: string, actingUserId: string, userId: string, allocationPercent: number, roleLabel?: string, startDate?: string, endDate?: string) {
+    return this.resourcesService.createResourceAllocation(projectId, actingUserId, userId, allocationPercent, roleLabel, startDate, endDate);
+  }
+  optimizeWorkspaceResources(workspaceId: string, userId: string) {
+    return this.resourcesService.optimizeWorkspaceResources(workspaceId, userId);
+  }
 
-    const developerCapacities = new Map<string, number>();
-    memberships.forEach((m) => {
-      const profile = profiles.find((p) => p.userId === m.userId);
-      developerCapacities.set(m.userId, profile?.weeklyCapacityMinutes ?? 2400);
-    });
-
-    const priorityWeight = {
-      HIGH: 3,
-      MEDIUM: 2,
-      LOW: 1,
-    };
-
-    const sortedTasks = [...openTasks].sort((a, b) => {
-      const pA = priorityWeight[a.priority] || 2;
-      const pB = priorityWeight[b.priority] || 2;
-      if (pB !== pA) {
-        return pB - pA;
-      }
-      const tA = a.estimatedMinutes ?? 120;
-      const tB = b.estimatedMinutes ?? 120;
-      return tB - tA;
-    });
-
-    const reallocations: { taskId: string; userId: string }[] = [];
-
-    for (const task of sortedTasks) {
-      const taskMinutes = task.estimatedMinutes ?? 120;
-
-      let bestUserId = memberships[0].userId;
-      let lowestLoadRatio = Infinity;
-
-      for (const m of memberships) {
-        const currentLoad = developerLoads.get(m.userId) || 0;
-        const capacity = developerCapacities.get(m.userId) || 2400;
-        const ratio = capacity > 0 ? currentLoad / capacity : Infinity;
-
-        if (ratio < lowestLoadRatio) {
-          lowestLoadRatio = ratio;
-          bestUserId = m.userId;
-        }
-      }
-
-      const isAlreadyAssignedOnlyToBest =
-        task.assignees.length === 1 && task.assignees[0].userId === bestUserId;
-
-      if (!isAlreadyAssignedOnlyToBest) {
-        reallocations.push({ taskId: task.id, userId: bestUserId });
-      }
-
-      const currentLoad = developerLoads.get(bestUserId) || 0;
-      developerLoads.set(bestUserId, currentLoad + taskMinutes);
-    }
-
-    for (const realloc of reallocations) {
-      await this.prisma.taskAssignee.deleteMany({
-        where: { taskId: realloc.taskId },
-      });
-      await this.prisma.taskAssignee.create({
-        data: {
-          taskId: realloc.taskId,
-          userId: realloc.userId,
-        },
-      });
-    }
-
-    return {
-      success: true,
-      message: `Optimisation réussie. ${reallocations.length} tâches réallouées.`,
-      reallocatedCount: reallocations.length,
-      reallocatedTaskIds: reallocations.map((r) => r.taskId),
-    };
+  // --- Finances ---
+  getProjectFinances(projectId: string, userId: string) {
+    return this.financesService.getProjectFinances(projectId, userId);
+  }
+  getWorkspaceFinancialSummary(workspaceId: string, userId: string) {
+    return this.financesService.getWorkspaceFinancialSummary(workspaceId, userId);
   }
 }
