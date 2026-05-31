@@ -3,6 +3,12 @@ import { ProjectsService } from './projects.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotesService } from '../notes/notes.service';
 import { IntegrationService } from './integration.service';
+import { TasksService } from './tasks.service';
+import { DependenciesService } from './dependencies.service';
+import { TimeBlocksService } from './timeblocks.service';
+import { MilestonesService } from './milestones.service';
+import { ResourcesService } from './resources.service';
+import { FinancesService } from './finances.service';
 import * as crypto from 'crypto';
 
 describe('ProjectsService - GitHub Webhooks', () => {
@@ -39,6 +45,49 @@ describe('ProjectsService - GitHub Webhooks', () => {
     sendNotification: jest.fn().mockResolvedValue(undefined),
   };
 
+  const mockTasksService = {
+    createTask: jest.fn(),
+    getTasks: jest.fn(),
+    updateTask: jest.fn(),
+    deleteTask: jest.fn(),
+    closeTaskFromWebhook: jest.fn(),
+  };
+
+  const mockDependenciesService = {
+    addTaskDependency: jest.fn(),
+    removeTaskDependency: jest.fn(),
+  };
+
+  const mockTimeBlocksService = {
+    createTimeBlock: jest.fn(),
+    getTimeBlocks: jest.fn(),
+    updateTimeBlock: jest.fn(),
+    deleteTimeBlock: jest.fn(),
+  };
+
+  const mockMilestonesService = {
+    createMilestone: jest.fn(),
+    completeMilestone: jest.fn(),
+    createDeliverable: jest.fn(),
+    updateDeliverableStatus: jest.fn(),
+    createDelivery: jest.fn(),
+    updateDeliveryStatus: jest.fn(),
+    toggleDeliveryChecklistItem: jest.fn(),
+    getDeliveryReport: jest.fn(),
+  };
+
+  const mockResourcesService = {
+    getResourceCapacityReport: jest.fn(),
+    updateResourceProfile: jest.fn(),
+    createResourceAllocation: jest.fn(),
+    optimizeWorkspaceResources: jest.fn(),
+  };
+
+  const mockFinancesService = {
+    getProjectFinances: jest.fn(),
+    getWorkspaceFinancialSummary: jest.fn(),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -46,6 +95,12 @@ describe('ProjectsService - GitHub Webhooks', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: NotesService, useValue: mockNotesService },
         { provide: IntegrationService, useValue: mockIntegration },
+        { provide: TasksService, useValue: mockTasksService },
+        { provide: DependenciesService, useValue: mockDependenciesService },
+        { provide: TimeBlocksService, useValue: mockTimeBlocksService },
+        { provide: MilestonesService, useValue: mockMilestonesService },
+        { provide: ResourcesService, useValue: mockResourcesService },
+        { provide: FinancesService, useValue: mockFinancesService },
       ],
     }).compile();
 
@@ -127,27 +182,12 @@ describe('ProjectsService - GitHub Webhooks', () => {
         },
       };
 
-      mockPrisma.task.findFirst.mockResolvedValue({
-        id: mockTaskId,
-        status: 'TODO',
-        noteId: 'some-note-id',
-      });
-      mockPrisma.task.update.mockResolvedValue({
-        id: mockTaskId,
-        status: 'DONE',
-      });
+      mockTasksService.closeTaskFromWebhook.mockResolvedValue(true);
 
       const closedIds = await service.handleGitHubWebhook(payload);
 
       expect(closedIds).toContain(mockTaskId);
-      expect(mockPrisma.task.findFirst).toHaveBeenCalledWith({
-        where: { id: mockTaskId, deletedAt: null },
-      });
-      expect(mockPrisma.task.update).toHaveBeenCalledWith({
-        where: { id: mockTaskId },
-        data: { status: 'DONE', progress: 100 },
-      });
-      expect(mockNotesService.syncTaskStatusToNote).toHaveBeenCalledWith(mockTaskId, 'DONE');
+      expect(mockTasksService.closeTaskFromWebhook).toHaveBeenCalledWith(mockTaskId);
     });
 
     it('devrait fermer les tâches issues de messages de commits lors d\'un push', async () => {
@@ -157,21 +197,12 @@ describe('ProjectsService - GitHub Webhooks', () => {
         ],
       };
 
-      mockPrisma.task.findFirst.mockResolvedValue({
-        id: mockTaskId,
-        status: 'IN_PROGRESS',
-        noteId: null,
-      });
+      mockTasksService.closeTaskFromWebhook.mockResolvedValue(true);
 
       const closedIds = await service.handleGitHubWebhook(payload);
 
       expect(closedIds).toContain(mockTaskId);
-      expect(mockPrisma.task.update).toHaveBeenCalledWith({
-        where: { id: mockTaskId },
-        data: { status: 'DONE', progress: 100 },
-      });
-      // noteId est null, donc syncTaskStatusToNote ne devrait pas être appelé
-      expect(mockNotesService.syncTaskStatusToNote).not.toHaveBeenCalled();
+      expect(mockTasksService.closeTaskFromWebhook).toHaveBeenCalledWith(mockTaskId);
     });
 
     it('ne devrait rien faire si la PR est fermée sans être fusionnée', async () => {
@@ -186,140 +217,61 @@ describe('ProjectsService - GitHub Webhooks', () => {
 
       const closedIds = await service.handleGitHubWebhook(payload);
       expect(closedIds).toHaveLength(0);
-      expect(mockPrisma.task.findFirst).not.toHaveBeenCalled();
+      expect(mockTasksService.closeTaskFromWebhook).not.toHaveBeenCalled();
     });
   });
 
-  describe('optimizeWorkspaceResources', () => {
+  describe('optimizeWorkspaceResources (délégation)', () => {
     const workspaceId = 'workspace-123';
     const userId = 'user-owner';
 
-    it('devrait jeter une erreur si le rôle de l\'utilisateur n\'est ni OWNER ni ADMIN', async () => {
-      mockPrisma.membership.findFirst.mockResolvedValue({
-        userId: 'user-member',
-        role: 'MEMBER',
-      });
-
-      await expect(
-        service.optimizeWorkspaceResources(workspaceId, 'user-member')
-      ).rejects.toThrow(/Unauthorized/);
-    });
-
-    it('devrait répartir les tâches selon l\'algorithme glouton (priorité et temps)', async () => {
-      mockPrisma.membership.findFirst.mockResolvedValue({
-        userId,
-        role: 'OWNER',
-      });
-
-      mockPrisma.membership.findMany.mockResolvedValue([
-        { userId: 'dev-A', user: { id: 'dev-A', name: 'Développeur A' } },
-        { userId: 'dev-B', user: { id: 'dev-B', name: 'Développeur B' } },
-      ]);
-
-      mockPrisma.resourceProfile.findMany.mockResolvedValue([
-        { userId: 'dev-A', weeklyCapacityMinutes: 1000 },
-        { userId: 'dev-B', weeklyCapacityMinutes: 2000 },
-      ]);
-
-      mockPrisma.task.findMany.mockResolvedValue([
-        { id: 'task-1', priority: 'HIGH', estimatedMinutes: 600, assignees: [] },
-        { id: 'task-2', priority: 'HIGH', estimatedMinutes: 400, assignees: [] },
-        { id: 'task-3', priority: 'MEDIUM', estimatedMinutes: 500, assignees: [] },
-      ]);
-
-      mockPrisma.taskAssignee.deleteMany.mockResolvedValue({ count: 1 });
-      mockPrisma.taskAssignee.create.mockResolvedValue({});
+    it('devrait déléguer l\'optimisation à ResourcesService', async () => {
+      const mockResult = {
+        success: true,
+        message: 'Optimisation réussie. 3 tâches réallouées.',
+        reallocatedCount: 3,
+        reallocatedTaskIds: ['task-1', 'task-2', 'task-3'],
+      };
+      mockResourcesService.optimizeWorkspaceResources.mockResolvedValue(mockResult);
 
       const result = await service.optimizeWorkspaceResources(workspaceId, userId);
 
-      expect(result.success).toBe(true);
-      expect(result.reallocatedCount).toBe(3);
-
-      expect(mockPrisma.taskAssignee.create).toHaveBeenCalledWith({
-        data: { taskId: 'task-1', userId: 'dev-A' },
-      });
-      expect(mockPrisma.taskAssignee.create).toHaveBeenCalledWith({
-        data: { taskId: 'task-2', userId: 'dev-B' },
-      });
-      expect(mockPrisma.taskAssignee.create).toHaveBeenCalledWith({
-        data: { taskId: 'task-3', userId: 'dev-B' },
-      });
+      expect(result).toEqual(mockResult);
+      expect(mockResourcesService.optimizeWorkspaceResources).toHaveBeenCalledWith(workspaceId, userId);
     });
   });
 
-  describe('ProjectsService - Auto-scheduling (Effet Domino)', () => {
-    it('devrait propager récursivement les décalages de dates aux tâches dépendantes', async () => {
-      const taskB = {
-        id: 'task-B',
-        startDate: new Date('2026-06-01T08:00:00Z'),
-        dueDate: new Date('2026-06-01T12:00:00Z'),
-      };
-
-      const mockTx = {
-        taskDependency: {
-          findMany: jest.fn().mockResolvedValue([
-            {
-              taskId: 'task-B',
-              dependsOnTaskId: 'task-A',
-              type: 'FINISH_TO_START',
-              task: taskB,
-            },
-          ]),
-        },
-        task: {
-          update: jest.fn().mockResolvedValue({}),
-        },
-      };
-
-      const visited = new Set<string>(['task-A']);
-      const impactedIds: string[] = [];
-      const newDueDateA = new Date('2026-06-01T10:00:00Z');
-
-      // @ts-ignore
-      await service.propagateScheduleUpdates('task-A', newDueDateA, visited, mockTx, impactedIds);
-
-      expect(mockTx.task.update).toHaveBeenCalledWith({
-        where: { id: 'task-B' },
-        data: {
-          startDate: new Date('2026-06-01T10:00:00Z'),
-          dueDate: new Date('2026-06-01T14:00:00Z'),
-        },
-      });
-      expect(impactedIds).toContain('task-B');
+  describe('Délégation Tasks, Dependencies, TimeBlocks, Milestones, Finances', () => {
+    it('devrait déléguer createTask à TasksService', async () => {
+      mockTasksService.createTask.mockResolvedValue({ id: 'task-new' });
+      await service.createTask('proj-1', 'user-1', 'Test');
+      expect(mockTasksService.createTask).toHaveBeenCalledWith('proj-1', 'user-1', 'Test', undefined, undefined, undefined);
     });
 
-    it('ne devrait pas décaler si la fin du parent ne dépasse pas le début de l\'enfant', async () => {
-      const taskB = {
-        id: 'task-B',
-        startDate: new Date('2026-06-01T12:00:00Z'),
-        dueDate: new Date('2026-06-01T16:00:00Z'),
-      };
+    it('devrait déléguer addTaskDependency à DependenciesService', async () => {
+      mockDependenciesService.addTaskDependency.mockResolvedValue({ id: 'dep-1' });
+      await service.addTaskDependency('task-1', 'user-1', 'task-2');
+      expect(mockDependenciesService.addTaskDependency).toHaveBeenCalledWith('task-1', 'user-1', 'task-2', undefined);
+    });
 
-      const mockTx = {
-        taskDependency: {
-          findMany: jest.fn().mockResolvedValue([
-            {
-              taskId: 'task-B',
-              dependsOnTaskId: 'task-A',
-              type: 'FINISH_TO_START',
-              task: taskB,
-            },
-          ]),
-        },
-        task: {
-          update: jest.fn(),
-        },
-      };
+    it('devrait déléguer createTimeBlock à TimeBlocksService', async () => {
+      const start = new Date();
+      const end = new Date(start.getTime() + 3600000);
+      mockTimeBlocksService.createTimeBlock.mockResolvedValue({ id: 'tb-1' });
+      await service.createTimeBlock('task-1', 'user-1', start, end);
+      expect(mockTimeBlocksService.createTimeBlock).toHaveBeenCalledWith('task-1', 'user-1', start, end);
+    });
 
-      const visited = new Set<string>(['task-A']);
-      const impactedIds: string[] = [];
-      const newDueDateA = new Date('2026-06-01T10:00:00Z');
+    it('devrait déléguer getProjectFinances à FinancesService', async () => {
+      mockFinancesService.getProjectFinances.mockResolvedValue({ projectId: 'proj-1', actualCostCents: 5000 });
+      await service.getProjectFinances('proj-1', 'user-1');
+      expect(mockFinancesService.getProjectFinances).toHaveBeenCalledWith('proj-1', 'user-1');
+    });
 
-      // @ts-ignore
-      await service.propagateScheduleUpdates('task-A', newDueDateA, visited, mockTx, impactedIds);
-
-      expect(mockTx.task.update).not.toHaveBeenCalled();
-      expect(impactedIds.length).toBe(0);
+    it('devrait déléguer getDeliveryReport à MilestonesService', async () => {
+      mockMilestonesService.getDeliveryReport.mockResolvedValue({ project: { id: 'proj-1' } });
+      await service.getDeliveryReport('proj-1', 'user-1');
+      expect(mockMilestonesService.getDeliveryReport).toHaveBeenCalledWith('proj-1', 'user-1');
     });
   });
 });

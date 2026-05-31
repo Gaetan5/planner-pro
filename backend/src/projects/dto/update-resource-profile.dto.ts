@@ -17,4 +17,10 @@ export class UpdateResourceProfileDto {
   @Min(0)
   @IsOptional()
   costRateCents?: number;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  billingRateCents?: number;
 }
