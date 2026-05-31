@@ -9,7 +9,7 @@
 ## 📊 Matrice de Couverture Synthétique
 
 | Phase | Intitulé | Backend | Frontend | Maturité | Verdict |
-|:---:|:---|:---:|:---:|:---:|:---|
+| :---: | :--- | :---: | :---: | :---: | :--- |
 | 1 | Collaboration Réelle | ✅ 85% | ✅ 75% | **80%** | Solide, manque l'envoi d'email |
 | 2 | Commentaires & Communication | ✅ 90% | ✅ 80% | **85%** | Très avancé |
 | 3 | Assistant IA de Productivité | ✅ 95% | ✅ 85% | **90%** | Le plus mature |
@@ -28,7 +28,7 @@
 
 ## Phase 1 — Collaboration Réelle
 
-### ✅ Ce qui est fait (Backend)
+### ✅ Ce qui est fait (Backend) — Collaboration
 
 - Modèle [Workspace](file:///home/gaetan/Documents/GitHub/planner-pro/backend/prisma/schema.prisma#L36-L53) complet avec `ownerId`, soft delete
 - Modèle [Membership](file:///home/gaetan/Documents/GitHub/planner-pro/backend/prisma/schema.prisma#L55-L66) avec contrainte unique `(workspaceId, userId)`
@@ -39,12 +39,12 @@
 - `ensureDefaultWorkspace()` dans [ProjectsService](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/projects/projects.service.ts#L19-L45) — auto-provisionne un workspace pour les nouveaux utilisateurs
 - Modèle [Team](file:///home/gaetan/Documents/GitHub/planner-pro/backend/prisma/schema.prisma#L68-L78) présent mais **non exploité**
 
-### ✅ Ce qui est fait (Frontend)
+### ✅ Ce qui est fait (Frontend) — Collaboration
 
 - Composant [InvitationAcceptance.tsx](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/components/InvitationAcceptance.tsx) — flux complet d'acceptation d'invitation par lien
 - Gestion des workspaces dans [AppContext.tsx](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/context/AppContext.tsx) — chargement, sélection, membres
 
-### ⚠️ Ce qui manque
+### ⚠️ Ce qui manque — Collaboration
 
 - **Aucun service d'envoi d'email** — L'invitation par email est stockée en BDD, mais **jamais envoyée** (ni Nodemailer, ni SendGrid, ni Resend)
 - **Le modèle `Team`** est dans le schéma mais **zéro logique métier associée** — pas d'assignation par équipe, pas de vue équipe
@@ -57,7 +57,7 @@
 
 ## Phase 2 — Commentaires et Communication
 
-### ✅ Ce qui est fait (Backend)
+### ✅ Ce qui est fait (Backend) — Commentaires
 
 - Modèle [Comment](file:///home/gaetan/Documents/GitHub/planner-pro/backend/prisma/schema.prisma#L409-L421) avec index sur `taskId` et `userId`
 - [CommentsService](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/projects/comments.service.ts) complet :
@@ -68,12 +68,12 @@
   - Notification webhook Slack/Teams à chaque commentaire
 - [CommentsController](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/projects/comments.controller.ts) avec routes REST
 
-### ✅ Ce qui est fait (Frontend)
+### ✅ Ce qui est fait (Frontend) — Commentaires
 
 - Composant [TaskCommentsPanel.tsx](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/components/TaskCommentsPanel.tsx) — UI panel de commentaires avec avatars
 - [TaskCommentsPanel.css](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/components/TaskCommentsPanel.css) — style premium
 
-### ⚠️ Ce qui manque
+### ⚠️ Ce qui manque — Commentaires
 
 - **Pas de réponse hiérarchique** (replies / thread) — le modèle `Comment` est plat (pas de `parentId`)
 - **Pas de pièces jointes** (fichiers, images)
@@ -87,7 +87,7 @@
 
 ## Phase 3 — Assistant IA de Productivité
 
-### ✅ Ce qui est fait (Backend)
+### ✅ Ce qui est fait (Backend) — IA
 
 - [GeminiService](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/notes/gemini.service.ts) — intégration Gemini 1.5 Flash :
   - `extractTasksFromText()` — extraction NLP de tâches depuis Markdown avec dates, assignations, états
@@ -101,12 +101,12 @@
   - Mode mock complet pour les tests sans clé API
 - [AiController](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/projects/ai.controller.ts)
 
-### ✅ Ce qui est fait (Frontend)
+### ✅ Ce qui est fait (Frontend) — IA
 
 - [AiCommandBar.tsx](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/components/AiCommandBar.tsx) — barre de commande IA avec preview des actions avant exécution
 - [CommandPalette.tsx](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/components/CommandPalette.tsx) — raccourci ⌘+K / Ctrl+K
 
-### ⚠️ Ce qui manque
+### ⚠️ Ce qui manque — IA
 
 - **Pas d'historique des commandes IA** — aucune trace en BDD
 - **Pas de versioning des prompts** — les prompts sont hardcodés dans le service
@@ -118,17 +118,17 @@
 
 ## Phase 4 — Capture Vocale
 
-### ✅ Ce qui est fait (Backend)
+### ✅ Ce qui est fait (Backend) — Capture Vocale
 
 - `transcribeAudio()` dans [GeminiService](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/notes/gemini.service.ts#L257-L283) — transcription audio via Gemini 1.5 Flash multimodal
 - `transcribeAndAnalyzeVoice()` dans [AiService](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/projects/ai.service.ts#L317-L343) — pipeline complet : Audio → Transcription → Analyse NLP → Actions résolues
 - Mode mock intégré
 
-### ✅ Ce qui est fait (Frontend)
+### ✅ Ce qui est fait (Frontend) — Capture Vocale
 
 - Intégré dans [AiCommandBar.tsx](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/components/AiCommandBar.tsx) — bouton micro avec `MediaRecorder` API
 
-### ⚠️ Ce qui manque
+### ⚠️ Ce qui manque — Capture Vocale
 
 - **Pas de streaming en temps réel** — la transcription attend la fin de l'enregistrement complet
 - **Pas d'API dédiée type Whisper/Deepgram** — tout passe par Gemini qui n'est pas optimal pour l'audio long
@@ -140,17 +140,17 @@
 
 ## Phase 5 — OCR & Whiteboard Import
 
-### ✅ Ce qui est fait (Backend)
+### ✅ Ce qui est fait (Backend) — OCR
 
 - `analyzeImage()` dans [GeminiService](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/notes/gemini.service.ts#L289-L392) — analyse d'image via Gemini Vision avec Structured Output JSON
 - `analyzeImageAndResolve()` dans [AiService](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/projects/ai.service.ts#L87-L114) — pipeline complet : Image → Analyse Vision → Actions résolues
 - Endpoint multer pour upload dans [AiController](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/projects/ai.controller.ts)
 
-### ✅ Ce qui est fait (Frontend)
+### ✅ Ce qui est fait (Frontend) — OCR
 
 - Upload d'image dans [AiCommandBar.tsx](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/components/AiCommandBar.tsx)
 
-### ⚠️ Ce qui manque
+### ⚠️ Ce qui manque — OCR
 
 - **Pas de caméra live** — uniquement upload de fichier
 - **Pas d'OCR dédié** (Tesseract, Google Vision) — tout repose sur Gemini Vision
@@ -162,7 +162,7 @@
 
 ## Phase 6 — Copilote Proactif
 
-### ✅ Ce qui est fait (Backend)
+### ✅ Ce qui est fait (Backend) — Copilote
 
 - [CopilotService](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/projects/copilot.service.ts) complet :
   - `calculatePredictiveAlerts()` — moteur de règles heuristiques avec 4 types d'alertes :
@@ -173,12 +173,12 @@
   - `generateBriefing()` — Daily Briefing IA personnalisé via Gemini avec données contextuelles (tâches, jalons, alertes)
   - Mode mock pour briefings de qualité sans API
 
-### ✅ Ce qui est fait (Frontend)
+### ✅ Ce qui est fait (Frontend) — Copilote
 
 - [CopilotWidget.tsx](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/components/CopilotWidget.tsx) — widget panneau latéral avec affichage des alertes et briefing
 - [CopilotWidget.css](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/components/CopilotWidget.css) — design premium
 
-### ⚠️ Ce qui manque
+### ⚠️ Ce qui manque — Copilote
 
 - **Pas de cron/scheduler** — les alertes sont calculées à la demande, pas en arrière-plan
 - **Pas de notification push** — pas de badge, pas de notification navigateur
@@ -190,7 +190,7 @@
 
 ## Phase 7 — Synchronisation Réelle
 
-### ⚠️ Ce qui est fait (Backend)
+### ⚠️ Ce qui est fait (Backend) — Synchro
 
 - Modèle [Integration](file:///home/gaetan/Documents/GitHub/planner-pro/backend/prisma/schema.prisma#L423-L436) — supporte `SLACK`, `TEAMS`, `GOOGLE_CALENDAR`, `OUTLOOK`
 - [IntegrationService](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/projects/integration.service.ts) — CRUD intégrations + webhook fire-and-forget vers Slack/Teams
@@ -198,7 +198,7 @@
   - `exportToCalendar()` — récupère les TimeBlocks mais ne fait aucun appel API réel
   - `detectCalendarConflicts()` — détection de conflits avec **événements hardcodés simulés**
 
-### ✅ Ce qui est fait (Frontend)
+### ✅ Ce qui est fait (Frontend) — Synchro
 
 - [IntegrationsPanel.tsx](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/components/IntegrationsPanel.tsx) — panneau de configuration des intégrations
 
@@ -215,7 +215,7 @@
 
 ## Phase 8 — Auto Scheduling Intelligent
 
-### ✅ Ce qui est fait (Backend)
+### ✅ Ce qui est fait (Backend) — Auto Scheduling
 
 - `propagateScheduleUpdates()` dans [ProjectsService](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/projects/projects.service.ts#L561-L611) — **Effet domino complet** :
   - Propagation récursive en transaction Prisma
@@ -224,7 +224,7 @@
 - Notification WebSocket `task-schedule-propagated` dans [ProjectsController](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/projects/projects.controller.ts#L243-L251)
 - `optimizeWorkspaceResources()` dans [ProjectsService](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/projects/projects.service.ts#L1137-L1239) — algorithme glouton de réallocation par charge/capacité
 
-### ⚠️ Ce qui manque
+### ⚠️ Ce qui manque — Auto Scheduling
 
 - **Pas de recalcul automatique global** — l'effet domino se déclenche uniquement quand l'utilisateur modifie un `dueDate` manuellement
 - **Pas de Critical Path Method (CPM)** implémenté
@@ -238,7 +238,7 @@
 
 ## Phase 9 — Agile Professionnel
 
-### ✅ Ce qui est fait (Backend)
+### ✅ Ce qui est fait (Backend) — Agile
 
 - Modèle [Sprint](file:///home/gaetan/Documents/GitHub/planner-pro/backend/prisma/schema.prisma#L438-L451) avec `SprintStatus` (`PLANNED`, `ACTIVE`, `COMPLETED`)
 - Champ `storyPoints` et `sprintId` sur [Task](file:///home/gaetan/Documents/GitHub/planner-pro/backend/prisma/schema.prisma#L237-L239)
@@ -250,7 +250,7 @@
   - `getBurndownChart()` — données burndown jour par jour (réel vs idéal)
 - Routes dans [ProjectsController](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/projects/projects.controller.ts#L349-L402)
 
-### ✅ Ce qui est fait (Frontend)
+### ✅ Ce qui est fait (Frontend) — Agile
 
 - [AgileView.tsx](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/components/AgileView.tsx) — vue Agile complète avec :
   - Backlog
@@ -259,7 +259,7 @@
   - Graphique Burndown
   - Affichage de la vélocité
 
-### ⚠️ Ce qui manque
+### ⚠️ Ce qui manque — Agile
 
 - **Pas de Cumulative Flow Diagram (CFD)**
 - **Pas de Sprint Retrospective** automatisée
@@ -272,7 +272,7 @@
 
 ## Phase 10 — Gantt Nouvelle Génération
 
-### ✅ Ce qui est fait (Frontend)
+### ✅ Ce qui est fait (Frontend) — Gantt
 
 - [GanttView.tsx](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/components/GanttView.tsx) — composant Gantt custom :
   - Rendu SVG
@@ -280,7 +280,7 @@
   - Lignes de dépendances visuelles
 - [GanttView.css](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/components/GanttView.css) — 13K de CSS
 
-### ⚠️ Ce qui manque
+### ⚠️ Ce qui manque — Gantt
 
 - **Pas de drag & drop** sur les barres Gantt — la modification des dates se fait uniquement via les modales
 - **Pas de zoom dynamique** (jour/semaine/mois/trimestre)
@@ -294,7 +294,7 @@
 
 ## Phase 11 — Finances & Rentabilité
 
-### ✅ Ce qui est fait (Backend) — **LE PLUS AVANCÉ**
+### ✅ Ce qui est fait (Backend) — Finances — **LE PLUS AVANCÉ**
 
 - [getProjectFinances()](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/projects/projects.service.ts#L1241-L1335) — calcul complet :
   - Coût réel basé sur `costRateCents` × heures TrackLogs
@@ -308,7 +308,7 @@
 - Champs `budgetCents` et `billingType` sur [Project](file:///home/gaetan/Documents/GitHub/planner-pro/backend/prisma/schema.prisma#L99-L100)
 - DTO [UpdateProjectFinancesDto](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/projects/dto/update-project-finances.dto.ts)
 
-### ⚠️ Ce qui manque (Frontend)
+### ⚠️ Ce qui manque (Frontend) — Finances
 
 - **Pas de vue dédiée "Finances"** dans le frontend — les données sont disponibles via API mais **pas affichées**
 - **Pas de graphiques budgétaires** (burn rate, tendance de marge)
@@ -321,13 +321,13 @@
 
 ## Phase 12 — Gestion de Portefeuille
 
-### ⚠️ Ce qui est fait
+### ⚠️ Ce qui est fait — Portefeuille
 
 - `getDeliveryReport()` dans [ProjectsService](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/projects/projects.service.ts#L751-L809) — KPIs par projet (taux de complétion, temps tracké, livrables, jalons)
 - [GovernanceView.tsx](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/components/GovernanceView.tsx) — vue de gouvernance avec phases, milestones, deliverables, delivery checklist
 - [DashboardContent.tsx](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/components/DashboardContent.tsx) — dashboard de base
 
-### ❌ Ce qui manque
+### ❌ Ce qui manque — Portefeuille
 
 - **Pas de Health Score Projet (0-100)** — aucun calcul composite
 - **Pas de Dashboard exécutif** cross-projets — `getWorkspaceFinancialSummary` existe backend mais rien en frontend
@@ -340,13 +340,13 @@
 
 ## Phase 13 — RBAC Avancé
 
-### ⚠️ Ce qui est fait
+### ⚠️ Ce qui est fait — RBAC
 
 - 4 rôles workspace via l'enum [WorkspaceRole](file:///home/gaetan/Documents/GitHub/planner-pro/backend/prisma/schema.prisma#L373-L378) : `OWNER`, `ADMIN`, `MEMBER`, `VIEWER`
 - `assertWorkspaceRole()` utilisé partout pour les actions sensibles (finances, optimisation, milestones, deliverables)
 - Le rôle `VIEWER` existe mais **n'est pas exploité** — aucune restriction de lecture
 
-### ❌ Ce qui manque (CRITIQUE pour la collaboration)
+### ❌ Ce qui manque — RBAC (CRITIQUE pour la collaboration)
 
 - **Pas de rôle par projet** — un `MEMBER` a accès à TOUS les projets du workspace
 - **Pas de rôle `Commenter`** — soit on est MEMBER (tout accès), soit VIEWER (passif)
@@ -361,7 +361,7 @@
 ## Fonctionnalités Différenciantes
 
 | Feature | Status | Détail |
-|:---|:---:|:---|
+| :--- | :---: | :--- |
 | Daily Briefing IA | ✅ **Fait** | `generateBriefing()` dans CopilotService avec Gemini + mode mock |
 | Health Score Projet | ❌ **Absent** | Aucun calcul composite |
 | Burnout Detector | ⚠️ **Partiel** | Surcharge détectée via estimations, pas via temps réel |
@@ -383,33 +383,23 @@
 ### Points Faibles (ce qui pose problème)
 
 > [!CAUTION]
->
 > ### 1. God Service Anti-Pattern
->
 > Le fichier [projects.service.ts](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/projects/projects.service.ts) fait **1376 lignes** et gère : projets, tâches, dépendances, TimeBlocks, milestones, deliverables, deliveries, resources, finances, GitHub webhooks, et optimisation. C'est un **God Object** flagrant qui viole le Single Responsibility Principle. Chaque domaine devrait avoir son propre service.
 
 > [!WARNING]
->
 > ### 2. Décalage Frontend / Backend
->
 > Le backend est significativement plus avancé que le frontend. Les finances, le financial summary workspace, et plusieurs APIs de données n'ont **aucune interface utilisateur**. On a un moteur de Ferrari avec une carrosserie de Clio.
 
 > [!WARNING]
->
 > ### 3. Synchronisation Calendar = Vaporware
->
 > Le CalendarSyncService est entièrement simulé avec des données hardcodées. Les événements "Alice dentiste" et "Gaëtan Comité de Direction" en dur dans le code ne trompent personne. Pas un seul appel OAuth ni API Calendar réel.
 
 > [!IMPORTANT]
->
 > ### 4. Pas de système de notifications
->
 > Aucun modèle `Notification` en BDD, aucune notification in-app, aucun badge, aucun compteur non-lu. Les mentions dans les commentaires sont détectées mais **tombent dans le vide**. Pour un outil collaboratif, c'est un manque fondamental.
 
 > [!IMPORTANT]
->
 > ### 5. Le VIEWER ne voit rien de spécial
->
 > Le rôle VIEWER existe dans l'enum mais n'est implémenté nulle part. Un VIEWER peut potentiellement créer des tâches si l'interface lui laisse.
 
 ---
@@ -419,7 +409,7 @@
 En respectant les principes sacrés (Simplicité > Complexité, Automatisation > Saisie Manuelle), voici mon ordre recommandé **révisé** :
 
 | Priorité | Action | Impact | Effort |
-|:---:|:---|:---:|:---:|
+| :---: | :--- | :---: | :---: |
 | **P0** | Refactorer ProjectsService en sous-services | 🏗️ Maintenabilité | 2-3j |
 | **P0** | Créer le modèle `Notification` + WebSocket temps réel | 👥 Collaboration | 3-4j |
 | **P1** | Frontend Phase 11 — Vue Finances + graphiques | 💰 Valeur business | 2-3j |
