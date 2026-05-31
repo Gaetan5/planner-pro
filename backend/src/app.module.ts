@@ -9,6 +9,7 @@ import { TrackingModule } from './tracking/tracking.module';
 import { NotesModule } from './notes/notes.module';
 import { AuthModule } from './auth/auth.module';
 import { RedisModule } from './redis/redis.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { RedisModule } from './redis/redis.module';
     NotesModule,
     AuthModule,
     RedisModule,
+    NotificationsModule,
   ],
   controllers: [AppController],
   providers: [

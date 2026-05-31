@@ -27,8 +27,11 @@ model User {
   resourceAllocations ResourceAllocation[]
   notes             Note[]
   refreshTokens     RefreshToken[]
+  timeLogs          TimeLog[]
   sentInvitations   Invitation[]   @relation("SentInvitations")
   comments          Comment[]
+  notifications     Notification[] @relation("UserNotifications")
+  sentNotifications Notification[] @relation("SentNotifications")
   createdAt         DateTime       @default(now())
 }
 
@@ -95,6 +98,8 @@ model Project {
   resourceAllocations ResourceAllocation[]
   tasks       Task[]
   invitations Invitation[]
+  budgetCents  Int?
+  billingType  String?   @default("TIME_AND_MATERIALS")
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
@@ -156,6 +161,7 @@ model ResourceProfile {
   weeklyCapacityMinutes Int       @default(2400)
   skills                String?   @db.Text
   costRateCents         Int?
+  billingRateCents      Int?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
@@ -286,8 +292,11 @@ model TimeLog {
   duration  Int?      // in seconds
   taskId    String
   task      Task      @relation(fields: [taskId], references: [id])
+  userId    String?
+  user      User?     @relation(fields: [userId], references: [id])
 
   @@index([taskId])
+  @@index([userId])
 }
 
 model Note {
@@ -448,4 +457,23 @@ enum SprintStatus {
   ACTIVE
   COMPLETED
 }
+
+model Notification {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+  senderId    String?
+  sender      User?    @relation("SentNotifications", fields: [senderId], references: [id])
+  type        String   // "MENTION", "ASSIGNMENT", "SYSTEM", etc.
+  title       String
+  content     String   @db.Text
+  read        Boolean  @default(false)
+  taskId      String?
+  projectId   String?
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([senderId])
+}
+
 
