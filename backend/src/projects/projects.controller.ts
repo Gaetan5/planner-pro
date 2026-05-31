@@ -296,6 +296,64 @@ export class ProjectsController {
     return { closedTaskIds };
   }
 
+  @Public()
+  @Get('mock-calendar')
+  getMockCalendar(
+    @Query('format') format = 'ics',
+    @Query('email') email = 'alice@test.com'
+  ) {
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+    
+    // Événement 1 : aujourd'hui, de 10:00 à 12:00 UTC
+    const start1 = new Date(`${todayStr}T10:00:00Z`);
+    const end1 = new Date(`${todayStr}T12:00:00Z`);
+    
+    // Événement 2 : demain, de 14:00 à 16:00 UTC
+    const tomorrow = new Date(now);
+    tomorrow.setDate(now.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().split('T')[0];
+    const start2 = new Date(`${tomorrowStr}T14:00:00Z`);
+    const end2 = new Date(`${tomorrowStr}T16:00:00Z`);
+
+    if (format === 'json') {
+      return [
+        {
+          title: `Rendez-vous dentiste (Google Calendar - ${email})`,
+          start: start1.toISOString(),
+          end: end1.toISOString(),
+          userEmail: email,
+        },
+        {
+          title: `Comité de Direction (Outlook Calendar - ${email})`,
+          start: start2.toISOString(),
+          end: end2.toISOString(),
+          userEmail: email,
+        }
+      ];
+    } else {
+      const formatIcsDate = (d: Date) => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+      return `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Planner Pro//Mock Calendar//FR
+BEGIN:VEVENT
+UID:event-1
+SUMMARY:Rendez-vous dentiste (Google Calendar - ${email})
+DTSTART:${formatIcsDate(start1)}
+DTEND:${formatIcsDate(end1)}
+DESCRIPTION:Rendez-vous de contrôle
+END:VEVENT
+BEGIN:VEVENT
+UID:event-2
+SUMMARY:Comité de Direction (Outlook Calendar - ${email})
+DTSTART:${formatIcsDate(start2)}
+DTEND:${formatIcsDate(end2)}
+DESCRIPTION:Comité stratégique mensuel
+END:VEVENT
+END:VCALENDAR`;
+    }
+  }
+
   @Post('workspaces/:workspaceId/resources/optimize')
   async optimizeResources(
     @Req() req: any,

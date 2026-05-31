@@ -79,7 +79,7 @@ export const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({ workspaceI
         workspaceId,
         type,
         name,
-        (type === 'SLACK' || type === 'TEAMS') ? url : undefined,
+        url ? url : undefined,
         (type === 'GOOGLE_CALENDAR' || type === 'OUTLOOK') ? calendarId : undefined
       );
       // Reset form
@@ -248,16 +248,27 @@ export const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({ workspaceI
                 />
               </div>
             ) : (
-              <div className="form-group">
-                <label>ID / Adresse Email du Calendrier</label>
-                <input
-                  type="text"
-                  placeholder="Ex: primary ou user@domain.com"
-                  value={calendarId}
-                  onChange={(e) => setCalendarId(e.target.value)}
-                  required
-                />
-              </div>
+              <>
+                <div className="form-group">
+                  <label>ID / Adresse Email du Calendrier</label>
+                  <input
+                    type="text"
+                    placeholder="Ex: primary ou user@domain.com"
+                    value={calendarId}
+                    onChange={(e) => setCalendarId(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label>URL de flux (ICS / JSON ou Simulateur) — Optionnel</label>
+                  <input
+                    type="url"
+                    placeholder="Ex: http://localhost:3001/projects/mock-calendar?email=alice@test.com"
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                  />
+                </div>
+              </>
             )}
           </div>
 
