@@ -18,6 +18,8 @@ export const GanttView: React.FC = () => {
   const [timelineStartDate, setTimelineStartDate] = useState<Date>(new Date())
   const [timelineEndDate, setTimelineEndDate] = useState<Date>(new Date())
   const [datesArray, setDatesArray] = useState<Date[]>([])
+  const [showCriticalPath, setShowCriticalPath] = useState<boolean>(false)
+  const [criticalTaskIds, setCriticalTaskIds] = useState<string[]>([])
 
   // Drag & drop interaction states
   const [interaction, setInteraction] = useState<{
@@ -136,6 +138,32 @@ export const GanttView: React.FC = () => {
     }
     setDatesArray(dates)
   }, [timelineStartDate, timelineEndDate, zoomMode])
+
+  const { getProjectCriticalPath } = useApp()
+
+  useEffect(() => {
+    if (!showCriticalPath || workspaceProjects.length === 0) {
+      setCriticalTaskIds([])
+      return
+    }
+
+    const fetchCriticalPaths = async () => {
+      let allCriticalIds: string[] = []
+      for (const proj of workspaceProjects) {
+        try {
+          const pathRes = await getProjectCriticalPath(proj.id)
+          if (pathRes) {
+            allCriticalIds = [...allCriticalIds, ...pathRes.criticalTaskIds]
+          }
+        } catch (err) {
+          console.error('Error fetching critical path for project', proj.id, err)
+        }
+      }
+      setCriticalTaskIds(allCriticalIds)
+    }
+
+    fetchCriticalPaths()
+  }, [showCriticalPath, activeWorkspaceId, projects])
 
   // Scroll timeline to today initially
   useEffect(() => {
@@ -306,7 +334,7 @@ export const GanttView: React.FC = () => {
   }, [interaction, dragPreview, zoomMode])
 
   // Manage dependency drawing paths
-  const [linksPaths, setLinksPaths] = useState<{ path: string; hasConflict: boolean; key: string }[]>([])
+  const [linksPaths, setLinksPaths] = useState<{ path: string; hasConflict: boolean; key: string; fromTaskId: string; toTaskId: string }[]>([])
 
   useEffect(() => {
     const paths: typeof linksPaths = []
@@ -351,7 +379,9 @@ export const GanttView: React.FC = () => {
         paths.push({
           path,
           hasConflict,
-          key: `${parentTask.id}-${task.id}`
+          key: `${parentTask.id}-${task.id}`,
+          fromTaskId: parentTask.id,
+          toTaskId: task.id
         })
       })
     })
@@ -433,6 +463,18 @@ export const GanttView: React.FC = () => {
               className={`zoom-btn ${zoomMode === 'week' ? 'zoom-btn--active' : ''}`}
             >
               <ZoomOut size={14} /> Semaines
+            </button>
+            <button
+              onClick={() => setShowCriticalPath(!showCriticalPath)}
+              className={`zoom-btn ${showCriticalPath ? 'zoom-btn--active-critical' : ''}`}
+              style={{
+                marginLeft: '8px',
+                borderColor: showCriticalPath ? '#ef4444' : undefined,
+                color: showCriticalPath ? '#ef4444' : undefined,
+                backgroundColor: showCriticalPath ? 'rgba(239, 68, 68, 0.1)' : undefined
+              }}
+            >
+              <AlertCircle size={14} /> Chemin Critique
             </button>
           </div>
         </div>
@@ -528,15 +570,18 @@ export const GanttView: React.FC = () => {
                 <marker id="arrow-conflict" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
                   <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#ef4444" />
                 </marker>
+                <marker id="arrow-critical" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                  <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#f43f5e" />
+                </marker>
               </defs>
               {linksPaths.map(link => (
                 <path
                   key={link.key}
                   d={link.path}
-                  className={`dependency-svg-path ${link.hasConflict ? 'dependency-svg-path--conflict' : ''}`}
-                  markerEnd={link.hasConflict ? "url(#arrow-conflict)" : "url(#arrow)"}
+                  className={`dependency-svg-path ${link.hasConflict ? 'dependency-svg-path--conflict' : ''} ${showCriticalPath && criticalTaskIds.includes(link.fromTaskId) && criticalTaskIds.includes(link.toTaskId) ? 'dependency-svg-path--critical' : ''}`}
+                  markerEnd={link.hasConflict ? "url(#arrow-conflict)" : (showCriticalPath && criticalTaskIds.includes(link.fromTaskId) && criticalTaskIds.includes(link.toTaskId) ? "url(#arrow-critical)" : "url(#arrow)")}
                   style={{
-                    '--arrow-color': 'rgba(139, 92, 246, 0.7)'
+                    '--arrow-color': showCriticalPath && criticalTaskIds.includes(link.fromTaskId) && criticalTaskIds.includes(link.toTaskId) ? '#f43f5e' : 'rgba(139, 92, 246, 0.7)'
                   } as React.CSSProperties}
                 />
               ))}
@@ -558,7 +603,7 @@ export const GanttView: React.FC = () => {
                 <div key={task.id} className="gantt-task-row">
                   {hasDates && coords ? (
                     <div
-                      className={`gantt-task-bar status--${task.status.toLowerCase()} priority--${task.priority.toLowerCase()}`}
+                      className={`gantt-task-bar status--${task.status.toLowerCase()} priority--${task.priority.toLowerCase()} ${showCriticalPath && criticalTaskIds.includes(task.id) ? 'gantt-task-bar--critical' : ''}`}
                       style={{
                         left: coords.left,
                         width: coords.width

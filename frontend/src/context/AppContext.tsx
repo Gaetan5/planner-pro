@@ -217,6 +217,7 @@ interface AppContextType {
   toggleDeliveryChecklistItem: (itemId: string) => Promise<void>
   addTaskDependency: (taskId: string, dependsOnTaskId: string, type?: string) => Promise<void>
   removeTaskDependency: (taskId: string, dependsOnTaskId: string) => Promise<void>
+  getProjectCriticalPath: (projectId: string) => Promise<{ criticalTaskIds: string[], slacks: Record<string, number> } | null>
   updateResourceProfile: (userId: string, weeklyCapacityMinutes?: number, skills?: string, costRateCents?: number) => Promise<void>
   createResourceAllocation: (projectId: string, userId: string, allocationPercent: number, roleLabel?: string, startDate?: string, endDate?: string) => Promise<void>
   refreshData: () => Promise<void>
@@ -533,6 +534,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       headers: getHeaders()
     })
     if (res.ok) refreshData()
+  }
+
+  const getProjectCriticalPath = async (projectId: string): Promise<{ criticalTaskIds: string[], slacks: Record<string, number> } | null> => {
+    const res = await fetch(`${BACKEND_URL}/projects/${projectId}/critical-path`, {
+      headers: getHeaders()
+    })
+    if (res.ok) {
+      return res.json()
+    }
+    return null
   }
 
   // WebSocket Time Tracking
@@ -1157,6 +1168,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Professional features
       createMilestone, completeMilestone, createDeliverable, updateDeliverableStatus,
       createDelivery, updateDeliveryStatus, toggleDeliveryChecklistItem, addTaskDependency, removeTaskDependency,
+      getProjectCriticalPath,
       updateResourceProfile, createResourceAllocation, refreshData,
       // Invitations / Collaboration
       createInvitation, listInvitations, revokeInvitation, checkInvitation, acceptInvitation,

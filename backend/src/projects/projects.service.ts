@@ -384,6 +384,9 @@ export class ProjectsService {
   deleteTask(taskId: string, userId: string) {
     return this.tasksService.deleteTask(taskId, userId);
   }
+  getCriticalPath(projectId: string, userId: string) {
+    return this.tasksService.getCriticalPath(projectId, userId);
+  }
 
   // --- Dependencies ---
   addTaskDependency(taskId: string, userId: string, dependsOnTaskId: string, type?: DependencyType) {
@@ -445,6 +448,15 @@ export class ProjectsService {
   }
   optimizeWorkspaceResources(workspaceId: string, userId: string) {
     return this.resourcesService.optimizeWorkspaceResources(workspaceId, userId);
+  }
+  createResourceLeave(actingUserId: string, userId: string, startDate: string, endDate: string, reason?: string) {
+    return this.resourcesService.createResourceLeave(actingUserId, userId, startDate, endDate, reason);
+  }
+  getResourceLeaves(actingUserId: string, userId: string) {
+    return this.resourcesService.getResourceLeaves(actingUserId, userId);
+  }
+  deleteResourceLeave(actingUserId: string, leaveId: string) {
+    return this.resourcesService.deleteResourceLeave(actingUserId, leaveId);
   }
 
   // --- Finances ---
