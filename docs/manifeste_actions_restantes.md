@@ -127,6 +127,12 @@ model Integration {
 
 ### Lot C — Auto-Scheduling Intelligent & Gantt (Priorité : P1)
 
+> **Statut** : ✅ **Terminé & validé (1er juin 2026)** (Commit `cbbf0e2`)
+> - Modèle Prisma `ResourceLeave` créé et appliqué.
+> - Gestion des congés et jours fériés dans l'auto-planification de capacité.
+> - Algorithme CPM (Critical Path Method) et détection de cycles implémentés et testés à 100%.
+> - Visualisation interactive et mise en relief corail du chemin critique sur le Gantt.
+
 #### 📝 Objectifs — Lot C
 
 1. Ajouter le support du glisser-déposer sur le composant visuel Gantt avec calcul des nouvelles dates (déjà partiellement dégrossi en front, à fiabiliser).
