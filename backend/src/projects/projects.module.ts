@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { ProjectsService } from './projects.service';
 import { ProjectsController } from './projects.controller';
 import { InvitationsService } from './invitations.service';
@@ -25,7 +25,7 @@ import { TrackingModule } from '../tracking/tracking.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  imports: [PrismaModule, NotesModule, TrackingModule, NotificationsModule],
+  imports: [PrismaModule, NotesModule, forwardRef(() => TrackingModule), NotificationsModule],
   providers: [
     // Sous-services spécialisés (SRP)
     TasksService,
