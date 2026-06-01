@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { AppProvider, useApp } from './context/AppContext'
 import { Login } from './components/Login'
 import { InvitationAcceptance } from './components/InvitationAcceptance'
@@ -14,7 +14,8 @@ import { AgileView } from './components/AgileView'
 import { GanttView } from './components/GanttView'
 import { NotificationInbox } from './components/NotificationInbox'
 import { FinancesView } from './components/FinancesView'
-import { LogOut, AlertTriangle, LayoutDashboard, Kanban, Calendar, FileText, Timer, Sun, Moon, ShieldCheck, Users, Sparkles, Milestone, CalendarRange } from 'lucide-react'
+import { OnboardingModal } from './components/OnboardingModal'
+import { LogOut, AlertTriangle, LayoutDashboard, Kanban, Calendar, FileText, Timer, Sun, Moon, ShieldCheck, Users, Sparkles, Milestone, CalendarRange, HelpCircle } from 'lucide-react'
 import logo from './logo.png'
 import './App.css'
 
@@ -24,6 +25,16 @@ function AppWithSession() {
     const params = new URLSearchParams(window.location.search)
     return params.get('token')
   })
+  const [showOnboarding, setShowOnboarding] = useState(false)
+
+  useEffect(() => {
+    if (user) {
+      const completed = localStorage.getItem(`planner_onboarding_completed_${user.id}`)
+      setShowOnboarding(completed !== 'true')
+    } else {
+      setShowOnboarding(false)
+    }
+  }, [user])
 
   if (inviteToken) {
     return <InvitationAcceptance token={inviteToken} onClose={() => setInviteToken(null)} />
@@ -162,6 +173,17 @@ function AppWithSession() {
             {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
           </button>
 
+          {/* Guide d'onboarding réactivable */}
+          <button
+            onClick={() => setShowOnboarding(true)}
+            className="btn-icon onboarding-help-btn"
+            title="Guide d'utilisation / Onboarding"
+            style={{ marginRight: '8px', color: '#10b981' }}
+          >
+            <HelpCircle size={16} />
+          </button>
+
+
           <div className="user-info">
             <div className="user-info__details">
               <p className="user-info__name">{user.name}</p>
@@ -250,6 +272,14 @@ function AppWithSession() {
         </button>
       </nav>
       <AiCommandBar />
+      {showOnboarding && (
+        <OnboardingModal
+          onClose={() => {
+            localStorage.setItem(`planner_onboarding_completed_${user.id}`, 'true')
+            setShowOnboarding(false)
+          }}
+        />
+      )}
     </div>
   )
 }

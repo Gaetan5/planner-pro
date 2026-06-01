@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
+import { createCipheriv, createDecipheriv, randomBytes, pbkdf2Sync } from 'crypto';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12;
@@ -62,3 +62,27 @@ export function decrypt(cipherText: string): string {
 
   return decrypted;
 }
+
+/**
+ * Hache un mot de passe avec PBKDF2 et un sel aléatoire de 16 octets.
+ * Renvoie une chaîne au format "salt:hash".
+ */
+export function hashPassword(password: string): string {
+  const salt = randomBytes(16).toString('hex');
+  const hash = pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+  return `${salt}:${hash}`;
+}
+
+/**
+ * Vérifie si un mot de passe correspond à un hachage stocké.
+ */
+export function verifyPassword(password: string, storedHash: string): boolean {
+  const parts = storedHash.split(':');
+  if (parts.length !== 2) {
+    return false;
+  }
+  const [salt, hash] = parts;
+  const verifyHash = pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+  return hash === verifyHash;
+}
+

@@ -15,6 +15,22 @@ export class AuthController {
   }
 
   /**
+   * Endpoint d'inscription classique
+   */
+  @Post('register')
+  register(@Body() body: { email: string; passwordRaw: string; name: string }) {
+    return this.authService.register(body.email, body.passwordRaw, body.name);
+  }
+
+  /**
+   * Endpoint de login classique
+   */
+  @Post('login')
+  login(@Body() body: { email: string; passwordRaw: string }) {
+    return this.authService.login(body.email, body.passwordRaw);
+  }
+
+  /**
    * Endpoint de login simulé pour le développement local
    */
   @Post('mock/login')

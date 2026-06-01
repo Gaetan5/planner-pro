@@ -173,6 +173,8 @@ interface AppContextType {
   activeTab: 'dashboard' | 'kanban' | 'calendar' | 'notes' | 'pomodoro' | 'governance' | 'resources' | 'agile' | 'gantt' | 'finances'
   isConnected: boolean
   login: (code: string) => Promise<void>
+  classicLogin: (email: string, passwordRaw: string) => Promise<void>
+  classicRegister: (email: string, passwordRaw: string, name: string) => Promise<void>
   logout: () => void
   mockLogin: (name: string) => Promise<void>
   setActiveTab: (tab: 'dashboard' | 'kanban' | 'calendar' | 'notes' | 'pomodoro' | 'governance' | 'resources' | 'agile' | 'gantt' | 'finances') => void
@@ -493,6 +495,48 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         body: JSON.stringify({ name: name || 'Gaëtan' }),
       })
       if (!res.ok) throw new Error('Échec simulation login')
+      const data = await res.json()
+      const userData = { id: data.user.id, name: data.user.name, email: data.user.email, token: data.accessToken }
+      setUser(userData)
+      localStorage.setItem('planner_user', JSON.stringify(userData))
+    } catch (e) {
+      console.error(e)
+      throw e
+    }
+  }
+
+  const classicLogin = async (email: string, passwordRaw: string) => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, passwordRaw }),
+      })
+      if (!res.ok) {
+        const errData = await res.json()
+        throw new Error(errData.message || 'Identifiants invalides')
+      }
+      const data = await res.json()
+      const userData = { id: data.user.id, name: data.user.name, email: data.user.email, token: data.accessToken }
+      setUser(userData)
+      localStorage.setItem('planner_user', JSON.stringify(userData))
+    } catch (e) {
+      console.error(e)
+      throw e
+    }
+  }
+
+  const classicRegister = async (email: string, passwordRaw: string, name: string) => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, passwordRaw, name }),
+      })
+      if (!res.ok) {
+        const errData = await res.json()
+        throw new Error(errData.message || 'Échec de l\'inscription')
+      }
       const data = await res.json()
       const userData = { id: data.user.id, name: data.user.name, email: data.user.email, token: data.accessToken }
       setUser(userData)
@@ -1203,7 +1247,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   return (
     <AppContext.Provider value={{
       user, projects, notes, workspaces, workspaceMembers, resourceCapacity, timeBlocks, activeTimer, activeTab, isConnected,
-      login, logout, mockLogin, setActiveTab, createProject, deleteProject,
+      login, classicLogin, classicRegister, logout, mockLogin, setActiveTab, createProject, deleteProject,
       createTask, updateTask, deleteTask, startTimer, stopTimer, saveNote, deleteNote,
       createTimeBlock, updateTimeBlock, deleteTimeBlock,
       // Pomodoro
