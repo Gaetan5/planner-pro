@@ -128,6 +128,7 @@ model Integration {
 ### Lot C — Auto-Scheduling Intelligent & Gantt (Priorité : P1)
 
 > **Statut** : ✅ **Terminé & validé (1er juin 2026)** (Commit `cbbf0e2`)
+>
 > - Modèle Prisma `ResourceLeave` créé et appliqué.
 > - Gestion des congés et jours fériés dans l'auto-planification de capacité.
 > - Algorithme CPM (Critical Path Method) et détection de cycles implémentés et testés à 100%.
@@ -168,6 +169,7 @@ model ResourceLeave {
 ### Lot D — Communication & Collaboratif Riche (Priorité : P2)
 
 > **Statut** : ✅ **Terminé & validé (1er juin 2026)**
+>
 > - Réponses hiérarchiques (threads) implémentées et gérées en cascade.
 > - Pièces jointes (fichiers/images) sur commentaires et tâches (Data URL BDD).
 > - Indicateur de saisie (typing indicator) en temps réel via WebSockets.
@@ -232,6 +234,7 @@ model Attachment {
 ### Lot E — IA, Multimodalité & Proactivité (Priorité : P2)
 
 > **Statut** : ✅ **Terminé & validé (1er juin 2026)**
+>
 > - Archivage automatique de l'historique d'analyse IA (`AiCommandHistory`).
 > - Tâches planifiées et proactivité (surcharges, retards, etc.) via `@Cron`.
 > - Pré-calcul et stockage en BDD des briefings matinaux (`AiBriefing`).

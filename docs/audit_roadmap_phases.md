@@ -50,7 +50,7 @@
 - **Le modèle `Team`** est dans le schéma mais **sans logique métier associée** (pas d'assignation par équipe, pas de vue équipe).
 - **Pas de rôle par projet** — le `projectId` optionnel sur `Invitation` est câblé mais aucune logique de permission spécifique au projet n'est active.
 
-### 📊 Maturité : **90%** — L'envoi d'e-mails d'invitation est entièrement résolu. Manque principalement la gestion par projet et les équipes.
+### 📊 Maturité : **90%** — L'envoi d'e-mails d'invitation est entièrement résolu. Manque principalement la gestion par projet et les équipes
 
 ---
 
@@ -75,7 +75,7 @@
 - **Pas de réponse hiérarchique** (replies / thread) — le modèle `Comment` est plat.
 - **Pas de pièces jointes** dans les commentaires (fichiers, images).
 
-### 📊 Maturité : **95%** — Excellent. Les mentions déclenchent maintenant de vraies notifications in-app, e-mails de mention, et mises à jour WebSocket temps réel.
+### 📊 Maturité : **95%** — Excellent. Les mentions déclenchent maintenant de vraies notifications in-app, e-mails de mention, et mises à jour WebSocket temps réel
 
 ---
 
@@ -101,7 +101,7 @@
 
 - Pas d'historique des commandes IA enregistré en base de données.
 
-### 📊 Maturité : **90%** — Le pipeline IA (Parse → Resolve → Preview → Execute) reste exemplaire.
+### 📊 Maturité : **90%** — Le pipeline IA (Parse → Resolve → Preview → Execute) reste exemplaire
 
 ---
 
@@ -121,7 +121,7 @@
 
 - **Pas d'OAuth2 natif Google/Outlook** — la synchronisation s'effectue via des liens de partage d'agendas publics (URLs iCal/ICS) plutôt que via authentification OAuth directe.
 
-### 📊 Maturité : **75%** — Le service est maintenant opérationnel avec parsing d'agendas réels et détection dynamique de conflits.
+### 📊 Maturité : **75%** — Le service est maintenant opérationnel avec parsing d'agendas réels et détection dynamique de conflits
 
 ---
 
@@ -139,7 +139,7 @@
 - **Pas de Critical Path Method (CPM)** implémenté.
 - **Frontend limité** — pas de visualisation de l'impact avant confirmation.
 
-### 📊 Maturité : **40%** — Le moteur de propagation fonctionne mais manque d'intelligence avancée (dates de congés, CPM).
+### 📊 Maturité : **40%** — Le moteur de propagation fonctionne mais manque d'intelligence avancée (dates de congés, CPM)
 
 ---
 
@@ -155,7 +155,7 @@
 
 - [AgileView.tsx](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/components/AgileView.tsx) — vue Agile complète : Backlog, tableau de sprint actif avec Drag & Drop, graphique Burndown et indicateurs de vélocité.
 
-### 📊 Maturité : **78%** — Trame Agile solide et complète.
+### 📊 Maturité : **78%** — Trame Agile solide et complète
 
 ---
 
@@ -174,7 +174,7 @@
 
 - Pas de tracé de chemin critique global (CPM) en couleur distincte.
 
-### 📊 Maturité : **85%** — Le Gantt est désormais hautement interactif et visuellement digne d'un outil moderne.
+### 📊 Maturité : **85%** — Le Gantt est désormais hautement interactif et visuellement digne d'un outil moderne
 
 ---
 
@@ -191,7 +191,7 @@
 - **Gestion des Alertes** : Indication visuelle claire des dépassements de budget.
 - **Sécurité et Permissions** : Protection de la vue avec contrôle RBAC strict (réservé aux rôles `ADMIN` et `OWNER`). Les membres `VIEWER` ou `MEMBER` reçoivent un message de refus d'accès.
 
-### 📊 Maturité : **95%** — L'implémentation est totale, propre et sécurisée.
+### 📊 Maturité : **95%** — L'implémentation est totale, propre et sécurisée
 
 ---
 
@@ -204,7 +204,7 @@
 - **Analyses Automatisées** : Génération d'un résumé écrit personnalisé de l'état du projet ("Excellente santé opérationnelle", "Attention requise", etc.) selon son score.
 - KPIs consolidés (taux d'avancement moyen, heures consommées, jalons à venir).
 
-### 📊 Maturité : **80%** — La vue portefeuille offre désormais une excellente vue consolidée.
+### 📊 Maturité : **80%** — La vue portefeuille offre désormais une excellente vue consolidée
 
 ---
 
@@ -220,7 +220,7 @@
 - Pas de granularité fine par projet (les rôles s'appliquent sur tout le workspace).
 - Pas d'audit log pour la traçabilité.
 
-### 📊 Maturité : **25%** — Suffisant pour un usage standard, mais manque de finesse pour une structure multi-projets cloisonnée.
+### 📊 Maturité : **25%** — Suffisant pour un usage standard, mais manque de finesse pour une structure multi-projets cloisonnée
 
 ---
 
@@ -236,7 +236,7 @@
 ### Points Faibles restants
 
 > [!WARNING]
-> ### 1. Absence de rôles par projet
+> **1. Absence de rôles par projet**
 > Un membre d'un workspace a toujours accès à l'intégralité des projets de ce workspace. Le cloisonnement au niveau projet reste à concevoir.
 
 ---
