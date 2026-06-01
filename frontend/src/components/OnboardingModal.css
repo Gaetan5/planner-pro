@@ -1,0 +1,276 @@
+/* ========================================
+   ONBOARDING MODAL STYLES
+   ======================================== */
+
+.onboarding-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(8, 10, 15, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: var(--space-xl);
+}
+
+.onboarding-card {
+  position: relative;
+  width: 100%;
+  max-width: 580px;
+  background: rgba(17, 24, 39, 0.85);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.4),
+              0 0 80px rgba(139, 92, 246, 0.15);
+  border-radius: var(--radius-xl);
+  padding: var(--space-3xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+  animation: pop-in 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+}
+
+.onboarding-close-btn {
+  position: absolute;
+  top: var(--space-xl);
+  right: var(--space-xl);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-muted);
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  z-index: 10;
+}
+
+.onboarding-close-btn:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #ef4444;
+  transform: rotate(90deg);
+}
+
+/* Dots Progress indicator */
+.onboarding-progress-dots {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-md);
+  margin-bottom: var(--space-sm);
+}
+
+.progress-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.progress-dot:hover {
+  background: rgba(255, 255, 255, 0.35);
+  transform: scale(1.2);
+}
+
+.progress-dot--active {
+  width: 24px;
+  border-radius: 5px;
+  background: linear-gradient(90deg, #8b5cf6, #ec4899);
+  box-shadow: 0 0 10px rgba(139, 92, 246, 0.5);
+}
+
+.progress-dot--completed {
+  background: #10b981;
+}
+
+/* Content Body */
+.onboarding-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  text-align: center;
+  min-height: 340px;
+  justify-content: center;
+}
+
+.onboarding-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.onboarding-badge {
+  font-size: var(--font-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  padding: var(--space-xs) var(--space-lg);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+  color: #a78bfa;
+}
+
+.onboarding-icon-wrapper {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 50%;
+  width: 80px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: inset 0 2px 8px rgba(255, 255, 255, 0.03);
+}
+
+.onboarding-icon {
+  animation: pulse-glow 3s infinite ease-in-out;
+}
+
+.onboarding-icon--blue {
+  color: #3b82f6;
+  filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.4));
+}
+.onboarding-icon--purple {
+  color: #a78bfa;
+  filter: drop-shadow(0 0 8px rgba(167, 139, 250, 0.4));
+}
+.onboarding-icon--pink {
+  color: #f472b6;
+  filter: drop-shadow(0 0 8px rgba(244, 114, 182, 0.4));
+}
+.onboarding-icon--green {
+  color: #34d399;
+  filter: drop-shadow(0 0 8px rgba(52, 211, 153, 0.4));
+}
+.onboarding-icon--gold {
+  color: #fbbf24;
+  filter: drop-shadow(0 0 8px rgba(251, 191, 36, 0.4));
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.95;
+  }
+  50% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+}
+
+.onboarding-title {
+  font-size: var(--font-2xl);
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: -0.5px;
+}
+
+.onboarding-description {
+  font-size: var(--font-base);
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0 var(--space-lg);
+}
+
+/* Tips Card */
+.onboarding-tips-card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg) var(--space-xl);
+  text-align: left;
+  margin-top: var(--space-sm);
+}
+
+.onboarding-tips-title {
+  font-size: var(--font-sm);
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: var(--space-md);
+  letter-spacing: 0.25px;
+}
+
+.onboarding-tips-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.onboarding-tip-item {
+  display: flex;
+  gap: var(--space-md);
+  font-size: var(--font-sm);
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.onboarding-tip-item .bullet {
+  color: #fbbf24;
+  font-weight: bold;
+}
+
+.onboarding-tip-item .text {
+  flex: 1;
+}
+
+/* Footer Navigation */
+.onboarding-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  padding-top: var(--space-xl);
+  margin-top: var(--space-sm);
+}
+
+.onboarding-nav-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-md) var(--space-xl);
+}
+
+.onboarding-step-counter {
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+/* Responsive adjustments */
+@media (max-width: 600px) {
+  .onboarding-card {
+    padding: var(--space-xl);
+    max-width: 100%;
+  }
+
+  .onboarding-body {
+    min-height: 400px;
+  }
+
+  .onboarding-description {
+    margin: 0;
+  }
+
+  .onboarding-tips-card {
+    padding: var(--space-md);
+  }
+
+  .onboarding-nav-btn {
+    padding: var(--space-md) var(--space-lg);
+  }
+}
