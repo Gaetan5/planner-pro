@@ -9,6 +9,7 @@ import { TimeBlocksService } from './timeblocks.service';
 import { MilestonesService } from './milestones.service';
 import { ResourcesService } from './resources.service';
 import { FinancesService } from './finances.service';
+import { ProjectPermissionsService } from './project-permissions.service';
 import * as crypto from 'crypto';
 
 describe('ProjectsService - GitHub Webhooks', () => {
@@ -88,6 +89,12 @@ describe('ProjectsService - GitHub Webhooks', () => {
     getWorkspaceFinancialSummary: jest.fn(),
   };
 
+  const mockProjectPermissionsService = {
+    assertProjectRole: jest.fn(),
+    logAction: jest.fn(),
+    getAuditLogs: jest.fn(),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -101,6 +108,7 @@ describe('ProjectsService - GitHub Webhooks', () => {
         { provide: MilestonesService, useValue: mockMilestonesService },
         { provide: ResourcesService, useValue: mockResourcesService },
         { provide: FinancesService, useValue: mockFinancesService },
+        { provide: ProjectPermissionsService, useValue: mockProjectPermissionsService },
       ],
     }).compile();
 
