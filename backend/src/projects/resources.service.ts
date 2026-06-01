@@ -446,15 +446,16 @@ export class ResourcesService {
     let workdayCount = 0;
 
     const start = new Date(windowStart);
-    start.setHours(0, 0, 0, 0);
+    start.setUTCHours(0, 0, 0, 0);
     const end = new Date(windowEnd);
+    end.setUTCHours(0, 0, 0, 0);
 
     const oneDayMs = 24 * 60 * 60 * 1000;
     for (let time = start.getTime(); time < end.getTime(); time += oneDayMs) {
       const d = new Date(time);
-      d.setHours(12, 0, 0, 0);
+      d.setUTCHours(12, 0, 0, 0);
 
-      const dayOfWeek = d.getDay();
+      const dayOfWeek = d.getUTCDay();
       if (dayOfWeek === 0 || dayOfWeek === 6) {
         continue;
       }
@@ -467,9 +468,9 @@ export class ResourcesService {
       const hasLeave = leaves.some((leave) => {
         if (leave.userId !== userId) return false;
         const lStart = new Date(leave.startDate);
-        lStart.setHours(0, 0, 0, 0);
+        lStart.setUTCHours(0, 0, 0, 0);
         const lEnd = new Date(leave.endDate);
-        lEnd.setHours(23, 59, 59, 999);
+        lEnd.setUTCHours(23, 59, 59, 999);
         return d >= lStart && d <= lEnd;
       });
 
@@ -500,13 +501,13 @@ function getEasterDate(year: number): Date {
   const m = Math.floor((a + 11 * h + 22 * L) / 451);
   const month = Math.floor((h + L - 7 * m + 114) / 31);
   const day = ((h + L - 7 * m + 114) % 31) + 1;
-  return new Date(year, month - 1, day);
+  return new Date(Date.UTC(year, month - 1, day));
 }
 
 function isPublicHoliday(date: Date): boolean {
-  const year = date.getFullYear();
-  const month = date.getMonth();
-  const day = date.getDate();
+  const year = date.getUTCFullYear();
+  const month = date.getUTCMonth();
+  const day = date.getUTCDate();
 
   // Fêtes fixes
   if (month === 0 && day === 1) return true; // Jour de l'an
@@ -521,13 +522,13 @@ function isPublicHoliday(date: Date): boolean {
   const easter = getEasterDate(year);
   
   const easterMonday = new Date(easter.getTime() + 1 * 24 * 60 * 60 * 1000);
-  if (month === easterMonday.getMonth() && day === easterMonday.getDate()) return true;
+  if (month === easterMonday.getUTCMonth() && day === easterMonday.getUTCDate()) return true;
 
   const ascension = new Date(easter.getTime() + 39 * 24 * 60 * 60 * 1000);
-  if (month === ascension.getMonth() && day === ascension.getDate()) return true;
+  if (month === ascension.getUTCMonth() && day === ascension.getUTCDate()) return true;
 
   const pentecostMonday = new Date(easter.getTime() + 50 * 24 * 60 * 60 * 1000);
-  if (month === pentecostMonday.getMonth() && day === pentecostMonday.getDate()) return true;
+  if (month === pentecostMonday.getUTCMonth() && day === pentecostMonday.getUTCDate()) return true;
 
   return false;
 }
