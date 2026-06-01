@@ -34,6 +34,7 @@ model User {
   sentNotifications  Notification[]      @relation("SentNotifications")
   projectMemberships ProjectMembership[]
   auditLogs          AuditLog[]
+  resourceLeaves     ResourceLeave[]
   createdAt          DateTime            @default(now())
 }
 
@@ -426,16 +427,19 @@ model Comment {
 }
 
 model Integration {
-  id          String    @id @default(uuid())
-  type        String    // "SLACK", "TEAMS", "GOOGLE_CALENDAR", "OUTLOOK"
-  name        String
-  url         String?   @db.Text
-  calendarId  String?
-  active      Boolean   @default(true)
-  workspaceId String
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id           String    @id @default(uuid())
+  type         String    // "SLACK", "TEAMS", "GOOGLE_CALENDAR", "OUTLOOK"
+  name         String
+  url          String?   @db.Text
+  calendarId   String?
+  active       Boolean   @default(true)
+  accessToken  String?   @db.Text
+  refreshToken String?   @db.Text
+  expiresAt    DateTime?
+  workspaceId  String
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   @@index([workspaceId])
 }
@@ -514,5 +518,17 @@ model AuditLog {
 
   @@index([userId])
 }
+
+model ResourceLeave {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  startDate   DateTime
+  endDate     DateTime
+  reason      String?
+
+  @@index([userId])
+}
+
 
 

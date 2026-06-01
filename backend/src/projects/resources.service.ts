@@ -79,7 +79,7 @@ export class ResourcesService {
     const windowStart = new Date();
     const windowEnd = new Date(windowStart.getTime() + 7 * 24 * 60 * 60 * 1000);
 
-    const [memberships, profiles, openTasks, timeBlocks, allocations] = await Promise.all([
+    const [memberships, profiles, openTasks, timeBlocks, allocations, leaves] = await Promise.all([
       this.prisma.membership.findMany({
         where: { workspaceId: workspace.id },
         include: { user: { select: { id: true, name: true, email: true } } },
@@ -110,11 +110,24 @@ export class ResourcesService {
         },
         include: { project: true },
       }),
+      this.prisma.resourceLeave.findMany({
+        where: {
+          startDate: { lt: windowEnd },
+          endDate: { gte: windowStart },
+        },
+      }),
     ]);
 
     return memberships.map((membership) => {
       const profile = profiles.find((item) => item.userId === membership.userId);
-      const weeklyCapacityMinutes = profile?.weeklyCapacityMinutes ?? 2400;
+      const baseWeeklyCapacity = profile?.weeklyCapacityMinutes ?? 2400;
+      const weeklyCapacityMinutes = this.getAdjustedCapacity(
+        baseWeeklyCapacity,
+        membership.userId,
+        windowStart,
+        windowEnd,
+        leaves,
+      );
       const assignedTaskIds = new Set(
         openTasks
           .filter((task) => task.userId === membership.userId || task.assignees.some((assignee) => assignee.userId === membership.userId))
@@ -234,10 +247,27 @@ export class ResourcesService {
       developerLoads.set(m.userId, 0);
     });
 
+    const windowStart = new Date();
+    const windowEnd = new Date(windowStart.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const leaves = await this.prisma.resourceLeave.findMany({
+      where: {
+        startDate: { lt: windowEnd },
+        endDate: { gte: windowStart },
+      },
+    });
+
     const developerCapacities = new Map<string, number>();
     memberships.forEach((m) => {
       const profile = profiles.find((p) => p.userId === m.userId);
-      developerCapacities.set(m.userId, profile?.weeklyCapacityMinutes ?? 2400);
+      const baseCapacity = profile?.weeklyCapacityMinutes ?? 2400;
+      const adjustedCapacity = this.getAdjustedCapacity(
+        baseCapacity,
+        m.userId,
+        windowStart,
+        windowEnd,
+        leaves,
+      );
+      developerCapacities.set(m.userId, adjustedCapacity || 1); // 1 pour éviter division par 0
     });
 
     const priorityWeight = {
@@ -306,4 +336,199 @@ export class ResourcesService {
       reallocatedTaskIds: reallocations.map((r) => r.taskId),
     };
   }
+
+  // --- CRUD ResourceLeave ---
+
+  async createResourceLeave(
+    actingUserId: string,
+    userId: string,
+    startDate: string,
+    endDate: string,
+    reason?: string,
+  ) {
+    // Seul le propriétaire ou un admin, ou l'utilisateur lui-même peut ajouter des congés.
+    // Pour simplifier, permettons à l'utilisateur de gérer ses propres congés, ou s'ils partagent un workspace et que l'actingUser y est admin/owner.
+    if (actingUserId !== userId) {
+      // Vérifier si l'actingUser est OWNER ou ADMIN dans au moins un workspace en commun avec l'utilisateur cible.
+      const commonWorkspaces = await this.prisma.membership.findMany({
+        where: {
+          userId: actingUserId,
+          role: { in: [WorkspaceRole.OWNER, WorkspaceRole.ADMIN] },
+          workspace: {
+            memberships: {
+              some: { userId },
+            },
+          },
+        },
+      });
+      if (commonWorkspaces.length === 0) {
+        throw new ForbiddenException('Unauthorized to manage leaves for this user');
+      }
+    }
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    if (end < start) {
+      throw new BadRequestException('End date must be after start date');
+    }
+
+    return this.prisma.resourceLeave.create({
+      data: {
+        userId,
+        startDate: start,
+        endDate: end,
+        reason,
+      },
+    });
+  }
+
+  async getResourceLeaves(actingUserId: string, userId: string) {
+    if (actingUserId !== userId) {
+      const commonWorkspaces = await this.prisma.membership.findMany({
+        where: {
+          userId: actingUserId,
+          workspace: {
+            memberships: {
+              some: { userId },
+            },
+          },
+        },
+      });
+      if (commonWorkspaces.length === 0) {
+        throw new ForbiddenException('Unauthorized to view leaves for this user');
+      }
+    }
+
+    return this.prisma.resourceLeave.findMany({
+      where: { userId },
+      orderBy: { startDate: 'asc' },
+    });
+  }
+
+  async deleteResourceLeave(actingUserId: string, leaveId: string) {
+    const leave = await this.prisma.resourceLeave.findUnique({
+      where: { id: leaveId },
+    });
+    if (!leave) {
+      throw new BadRequestException('Leave not found');
+    }
+
+    if (actingUserId !== leave.userId) {
+      const commonWorkspaces = await this.prisma.membership.findMany({
+        where: {
+          userId: actingUserId,
+          role: { in: [WorkspaceRole.OWNER, WorkspaceRole.ADMIN] },
+          workspace: {
+            memberships: {
+              some: { userId: leave.userId },
+            },
+          },
+        },
+      });
+      if (commonWorkspaces.length === 0) {
+        throw new ForbiddenException('Unauthorized to delete leaves for this user');
+      }
+    }
+
+    return this.prisma.resourceLeave.delete({
+      where: { id: leaveId },
+    });
+  }
+
+  private getAdjustedCapacity(
+    weeklyCapacityMinutes: number,
+    userId: string,
+    windowStart: Date,
+    windowEnd: Date,
+    leaves: any[],
+  ): number {
+    let activeDays = 0;
+    let workdayCount = 0;
+
+    const start = new Date(windowStart);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(windowEnd);
+
+    const oneDayMs = 24 * 60 * 60 * 1000;
+    for (let time = start.getTime(); time < end.getTime(); time += oneDayMs) {
+      const d = new Date(time);
+      d.setHours(12, 0, 0, 0);
+
+      const dayOfWeek = d.getDay();
+      if (dayOfWeek === 0 || dayOfWeek === 6) {
+        continue;
+      }
+      workdayCount++;
+
+      if (isPublicHoliday(d)) {
+        continue;
+      }
+
+      const hasLeave = leaves.some((leave) => {
+        if (leave.userId !== userId) return false;
+        const lStart = new Date(leave.startDate);
+        lStart.setHours(0, 0, 0, 0);
+        const lEnd = new Date(leave.endDate);
+        lEnd.setHours(23, 59, 59, 999);
+        return d >= lStart && d <= lEnd;
+      });
+
+      if (hasLeave) {
+        continue;
+      }
+
+      activeDays++;
+    }
+    if (workdayCount === 0) return 0;
+    const dailyCapacity = weeklyCapacityMinutes / 5;
+    return Math.round(dailyCapacity * activeDays);
+  }
 }
+
+function getEasterDate(year: number): Date {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const L = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * L) / 451);
+  const month = Math.floor((h + L - 7 * m + 114) / 31);
+  const day = ((h + L - 7 * m + 114) % 31) + 1;
+  return new Date(year, month - 1, day);
+}
+
+function isPublicHoliday(date: Date): boolean {
+  const year = date.getFullYear();
+  const month = date.getMonth();
+  const day = date.getDate();
+
+  // Fêtes fixes
+  if (month === 0 && day === 1) return true; // Jour de l'an
+  if (month === 4 && day === 1) return true; // 1er Mai
+  if (month === 4 && day === 8) return true; // 8 Mai
+  if (month === 6 && day === 14) return true; // 14 Juillet
+  if (month === 7 && day === 15) return true; // 15 Août
+  if (month === 10 && day === 1) return true; // 1er Novembre
+  if (month === 10 && day === 11) return true; // 11 Novembre
+  if (month === 11 && day === 25) return true; // 25 Décembre
+
+  const easter = getEasterDate(year);
+  
+  const easterMonday = new Date(easter.getTime() + 1 * 24 * 60 * 60 * 1000);
+  if (month === easterMonday.getMonth() && day === easterMonday.getDate()) return true;
+
+  const ascension = new Date(easter.getTime() + 39 * 24 * 60 * 60 * 1000);
+  if (month === ascension.getMonth() && day === ascension.getDate()) return true;
+
+  const pentecostMonday = new Date(easter.getTime() + 50 * 24 * 60 * 60 * 1000);
+  if (month === pentecostMonday.getMonth() && day === pentecostMonday.getDate()) return true;
+
+  return false;
+}
+

@@ -18,6 +18,7 @@ import { CreateDeliverableDto } from './dto/create-deliverable.dto';
 import { CreateTaskDependencyDto } from './dto/create-task-dependency.dto';
 import { UpdateResourceProfileDto } from './dto/update-resource-profile.dto';
 import { CreateResourceAllocationDto } from './dto/create-resource-allocation.dto';
+import { CreateResourceLeaveDto } from './dto/create-resource-leave.dto';
 import { CreateDeliveryDto } from './dto/create-delivery.dto';
 import { UpdateDeliveryStatusDto } from './dto/update-delivery-status.dto';
 import { CreateSprintDto } from './dto/create-sprint.dto';
@@ -121,6 +122,31 @@ export class ProjectsController {
     return this.projectsService.updateResourceProfile(req.user.id, userId, body);
   }
 
+  @Post('resources/:userId/leaves')
+  createResourceLeave(
+    @Req() req: any,
+    @Param('userId') userId: string,
+    @Body() body: CreateResourceLeaveDto,
+  ) {
+    return this.projectsService.createResourceLeave(
+      req.user.id,
+      userId,
+      body.startDate,
+      body.endDate,
+      body.reason,
+    );
+  }
+
+  @Get('resources/:userId/leaves')
+  getResourceLeaves(@Req() req: any, @Param('userId') userId: string) {
+    return this.projectsService.getResourceLeaves(req.user.id, userId);
+  }
+
+  @Delete('resources/leaves/:leaveId')
+  deleteResourceLeave(@Req() req: any, @Param('leaveId') leaveId: string) {
+    return this.projectsService.deleteResourceLeave(req.user.id, leaveId);
+  }
+
   @Post(':id/allocations')
   createResourceAllocation(
     @Req() req: any,
@@ -215,6 +241,11 @@ export class ProjectsController {
   @Get(':id/tasks')
   getTasks(@Req() req: any, @Param('id') projectId: string) {
     return this.projectsService.getTasks(projectId, req.user.id);
+  }
+
+  @Get(':id/critical-path')
+  getCriticalPath(@Req() req: any, @Param('id') projectId: string) {
+    return this.projectsService.getCriticalPath(projectId, req.user.id);
   }
 
   @Post(':id/milestones')

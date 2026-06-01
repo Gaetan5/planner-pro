@@ -597,3 +597,27 @@
     width: 180px;
   }
 }
+
+/* 6. Critical Path Highlighting */
+.gantt-task-bar--critical {
+  border: 1.5px solid #f43f5e !important;
+  box-shadow: 0 0 10px rgba(244, 63, 94, 0.4) !important;
+}
+
+.dependency-svg-path--critical {
+  stroke: #f43f5e !important;
+  stroke-width: 2px !important;
+  animation: pulse-critical 2s infinite ease-in-out;
+}
+
+@keyframes pulse-critical {
+  0% { stroke: #f43f5e; opacity: 1; filter: drop-shadow(0 0 4px rgba(244, 63, 94, 0.6)); }
+  50% { stroke: #e11d48; opacity: 0.6; filter: drop-shadow(0 0 1px rgba(244, 63, 94, 0.2)); }
+  100% { stroke: #f43f5e; opacity: 1; filter: drop-shadow(0 0 4px rgba(244, 63, 94, 0.6)); }
+}
+
+.zoom-btn--active-critical {
+  background: #f43f5e !important;
+  color: white !important;
+  box-shadow: var(--shadow-sm);
+}

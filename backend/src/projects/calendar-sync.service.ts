@@ -335,12 +335,12 @@ export class CalendarSyncService {
         redirectUri,
       )}&response_type=code&scope=${encodeURIComponent(
         'https://www.googleapis.com/auth/calendar',
-      )}&access_type=offline&prompt=consent&state=${workspaceId}:GOOGLE_CALENDAR`;
+      )}&access_type=offline&prompt=consent&state=${encodeURIComponent(workspaceId + ':GOOGLE_CALENDAR')}`;
     } else {
       const clientId = process.env.MICROSOFT_CLIENT_ID || 'mock-microsoft-client-id';
       return `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(
         redirectUri,
-      )}&state=${workspaceId}:OUTLOOK`;
+      )}&state=${encodeURIComponent(workspaceId + ':OUTLOOK')}`;
     }
   }
 
