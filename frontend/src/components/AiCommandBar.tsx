@@ -9,13 +9,13 @@ import {
   X, 
   Loader2, 
   Plus, 
-  User, 
+  User as UserIcon, 
   Link2, 
   Clock,
   CheckSquare,
   Mic,
   MicOff,
-  Image
+  Image as ImageIcon
 } from 'lucide-react'
 import './AiCommandBar.css'
 
@@ -45,9 +45,10 @@ export const AiCommandBar: React.FC = () => {
     projects,
     parseAiCommand,
     executeAiActions,
-    parseAiVoiceCommand,
     parseAiImageCommand,
-    refreshData
+    refreshData,
+    socket,
+    workspaceMembers
   } = useApp()
 
   const [isOpen, setIsOpen] = useState(false)
@@ -63,10 +64,36 @@ export const AiCommandBar: React.FC = () => {
   
   const [isRecording, setIsRecording] = useState(false)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const audioChunksRef = useRef<Blob[]>([])
   
   const overlayRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // Écouter les retours de la voix en streaming via WebSockets
+  useEffect(() => {
+    if (socket) {
+      const handleVoiceResult = (result: any) => {
+        setIsLoading(false)
+        setCommandText(result.transcription)
+        setActions(result.actions)
+        if (result.actions.length === 0) {
+          setErrorMessage("Aucune action n'a pu être interprétée dans votre enregistrement.")
+        }
+      }
+
+      const handleVoiceError = (err: any) => {
+        setIsLoading(false)
+        setErrorMessage(err.message || "Une erreur est survenue lors de l'analyse vocale en streaming.")
+      }
+
+      socket.on('voice-result', handleVoiceResult)
+      socket.on('voice-error', handleVoiceError)
+
+      return () => {
+        socket.off('voice-result', handleVoiceResult)
+        socket.off('voice-error', handleVoiceError)
+      }
+    }
+  }, [socket])
 
   const startRecording = async () => {
     try {
@@ -83,25 +110,38 @@ export const AiCommandBar: React.FC = () => {
       }
 
       mediaRecorderRef.current = recorder
-      audioChunksRef.current = []
 
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data)
+      // Signaler le début du stream voix au serveur
+      if (socket) {
+        socket.emit('voice-start')
+      }
+
+      // Émettre les morceaux d'audio au serveur en temps réel toutes les 250ms
+      recorder.ondataavailable = async (event) => {
+        if (event.data.size > 0 && socket) {
+          const arrayBuffer = await event.data.arrayBuffer()
+          socket.emit('voice-chunk', arrayBuffer)
         }
       }
 
       recorder.onstop = async () => {
         stream.getTracks().forEach((track) => track.stop())
-        const audioBlob = new Blob(audioChunksRef.current, { type: recorder.mimeType })
-        if (audioBlob.size > 0) {
-          await handleVoiceSubmit(audioBlob)
-        } else {
-          setErrorMessage("Aucun audio n'a été capturé.")
+        
+        if (socket) {
+          setIsLoading(true)
+          const workspaceId = workspaces[0]?.id || ''
+          const projectId = projects[0]?.id || null
+
+          socket.emit('voice-end', {
+            workspaceId,
+            projectId,
+            mimeType: recorder.mimeType,
+            isMock: true // Bypass / Mock pour les tests
+          })
         }
       }
 
-      recorder.start()
+      recorder.start(250) // Déclencher ondataavailable toutes les 250ms
       setIsRecording(true)
     } catch (err: any) {
       console.error("Erreur microphone:", err)
@@ -145,79 +185,6 @@ export const AiCommandBar: React.FC = () => {
     }
   }
 
-  const handleVoiceSubmit = async (blob: Blob) => {
-    setIsLoading(true)
-    setErrorMessage(null)
-    setActions([])
-    setExecutionSuccess(false)
-
-    try {
-      const workspaceId = workspaces[0]?.id || ''
-      const projectId = projects[0]?.id || null
-
-      if (!workspaceId) {
-        throw new Error("Aucun espace de travail trouvé.")
-      }
-
-      const result = await parseAiVoiceCommand(workspaceId, projectId, blob)
-      
-      setCommandText(result.transcription)
-      setActions(result.actions)
-
-      if (result.actions.length === 0) {
-        setErrorMessage("Aucune action n'a pu être interprétée dans votre enregistrement.")
-      }
-    } catch (err: any) {
-      console.error(err)
-      setErrorMessage(err.message || "Une erreur est survenue lors de l'analyse vocale.")
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  // Écouter le raccourci global Cmd+K / Ctrl+K et ouvrir la barre d'IA
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault()
-        setIsOpen((prev) => !prev)
-      } else if (e.key === 'Escape') {
-        setIsOpen(false)
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [])
-
-  // Événement custom pour ouvrir via bouton d'en-tête
-  useEffect(() => {
-    const handleOpenAiBar = () => {
-      setIsOpen(true)
-    }
-    window.addEventListener('open-ai-command-bar', handleOpenAiBar)
-    return () => window.removeEventListener('open-ai-command-bar', handleOpenAiBar)
-  }, [])
-
-  // Focus sur l'input et réinitialisation à l'ouverture
-  useEffect(() => {
-    if (isOpen) {
-      setTimeout(() => inputRef.current?.focus(), 80)
-      setCommandText('')
-      setActions([])
-      setErrorMessage(null)
-      setIsLoading(false)
-      setExecutionSuccess(false)
-      setSelectedImage(null)
-      setImagePreview(null)
-    }
-  }, [isOpen])
-
-  const handleOverlayClick = (e: React.MouseEvent) => {
-    if (e.target === overlayRef.current) {
-      setIsOpen(false)
-    }
-  }
-
   // Lancer l'analyse NLP ou Vision par Gemini
   const handleAnalyze = async () => {
     if (!commandText.trim() && !selectedImage) return
@@ -255,6 +222,28 @@ export const AiCommandBar: React.FC = () => {
     }
   }
 
+  // Mettre à jour une action spécifique localement
+  const handleUpdateActionField = (actionId: string, field: string, value: any) => {
+    setActions((prev) => 
+      prev.map((act) => {
+        if (act.id !== actionId) return act
+        
+        const updated = { ...act, [field]: value }
+        
+        // Mettre à jour la description de manière lisible
+        if (field === 'taskTitle') {
+          updated.description = `Créer la tâche "${value}"`
+        } else if (field === 'assigneeId') {
+          const member = workspaceMembers.find(m => m.user.id === value)
+          updated.assigneeName = member ? (member.user.name || member.user.email) : undefined
+          updated.resolved = true // Si l'id est valide, l'action devient résolue
+        }
+        
+        return updated
+      })
+    )
+  }
+
   // Supprimer une action de la liste de validation
   const handleDeleteAction = (actionId: string) => {
     setActions((prev) => prev.filter((a) => a.id !== actionId))
@@ -279,7 +268,6 @@ export const AiCommandBar: React.FC = () => {
         setCommandText('')
         await refreshData()
         
-        // Fermeture automatique après 1.5 seconde de succès
         setTimeout(() => {
           setIsOpen(false)
         }, 1500)
@@ -294,12 +282,17 @@ export const AiCommandBar: React.FC = () => {
     }
   }
 
-  // Remplir un exemple de commande et l'exécuter directement
   const handleApplyExample = (text: string) => {
     setCommandText(text)
     setTimeout(() => {
       inputRef.current?.focus()
     }, 50)
+  }
+
+  const handleOverlayClick = (e: React.MouseEvent) => {
+    if (e.target === overlayRef.current) {
+      setIsOpen(false)
+    }
   }
 
   if (!isOpen) return null
@@ -310,7 +303,7 @@ export const AiCommandBar: React.FC = () => {
       case 'CREATE_TASK':
         return <Plus className="action-icon text-emerald" size={16} />
       case 'ASSIGN_TASK':
-        return <User className="action-icon text-blue" size={16} />
+        return <UserIcon className="action-icon text-blue" size={16} />
       case 'CREATE_DEPENDENCY':
         return <Link2 className="action-icon text-purple" size={16} />
       case 'CREATE_TIMEBLOCK':
@@ -408,7 +401,7 @@ export const AiCommandBar: React.FC = () => {
                 <span className="bar"></span>
                 <span className="bar"></span>
               </div>
-              <span className="recording-status-text">Écoute en cours... Parlez maintenant</span>
+              <span className="recording-status-text">Écoute en temps réel...</span>
             </div>
           ) : (
             <input
@@ -443,7 +436,7 @@ export const AiCommandBar: React.FC = () => {
               disabled={isLoading || executionSuccess}
               title="Importer une image de projet (tableau blanc, schéma)"
             >
-              <Image size={16} />
+              <ImageIcon size={16} />
             </button>
           )}
 
@@ -451,7 +444,7 @@ export const AiCommandBar: React.FC = () => {
             className={`ai-voice-btn ${isRecording ? 'recording' : ''}`}
             onClick={isRecording ? stopRecording : startRecording}
             disabled={isLoading || executionSuccess || !!selectedImage}
-            title={isRecording ? "Arrêter l'enregistrement" : "Démarrer l'enregistrement vocal"}
+            title={isRecording ? "Arrêter l'enregistrement" : "Démarrer l'enregistrement vocal en streaming"}
           >
             {isRecording ? <MicOff size={16} /> : <Mic size={16} />}
           </button>
@@ -506,14 +499,14 @@ export const AiCommandBar: React.FC = () => {
             </div>
           )}
 
-          {/* Liste des actions résolues à valider */}
+          {/* Liste des actions résolues avec édition interactive */}
           {actions.length > 0 && !executionSuccess && (
             <div className="ai-actions-preview">
               <div className="preview-header">
                 <h3>Actions détectées ({actions.length})</h3>
                 <span className="preview-badge">À valider</span>
               </div>
-              <p className="preview-intro">Revoyez et modifiez les actions ci-dessous avant de valider l'exécution :</p>
+              <p className="preview-intro">Revoyez et affinez les détails des actions ci-dessous :</p>
               
               <div className="actions-list">
                 {actions.map((action) => (
@@ -523,8 +516,59 @@ export const AiCommandBar: React.FC = () => {
                         {getActionIcon(action.type)}
                         <span>{formatActionType(action.type)}</span>
                       </div>
+                      
                       <div className="action-card-details">
-                        <p className="action-desc">{action.description}</p>
+                        {/* Rendu interactif d'édition des champs */}
+                        {action.type === 'CREATE_TASK' ? (
+                          <div className="action-interactive-form">
+                            <input
+                              type="text"
+                              className="action-editable-input task-title-edit"
+                              value={action.taskTitle || ''}
+                              onChange={(e) => handleUpdateActionField(action.id, 'taskTitle', e.target.value)}
+                              placeholder="Titre de la tâche"
+                            />
+                            <div className="action-form-row">
+                              <select
+                                className="action-editable-select"
+                                value={action.assigneeId || ''}
+                                onChange={(e) => handleUpdateActionField(action.id, 'assigneeId', e.target.value)}
+                              >
+                                <option value="">Assigner à...</option>
+                                {workspaceMembers.map((m) => (
+                                  <option key={m.id} value={m.user.id}>
+                                    {m.user.name || m.user.email}
+                                  </option>
+                                ))}
+                              </select>
+                              <input
+                                type="date"
+                                className="action-editable-input date-edit"
+                                value={action.dueDate ? action.dueDate.split('T')[0] : ''}
+                                onChange={(e) => handleUpdateActionField(action.id, 'dueDate', e.target.value)}
+                              />
+                            </div>
+                          </div>
+                        ) : action.type === 'ASSIGN_TASK' ? (
+                          <div className="action-interactive-form">
+                            <p className="action-desc-text">Affectation de la tâche <strong>{action.taskTitle}</strong></p>
+                            <select
+                              className="action-editable-select"
+                              value={action.assigneeId || ''}
+                              onChange={(e) => handleUpdateActionField(action.id, 'assigneeId', e.target.value)}
+                            >
+                              <option value="">Sélectionner un assigné...</option>
+                              {workspaceMembers.map((m) => (
+                                <option key={m.id} value={m.user.id}>
+                                  {m.user.name || m.user.email}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        ) : (
+                          <p className="action-desc">{action.description}</p>
+                        )}
+
                         {!action.resolved && (
                           <div className="action-warning">
                             <AlertCircle size={12} className="warning-icon" />
@@ -547,7 +591,7 @@ export const AiCommandBar: React.FC = () => {
               {hasWarnings && (
                 <div className="warning-notice">
                   <AlertCircle size={16} className="notice-icon" />
-                  <p>Certaines actions ne sont pas résolues (icône rouge). Elles ne seront pas exécutées ou échoueront. Vous devriez les supprimer ou affiner votre commande.</p>
+                  <p>Certaines actions ne sont pas résolues (icône corail). Veuillez sélectionner un collaborateur ou modifier le titre pour pouvoir les exécuter.</p>
                 </div>
               )}
             </div>
@@ -594,7 +638,7 @@ export const AiCommandBar: React.FC = () => {
               ) : (
                 <>
                   <Check size={16} style={{ marginRight: '6px' }} />
-                  <span>Lancer l'automatisation</span>
+                  <span>Valider & Exécuter</span>
                 </>
               )}
             </button>
@@ -613,3 +657,4 @@ export const AiCommandBar: React.FC = () => {
     </div>
   )
 }
+

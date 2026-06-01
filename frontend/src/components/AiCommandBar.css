@@ -864,3 +864,79 @@
     top: 0%;
   }
 }
+
+/* Formulaire d'action interactif */
+.action-interactive-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.action-form-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.action-editable-input,
+.action-editable-select {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: #ffffff;
+  font-size: 0.8rem;
+  outline: none;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+[data-theme='light'] .action-editable-input,
+[data-theme='light'] .action-editable-select {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  color: #1f2937;
+}
+
+.action-editable-input:focus,
+.action-editable-select:focus {
+  border-color: rgba(139, 92, 246, 0.5);
+  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.15);
+}
+
+.task-title-edit {
+  width: 100%;
+  font-weight: 500;
+}
+
+.action-editable-select {
+  flex: 1;
+  min-width: 120px;
+  cursor: pointer;
+}
+
+.action-editable-select option {
+  background: #12121a;
+  color: #ffffff;
+}
+
+[data-theme='light'] .action-editable-select option {
+  background: #ffffff;
+  color: #1f2937;
+}
+
+.date-edit {
+  width: 130px;
+}
+
+.action-desc-text {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #9ca3af;
+}
+
+.action-card.has-warning .action-editable-select {
+  border-color: rgba(239, 68, 68, 0.4);
+}

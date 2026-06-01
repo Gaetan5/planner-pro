@@ -18,6 +18,7 @@ import { MilestonesService } from './milestones.service';
 import { ResourcesService } from './resources.service';
 import { FinancesService } from './finances.service';
 import { ProjectPermissionsService } from './project-permissions.service';
+import { ProactiveSchedulerService } from './proactive-scheduler.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { NotesModule } from '../notes/notes.module';
 import { TrackingModule } from '../tracking/tracking.module';
@@ -34,6 +35,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     ResourcesService,
     FinancesService,
     ProjectPermissionsService,
+    ProactiveSchedulerService,
     // Façade d'orchestration
     ProjectsService,
     // Services existants
@@ -59,6 +61,8 @@ import { NotificationsModule } from '../notifications/notifications.module';
     IntegrationService,
     CalendarSyncService,
     SprintService,
+    ProactiveSchedulerService,
+    AiService,
   ],
 })
 export class ProjectsModule {}

@@ -25,7 +25,6 @@ export class AiService {
     private readonly geminiService: GeminiService,
     private readonly projectsService: ProjectsService,
   ) {}
-
   /**
    * Analyse une commande textuelle et résout les entités en base de données.
    */
@@ -77,7 +76,19 @@ export class AiService {
       parsedActions = await this.geminiService.parseCommand(commandText, new Date());
     }
     
-    return this.resolveActions(workspaceId, parsedActions);
+    const resolved = await this.resolveActions(workspaceId, parsedActions);
+
+    // Archiver la requête dans l'historique
+    await this.prisma.aiCommandHistory.create({
+      data: {
+        userId,
+        rawPrompt: commandText,
+        actionsJson: JSON.parse(JSON.stringify(resolved)),
+        executed: false,
+      },
+    });
+
+    return resolved;
   }
 
   /**
@@ -110,7 +121,19 @@ export class AiService {
       parsedActions = await this.geminiService.analyzeImage(imageBuffer, mimeType);
     }
 
-    return this.resolveActions(workspaceId, parsedActions);
+    const resolved = await this.resolveActions(workspaceId, parsedActions);
+
+    // Archiver l'analyse d'image dans l'historique
+    await this.prisma.aiCommandHistory.create({
+      data: {
+        userId,
+        rawPrompt: `IMAGE_OCR_${mimeType}`,
+        actionsJson: JSON.parse(JSON.stringify(resolved)),
+        executed: false,
+      },
+    });
+
+    return resolved;
   }
 
   /**

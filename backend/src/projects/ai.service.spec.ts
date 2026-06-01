@@ -18,6 +18,9 @@ describe('AiService', () => {
     task: {
       findMany: jest.fn(),
     },
+    aiCommandHistory: {
+      create: jest.fn(),
+    },
   };
 
   const mockGeminiService = {
@@ -135,6 +138,28 @@ describe('AiService', () => {
       expect(action.taskId).toBe('task-sec-id');
       expect(action.taskTitle).toBe('Configurer la sécurité globale'); // Titre réel résolu
       expect(action.assigneeId).toBe('bob-id');
+    });
+
+    it('devrait archiver la commande analysée dans la table AiCommandHistory', async () => {
+      mockGeminiService.parseCommand.mockResolvedValue([
+        {
+          type: 'CREATE_TASK',
+          taskTitle: 'Maquetter la DB',
+        },
+      ]);
+      mockPrisma.membership.findMany.mockResolvedValue([]);
+      mockPrisma.task.findMany.mockResolvedValue([]);
+      mockPrisma.aiCommandHistory.create.mockResolvedValue({ id: 'history-1' });
+
+      await service.analyzeCommand(userId, workspaceId, projectId, 'Test prompt');
+
+      expect(mockPrisma.aiCommandHistory.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          userId,
+          rawPrompt: 'Test prompt',
+          executed: false,
+        }),
+      });
     });
   });
 
