@@ -229,10 +229,13 @@ interface AppContextType {
   acceptInvitation: (token: string) => Promise<{ workspaceId: string; message: string }>
   // Commentaires & Communication
   socket: Socket | null
-  addComment: (taskId: string, content: string) => Promise<any>
+  addComment: (taskId: string, content: string, parentId?: string, attachments?: any[]) => Promise<any>
   getComments: (taskId: string) => Promise<any[]>
   deleteComment: (commentId: string) => Promise<void>
   updateComment: (commentId: string, content: string) => Promise<any>
+  createTaskAttachment: (taskId: string, fileName: string, fileUrl: string, fileType: string, fileSize: number) => Promise<any>
+  getTaskAttachments: (taskId: string) => Promise<any[]>
+  deleteTaskAttachment: (attachmentId: string) => Promise<void>
   parseAiCommand: (workspaceId: string, projectId: string | null, command: string) => Promise<any[]>
   executeAiActions: (workspaceId: string, projectId: string | null, actions: any[]) => Promise<{ success: boolean; executedCount: number }>
   parseAiVoiceCommand: (workspaceId: string, projectId: string | null, audioBlob: Blob) => Promise<{ transcription: string; actions: any[] }>
@@ -807,11 +810,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return data
   }
 
-  const addComment = async (taskId: string, content: string) => {
+  const addComment = async (taskId: string, content: string, parentId?: string, attachments?: any[]) => {
     const res = await fetch(`${BACKEND_URL}/projects/tasks/${taskId}/comments`, {
       method: 'POST',
       headers: getHeaders(),
-      body: JSON.stringify({ content })
+      body: JSON.stringify({ content, parentId, attachments })
     })
     if (!res.ok) {
       throw new Error(await res.text() || "Impossible d'ajouter le commentaire.")
@@ -836,6 +839,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     })
     if (!res.ok) {
       throw new Error(await res.text() || "Impossible de supprimer le commentaire.")
+    }
+  }
+
+  const createTaskAttachment = async (taskId: string, fileName: string, fileUrl: string, fileType: string, fileSize: number) => {
+    const res = await fetch(`${BACKEND_URL}/projects/tasks/${taskId}/attachments`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ fileName, fileUrl, fileType, fileSize })
+    })
+    if (!res.ok) {
+      throw new Error(await res.text() || "Impossible d'ajouter la pièce jointe.")
+    }
+    return res.json()
+  }
+
+  const getTaskAttachments = async (taskId: string) => {
+    const res = await fetch(`${BACKEND_URL}/projects/tasks/${taskId}/attachments`, {
+      headers: getHeaders()
+    })
+    if (res.ok) return res.json()
+    return []
+  }
+
+  const deleteTaskAttachment = async (attachmentId: string) => {
+    const res = await fetch(`${BACKEND_URL}/projects/attachments/${attachmentId}`, {
+      method: 'DELETE',
+      headers: getHeaders()
+    })
+    if (!res.ok) {
+      throw new Error(await res.text() || "Impossible de supprimer la pièce jointe.")
     }
   }
 
@@ -1174,6 +1207,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createInvitation, listInvitations, revokeInvitation, checkInvitation, acceptInvitation,
       // Commentaires & Communication
       socket, addComment, getComments, deleteComment, updateComment,
+      createTaskAttachment, getTaskAttachments, deleteTaskAttachment,
       parseAiCommand, executeAiActions, parseAiVoiceCommand, parseAiImageCommand,
       getCopilotAlerts, getCopilotBriefing,
       // Intégrations & Calendrier

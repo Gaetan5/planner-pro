@@ -26,7 +26,13 @@ export class CommentsService {
     return membership;
   }
 
-  async createComment(taskId: string, userId: string, content: string) {
+  async createComment(
+    taskId: string,
+    userId: string,
+    content: string,
+    parentId?: string,
+    attachments?: { fileName: string; fileUrl: string; fileType: string; fileSize: number }[],
+  ) {
     const task = await this.prisma.task.findFirst({
       where: { id: taskId, deletedAt: null },
       include: { project: true },
@@ -43,17 +49,33 @@ export class CommentsService {
     // Vérifier l'accès au workspace de la tâche
     await this.assertWorkspaceAccess(task.project.workspaceId, userId);
 
+    if (parentId) {
+      const parent = await this.prisma.comment.findFirst({
+        where: { id: parentId, taskId },
+      });
+      if (!parent) {
+        throw new NotFoundException("Commentaire parent introuvable.");
+      }
+    }
+
     // Enregistrer le commentaire
     const comment = await this.prisma.comment.create({
       data: {
         content,
         taskId,
         userId,
+        parentId,
+        attachments: attachments ? {
+          createMany: {
+            data: attachments,
+          },
+        } : undefined,
       },
       include: {
         user: {
           select: { id: true, name: true, email: true },
         },
+        attachments: true,
       },
     });
 
@@ -106,15 +128,38 @@ export class CommentsService {
     // Vérifier l'accès
     await this.assertWorkspaceAccess(task.project.workspaceId, userId);
 
-    return this.prisma.comment.findMany({
+    const allDbComments = await this.prisma.comment.findMany({
       where: { taskId },
       include: {
         user: {
           select: { id: true, name: true, email: true },
         },
+        attachments: true,
       },
       orderBy: { createdAt: 'asc' },
     });
+
+    const commentMap = new Map<string, any>();
+    allDbComments.forEach((c) => {
+      commentMap.set(c.id, { ...c, replies: [] });
+    });
+
+    const roots: any[] = [];
+    allDbComments.forEach((c) => {
+      const mapped = commentMap.get(c.id);
+      if (c.parentId) {
+        const parent = commentMap.get(c.parentId);
+        if (parent) {
+          parent.replies.push(mapped);
+        } else {
+          roots.push(mapped);
+        }
+      } else {
+        roots.push(mapped);
+      }
+    });
+
+    return roots;
   }
 
   async deleteComment(commentId: string, userId: string) {
@@ -243,5 +288,88 @@ export class CommentsService {
     }
 
     return mentionedUserIds;
+  }
+
+  // --- CRUD Pièces jointes (Attachment) ---
+
+  async createAttachmentForTask(
+    taskId: string,
+    userId: string,
+    fileName: string,
+    fileUrl: string,
+    fileType: string,
+    fileSize: number,
+  ) {
+    const task = await this.prisma.task.findFirst({
+      where: { id: taskId, deletedAt: null },
+      include: { project: true },
+    });
+    if (!task) {
+      throw new NotFoundException("Tâche introuvable.");
+    }
+    if (!task.project.workspaceId) {
+      throw new BadRequestException("Cette tâche n'est pas liée à un workspace.");
+    }
+    await this.assertWorkspaceAccess(task.project.workspaceId, userId);
+
+    return this.prisma.attachment.create({
+      data: {
+        fileName,
+        fileUrl,
+        fileType,
+        fileSize,
+        taskId,
+      },
+    });
+  }
+
+  async getAttachmentsForTask(taskId: string, userId: string) {
+    const task = await this.prisma.task.findFirst({
+      where: { id: taskId, deletedAt: null },
+      include: { project: true },
+    });
+    if (!task) {
+      throw new NotFoundException("Tâche introuvable.");
+    }
+    if (!task.project.workspaceId) {
+      throw new BadRequestException("Cette tâche n'est pas liée à un workspace.");
+    }
+    await this.assertWorkspaceAccess(task.project.workspaceId, userId);
+
+    return this.prisma.attachment.findMany({
+      where: { taskId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async deleteAttachment(attachmentId: string, userId: string) {
+    const attachment = await this.prisma.attachment.findUnique({
+      where: { id: attachmentId },
+      include: {
+        task: {
+          include: {
+            project: true,
+          },
+        },
+      },
+    });
+
+    if (!attachment) {
+      throw new NotFoundException("Pièce jointe introuvable.");
+    }
+
+    const workspaceId = attachment.task?.project.workspaceId;
+    if (!workspaceId) {
+      throw new BadRequestException("Cette pièce jointe n'est pas liée à une tâche dans un workspace.");
+    }
+
+    const membership = await this.assertWorkspaceAccess(workspaceId, userId);
+    // Autoriser le créateur/admin/owner
+    // Pour simplifier, permettons à tout membre d'écrire/supprimer s'il est ADMIN/OWNER, ou si l'utilisateur y a accès (puisqu'il a accès au workspace).
+    // Mais restreignons pour la sécurité : ADMIN, OWNER, ou n'importe quel membre du projet si on ne stocke pas le créateur de l'attachment
+    // (Puisque l'attachment n'a pas de userId, tout membre autorisé du workspace peut le supprimer, ce qui est standard pour les fichiers partagés de projet).
+    return this.prisma.attachment.delete({
+      where: { id: attachmentId },
+    });
   }
 }

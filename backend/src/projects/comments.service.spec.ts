@@ -21,8 +21,15 @@ describe('CommentsService', () => {
       create: jest.fn(),
       findMany: jest.fn(),
       findUnique: jest.fn(),
+      findFirst: jest.fn(),
       delete: jest.fn(),
       update: jest.fn(),
+    },
+    attachment: {
+      create: jest.fn(),
+      findMany: jest.fn(),
+      findUnique: jest.fn(),
+      delete: jest.fn(),
     },
   };
 
@@ -109,11 +116,14 @@ describe('CommentsService', () => {
           content: 'Hello @alice, regarde ça.',
           taskId,
           userId,
+          parentId: undefined,
+          attachments: undefined,
         },
         include: {
           user: {
             select: { id: true, name: true, email: true },
           },
+          attachments: true,
         },
       });
     });
@@ -265,6 +275,91 @@ describe('CommentsService', () => {
 
       const mentionsNone = await service.parseMentions('Pas de mentions ici.', workspaceId);
       expect(mentionsNone).toEqual([]);
+    });
+  });
+
+  describe('Threads et Attachments', () => {
+    const taskId = 'task-123';
+    const userId = 'user-1';
+    const workspaceId = 'workspace-123';
+
+    it('devrait créer un commentaire enfant (thread) rattaché au parent', async () => {
+      mockPrisma.task.findFirst.mockResolvedValue({ id: taskId, project: { workspaceId } });
+      mockPrisma.membership.findFirst.mockResolvedValue({ userId, role: WorkspaceRole.MEMBER });
+      mockPrisma.comment.findFirst.mockResolvedValue({ id: 'parent-123', taskId });
+      
+      const mockCommentCreated = {
+        id: 'child-123',
+        content: 'Réponse',
+        taskId,
+        userId,
+        parentId: 'parent-123',
+        user: { id: userId, name: 'User 1', email: 'user1@test.com' },
+        attachments: [],
+      };
+      mockPrisma.comment.create.mockResolvedValue(mockCommentCreated);
+
+      const result = await service.createComment(taskId, userId, 'Réponse', 'parent-123');
+
+      expect(result.comment.parentId).toBe('parent-123');
+      expect(mockPrisma.comment.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          parentId: 'parent-123',
+        }),
+      }));
+    });
+
+    it('devrait structurer la liste des commentaires en arborescence hiérarchique', async () => {
+      mockPrisma.task.findFirst.mockResolvedValue({ id: taskId, project: { workspaceId } });
+      mockPrisma.membership.findFirst.mockResolvedValue({ userId, role: WorkspaceRole.MEMBER });
+
+      const mockDbComments = [
+        { id: 'c-1', content: 'Racine', parentId: null, user: {}, attachments: [] },
+        { id: 'c-2', content: 'Réponse 1', parentId: 'c-1', user: {}, attachments: [] },
+      ];
+      mockPrisma.comment.findMany.mockResolvedValue(mockDbComments);
+
+      const result = await service.listComments(taskId, userId);
+
+      expect(result.length).toBe(1); // Seul c-1 est à la racine
+      expect(result[0].id).toBe('c-1');
+      expect(result[0].replies.length).toBe(1);
+      expect(result[0].replies[0].id).toBe('c-2');
+    });
+
+    it('devrait créer un attachment pour une tâche', async () => {
+      mockPrisma.task.findFirst.mockResolvedValue({ id: taskId, project: { workspaceId } });
+      mockPrisma.membership.findFirst.mockResolvedValue({ userId, role: WorkspaceRole.MEMBER });
+      
+      const mockAttachment = {
+        id: 'att-1',
+        fileName: 'doc.pdf',
+        fileUrl: 'http://test.com/doc.pdf',
+        fileType: 'application/pdf',
+        fileSize: 1024,
+        taskId,
+      };
+      mockPrisma.attachment.create.mockResolvedValue(mockAttachment);
+
+      const result = await service.createAttachmentForTask(
+        taskId,
+        userId,
+        'doc.pdf',
+        'http://test.com/doc.pdf',
+        'application/pdf',
+        1024,
+      );
+
+      expect(result).toEqual(mockAttachment);
+      expect(mockPrisma.attachment.create).toHaveBeenCalledWith({
+        data: {
+          fileName: 'doc.pdf',
+          fileUrl: 'http://test.com/doc.pdf',
+          fileType: 'application/pdf',
+          fileSize: 1024,
+          taskId,
+        },
+      });
     });
   });
 });
