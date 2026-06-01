@@ -28,11 +28,13 @@ model User {
   notes             Note[]
   refreshTokens     RefreshToken[]
   timeLogs          TimeLog[]
-  sentInvitations   Invitation[]   @relation("SentInvitations")
-  comments          Comment[]
-  notifications     Notification[] @relation("UserNotifications")
-  sentNotifications Notification[] @relation("SentNotifications")
-  createdAt         DateTime       @default(now())
+  sentInvitations    Invitation[]        @relation("SentInvitations")
+  comments           Comment[]
+  notifications      Notification[]      @relation("UserNotifications")
+  sentNotifications  Notification[]      @relation("SentNotifications")
+  projectMemberships ProjectMembership[]
+  auditLogs          AuditLog[]
+  createdAt          DateTime            @default(now())
 }
 
 model Workspace {
@@ -96,13 +98,14 @@ model Project {
   deliverables Deliverable[]
   deliveries  DeliveryRecord[]
   resourceAllocations ResourceAllocation[]
-  tasks       Task[]
-  invitations Invitation[]
-  budgetCents  Int?
-  billingType  String?   @default("TIME_AND_MATERIALS")
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  deletedAt   DateTime?
+  tasks               Task[]
+  invitations         Invitation[]
+  projectMemberships  ProjectMembership[]
+  budgetCents         Int?
+  billingType         String?              @default("TIME_AND_MATERIALS")
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  deletedAt           DateTime?
 
   @@index([userId])
   @@index([workspaceId])
@@ -474,6 +477,42 @@ model Notification {
 
   @@index([userId])
   @@index([senderId])
+}
+
+model ProjectMembership {
+  id          String      @id @default(uuid())
+  projectId   String
+  userId      String
+  role        ProjectRole
+  project     Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@unique([projectId, userId])
+  @@index([userId])
+  @@index([projectId])
+}
+
+enum ProjectRole {
+  MANAGER
+  CONTRIBUTOR
+  COMMENTER
+  CLIENT
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  action      String   // ex: "TASK_CREATE", "PROJECT_DELETE"
+  entityType  String   // ex: "Task", "Project"
+  entityId    String
+  changes     Json     // Contenu avant / après
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
 }
 
 
