@@ -21,7 +21,13 @@ export class CommentsController {
     @Param('taskId') taskId: string,
     @Body() body: CreateCommentDto,
   ) {
-    const result = await this.commentsService.createComment(taskId, req.user.id, body.content);
+    const result = await this.commentsService.createComment(
+      taskId,
+      req.user.id,
+      body.content,
+      body.parentId,
+      body.attachments,
+    );
 
     // Diffuser le commentaire en temps réel via WebSockets à la room de la tâche
     if (this.trackingGateway.server) {
@@ -102,5 +108,32 @@ export class CommentsController {
     }
 
     return result.comment;
+  }
+
+  @Post('tasks/:taskId/attachments')
+  async createAttachment(
+    @Req() req: any,
+    @Param('taskId') taskId: string,
+    @Body() body: { fileName: string; fileUrl: string; fileType: string; fileSize: number },
+  ) {
+    return this.commentsService.createAttachmentForTask(
+      taskId,
+      req.user.id,
+      body.fileName,
+      body.fileUrl,
+      body.fileType,
+      body.fileSize,
+    );
+  }
+
+  @Get('tasks/:taskId/attachments')
+  async getAttachments(@Req() req: any, @Param('taskId') taskId: string) {
+    return this.commentsService.getAttachmentsForTask(taskId, req.user.id);
+  }
+
+  @Delete('attachments/:attachmentId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async deleteAttachment(@Req() req: any, @Param('attachmentId') attachmentId: string) {
+    await this.commentsService.deleteAttachment(attachmentId, req.user.id);
   }
 }

@@ -238,6 +238,7 @@ model Task {
   timeBlocks  TimeBlock[]
   timeLogs    TimeLog[]
   comments    Comment[]
+  attachments Attachment[]
   noteId      String?
   note        Note?          @relation(fields: [noteId], references: [id], onDelete: SetNull)
   sprintId    String?
@@ -413,17 +414,38 @@ model Invitation {
 }
 
 model Comment {
-  id        String   @id @default(uuid())
-  content   String   @db.Text
-  taskId    String
-  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String       @id @default(uuid())
+  content     String       @db.Text
+  taskId      String
+  task        Task         @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User         @relation(fields: [userId], references: [id])
+  parentId    String?
+  parent      Comment?     @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies     Comment[]    @relation("CommentReplies")
+  attachments Attachment[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
 
   @@index([taskId])
   @@index([userId])
+  @@index([parentId])
+}
+
+model Attachment {
+  id        String   @id @default(uuid())
+  fileName  String
+  fileUrl   String   @db.Text
+  fileType  String
+  fileSize  Int
+  commentId String?
+  comment   Comment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  taskId    String?
+  task      Task?    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@index([commentId])
+  @@index([taskId])
 }
 
 model Integration {

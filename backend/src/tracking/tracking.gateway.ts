@@ -133,4 +133,20 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
     console.log(`Socket ${client.id} a quitté la room task:${data.taskId}`);
     return { status: 'success' };
   }
+
+  @SubscribeMessage('typing')
+  async handleTyping(
+    @MessageBody() data: { taskId: string; isTyping: boolean },
+    @ConnectedSocket() client: Socket,
+  ) {
+    const userId = client.data.userId;
+    if (!userId) return { status: 'error', message: 'Non authentifié.' };
+
+    client.to(`task:${data.taskId}`).emit('user-typing', {
+      taskId: data.taskId,
+      userId,
+      isTyping: data.isTyping,
+    });
+    return { status: 'success' };
+  }
 }
