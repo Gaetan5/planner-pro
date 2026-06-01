@@ -14,6 +14,7 @@ import { JwtService } from '@nestjs/jwt';
 import { SkipThrottle } from '@nestjs/throttler';
 import { createAdapter } from '@socket.io/redis-adapter';
 import { createClient } from 'redis';
+import { AiService } from '../projects/ai.service';
 
 @SkipThrottle()
 @WebSocketGateway({
@@ -29,6 +30,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
   constructor(
     private readonly trackingService: TrackingService,
     private readonly jwtService: JwtService,
+    private readonly aiService: AiService,
   ) {}
 
   async afterInit(server: Server) {
@@ -148,5 +150,62 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
       isTyping: data.isTyping,
     });
     return { status: 'success' };
+  }
+
+  @SubscribeMessage('voice-start')
+  handleVoiceStart(@ConnectedSocket() client: Socket) {
+    client.data.audioChunks = [];
+    console.log(`Début du flux de streaming voix pour le client ${client.id}`);
+    return { status: 'success' };
+  }
+
+  @SubscribeMessage('voice-chunk')
+  handleVoiceChunk(
+    @MessageBody() chunk: Buffer | ArrayBuffer,
+    @ConnectedSocket() client: Socket,
+  ) {
+    if (!client.data.audioChunks) {
+      client.data.audioChunks = [];
+    }
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    client.data.audioChunks.push(buffer);
+    return { status: 'success', chunksCount: client.data.audioChunks.length };
+  }
+
+  @SubscribeMessage('voice-end')
+  async handleVoiceEnd(
+    @MessageBody() data: { workspaceId: string; projectId: string | null; mimeType?: string; isMock?: boolean },
+    @ConnectedSocket() client: Socket,
+  ) {
+    const userId = client.data.userId;
+    if (!userId) return { status: 'error', message: 'Non authentifié.' };
+
+    const chunks = client.data.audioChunks || [];
+    if (chunks.length === 0) {
+      return { status: 'error', message: 'Aucun morceau audio reçu.' };
+    }
+
+    console.log(`Fin du flux de streaming voix. Assemblage de ${chunks.length} chunks.`);
+    const audioBuffer = Buffer.concat(chunks);
+    client.data.audioChunks = []; // Réinitialiser le buffer
+
+    try {
+      const result = await this.aiService.transcribeAndAnalyzeVoice(
+        userId,
+        data.workspaceId,
+        data.projectId,
+        audioBuffer,
+        data.mimeType || 'audio/webm',
+        data.isMock ?? false,
+      );
+
+      // Renvoyer le résultat à l'utilisateur
+      client.emit('voice-result', result);
+      return { status: 'success', data: result };
+    } catch (err: any) {
+      console.error('Erreur lors du traitement de la voix en streaming:', err);
+      client.emit('voice-error', { message: err.message });
+      return { status: 'error', message: err.message };
+    }
   }
 }

@@ -35,6 +35,8 @@ model User {
   projectMemberships ProjectMembership[]
   auditLogs          AuditLog[]
   resourceLeaves     ResourceLeave[]
+  aiCommandHistories AiCommandHistory[]
+  aiBriefing         AiBriefing?
   createdAt          DateTime            @default(now())
 }
 
@@ -552,5 +554,22 @@ model ResourceLeave {
   @@index([userId])
 }
 
+model AiCommandHistory {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rawPrompt   String   @db.Text
+  actionsJson Json     // Stocke les actions proposées (CREATE_TASK, etc.)
+  executed    Boolean  @default(false)
+  createdAt   DateTime @default(now())
 
+  @@index([userId])
+}
 
+model AiBriefing {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content   String   @db.Text
+  updatedAt DateTime @updatedAt
+}
