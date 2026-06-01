@@ -6,6 +6,7 @@ import { Prisma, TaskPriority, TaskStatus, WorkspaceRole } from '@prisma/client'
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { NotificationsService } from '../notifications/notifications.service';
+import { ProjectPermissionsService } from './project-permissions.service';
 
 const TASK_INCLUDE = {
   assignees: {
@@ -22,6 +23,7 @@ export class TasksService {
     private readonly notesService: NotesService,
     private readonly integrationService: IntegrationService,
     private readonly notificationsService: NotificationsService,
+    private readonly projectPermissionsService: ProjectPermissionsService,
   ) {}
 
   // ─── Helpers partagés ───────────────────────────────────────────────
@@ -123,16 +125,15 @@ export class TasksService {
       where: {
         id: taskId,
         deletedAt: null,
-        OR: [
-          { userId },
-          { project: { workspace: { memberships: { some: { userId } } } } },
-        ],
       },
       include: { project: true },
     });
     if (!task) {
       throw new BadRequestException('Task not found or unauthorized');
     }
+    
+    // Vérifier les permissions fines (au moins CLIENT)
+    await this.projectPermissionsService.assertProjectRole(task.projectId, userId, ['MANAGER', 'CONTRIBUTOR', 'COMMENTER', 'CLIENT']);
     return task;
   }
 
@@ -141,15 +142,14 @@ export class TasksService {
       where: {
         id: projectId,
         deletedAt: null,
-        OR: [
-          { userId },
-          { workspace: { memberships: { some: { userId } } } },
-        ],
       },
     });
     if (!project) {
       throw new BadRequestException('Project not found or unauthorized');
     }
+
+    // Vérifier les permissions fines (au moins CLIENT)
+    await this.projectPermissionsService.assertProjectRole(projectId, userId, ['MANAGER', 'CONTRIBUTOR', 'COMMENTER', 'CLIENT']);
     return project;
   }
 
@@ -165,14 +165,8 @@ export class TasksService {
   ) {
     const project = await this.assertProjectAccess(projectId, userId);
 
-    if (project.workspaceId) {
-      const membership = await this.prisma.membership.findFirst({
-        where: { workspaceId: project.workspaceId, userId },
-      });
-      if (membership?.role === WorkspaceRole.VIEWER) {
-        throw new ForbiddenException('Unauthorized: read-only access (VIEWER)');
-      }
-    }
+    // Pour créer, l'utilisateur doit être au moins CONTRIBUTOR ou MANAGER
+    await this.projectPermissionsService.assertProjectRole(projectId, userId, ['MANAGER', 'CONTRIBUTOR']);
 
     const dates = this.parseTaskDates(options);
     const task = await this.prisma.task.create({
@@ -200,6 +194,14 @@ export class TasksService {
     });
 
     if (finalTask) {
+      await this.projectPermissionsService.logAction(
+        userId,
+        'TASK_CREATE',
+        'Task',
+        finalTask.id,
+        { task: finalTask },
+      );
+
       this.integrationService.sendNotification(
         project.workspaceId,
         'Nouvelle Tâche',
@@ -222,14 +224,8 @@ export class TasksService {
   async updateTask(taskId: string, userId: string, data: UpdateTaskDto) {
     const task = await this.assertTaskAccess(taskId, userId);
 
-    if (task.project?.workspaceId) {
-      const membership = await this.prisma.membership.findFirst({
-        where: { workspaceId: task.project.workspaceId, userId },
-      });
-      if (membership?.role === WorkspaceRole.VIEWER) {
-        throw new ForbiddenException('Unauthorized: read-only access (VIEWER)');
-      }
-    }
+    // Pour modifier, au moins CONTRIBUTOR ou MANAGER
+    await this.projectPermissionsService.assertProjectRole(task.projectId, userId, ['MANAGER', 'CONTRIBUTOR']);
 
     const impactedTaskIds: string[] = [];
 
@@ -265,6 +261,14 @@ export class TasksService {
     });
 
     if (finalTask) {
+      await this.projectPermissionsService.logAction(
+        userId,
+        'TASK_UPDATE',
+        'Task',
+        taskId,
+        { before: task, after: finalTask },
+      );
+
       if (data.status === 'DONE' && task.status !== 'DONE') {
         this.integrationService.sendNotification(
           task.project.workspaceId,
@@ -283,19 +287,23 @@ export class TasksService {
   async deleteTask(taskId: string, userId: string) {
     const task = await this.assertTaskAccess(taskId, userId);
 
-    if (task.project?.workspaceId) {
-      const membership = await this.prisma.membership.findFirst({
-        where: { workspaceId: task.project.workspaceId, userId },
-      });
-      if (membership?.role === WorkspaceRole.VIEWER) {
-        throw new ForbiddenException('Unauthorized: read-only access (VIEWER)');
-      }
-    }
+    // Pour supprimer, au moins CONTRIBUTOR ou MANAGER
+    await this.projectPermissionsService.assertProjectRole(task.projectId, userId, ['MANAGER', 'CONTRIBUTOR']);
 
-    return this.prisma.task.update({
+    const deleted = await this.prisma.task.update({
       where: { id: taskId },
       data: { deletedAt: new Date() },
     });
+
+    await this.projectPermissionsService.logAction(
+      userId,
+      'TASK_DELETE',
+      'Task',
+      taskId,
+      { deleted },
+    );
+
+    return deleted;
   }
 
   // ─── Propagation Domino (Auto-Scheduling) ─────────────────────────
