@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { useApp, Task } from '../context/AppContext'
 import { CalendarRange, ZoomIn, ZoomOut, AlertCircle, Link } from 'lucide-react'
 import './GanttView.css'
@@ -56,10 +56,15 @@ export const GanttView: React.FC = () => {
   }, [workspaces])
 
   // Get tasks for active workspace
-  const workspaceProjects = projects.filter(p => p.workspaceId === activeWorkspaceId)
-  const allTasks = workspaceProjects.flatMap(p =>
-    (p.tasks || []).map(t => ({ ...t, projectName: p.name }))
-  )
+  const workspaceProjects = useMemo(() => {
+    return projects.filter(p => p.workspaceId === activeWorkspaceId)
+  }, [projects, activeWorkspaceId])
+
+  const allTasks = useMemo(() => {
+    return workspaceProjects.flatMap(p =>
+      (p.tasks || []).map(t => ({ ...t, projectName: p.name }))
+    )
+  }, [workspaceProjects])
 
   // Generate timeline range based on tasks dates
   useEffect(() => {
