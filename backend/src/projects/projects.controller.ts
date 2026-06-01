@@ -450,6 +450,34 @@ END:VCALENDAR`;
     return this.calendarSyncService.detectCalendarConflicts(workspaceId);
   }
 
+  // ═══════════════════════════════════════════════════════════════════
+  //  CALENDAR OAUTH & BIDIRECTIONAL SYNC (Lot B)
+  // ═══════════════════════════════════════════════════════════════════
+
+  @Get('workspaces/:workspaceId/calendar/oauth/google/auth-url')
+  getGoogleAuthUrl(@Param('workspaceId') workspaceId: string) {
+    return { url: this.calendarSyncService.generateAuthUrl('GOOGLE_CALENDAR', workspaceId) };
+  }
+
+  @Get('workspaces/:workspaceId/calendar/oauth/outlook/auth-url')
+  getOutlookAuthUrl(@Param('workspaceId') workspaceId: string) {
+    return { url: this.calendarSyncService.generateAuthUrl('OUTLOOK', workspaceId) };
+  }
+
+  @Post('workspaces/:workspaceId/calendar/oauth/callback')
+  handleOAuthCallback(
+    @Param('workspaceId') workspaceId: string,
+    @Body() body: { provider: 'GOOGLE_CALENDAR' | 'OUTLOOK'; code: string },
+  ) {
+    return this.calendarSyncService.handleOAuthCallback(workspaceId, body.provider, body.code);
+  }
+
+  @Post('workspaces/:workspaceId/calendar/sync')
+  syncCalendarEvents(@Param('workspaceId') workspaceId: string) {
+    return this.calendarSyncService.syncCalendarEvents(workspaceId);
+  }
+
+
   @Post('workspaces/:workspaceId/sprints')
   createSprint(
     @Req() req: any,

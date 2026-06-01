@@ -11,13 +11,30 @@ describe('CalendarSyncService', () => {
     integration: {
       findUnique: jest.fn(),
       findMany: jest.fn(),
+      findFirst: jest.fn(),
+      upsert: jest.fn(),
+      update: jest.fn(),
     },
     timeBlock: {
       findMany: jest.fn(),
+      create: jest.fn(),
+      findFirst: jest.fn(),
+    },
+    project: {
+      findFirst: jest.fn(),
+    },
+    task: {
+      findFirst: jest.fn(),
+      create: jest.fn(),
+    },
+    user: {
+      findFirst: jest.fn(),
     },
   };
 
   beforeEach(async () => {
+    process.env.ENCRYPTION_KEY = 'a'.repeat(32); // Clé de chiffrement de 32 octets requise par l'utilitaire
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CalendarSyncService,
@@ -150,9 +167,58 @@ describe('CalendarSyncService', () => {
 
       mockPrisma.timeBlock.findMany.mockResolvedValue(localTimeBlocks);
 
-      const conflicts = await service.detectCalendarConflicts('workspace-123');
+      const result = await service.detectCalendarConflicts('workspace-123');
 
-      expect(conflicts.length).toBe(0);
+      expect(result.length).toBe(0);
+    });
+  });
+
+  describe('generateAuthUrl', () => {
+    it('devrait générer des URLs contenant les scopes et redirect_uri appropriés', () => {
+      const googleUrl = service.generateAuthUrl('GOOGLE_CALENDAR', 'ws-123');
+      expect(googleUrl).toContain('accounts.google.com');
+      expect(googleUrl).toContain('scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcalendar');
+
+      const outlookUrl = service.generateAuthUrl('OUTLOOK', 'ws-123');
+      expect(outlookUrl).toContain('login.microsoftonline.com');
+      expect(outlookUrl).toContain('ws-123%3AOUTLOOK');
+    });
+  });
+
+  describe('handleOAuthCallback', () => {
+    it('devrait stocker et chiffrer les tokens d\'accès et de rafraîchissement', async () => {
+      mockPrisma.integration.findFirst.mockResolvedValue(null);
+      mockPrisma.integration.upsert.mockResolvedValue({
+        id: 'new-int-123',
+        type: 'GOOGLE_CALENDAR',
+      });
+
+      const result = await service.handleOAuthCallback('ws-123', 'GOOGLE_CALENDAR', 'auth-code-123');
+
+      expect(result.success).toBe(true);
+      expect(mockPrisma.integration.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({
+            workspaceId: 'ws-123',
+            type: 'GOOGLE_CALENDAR',
+            accessToken: expect.stringContaining(':'), // Format iv:tag:encrypted
+            refreshToken: expect.stringContaining(':'),
+          }),
+        }),
+      );
+    });
+  });
+
+  describe('refreshAccessToken', () => {
+    it('devrait lever NotFoundException si l\'intégration n\'a pas de refresh token', async () => {
+      mockPrisma.integration.findUnique.mockResolvedValue({
+        id: 'int-123',
+        refreshToken: null,
+      });
+
+      await expect(
+        service.refreshAccessToken('int-123'),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 });
