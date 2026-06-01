@@ -1,10 +1,11 @@
 import { Controller, Get, Post, Body, Param, Put, Delete, UseGuards, Req, Query, Headers } from '@nestjs/common';
 import { Public } from '../auth/public.decorator';
-import { DeliverableStatus } from '@prisma/client';
+import { DeliverableStatus, ProjectRole } from '@prisma/client';
 import { ProjectsService } from './projects.service';
 import { SprintService } from './sprint.service';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { TrackingGateway } from '../tracking/tracking.gateway';
+import { ProjectPermissionsService } from './project-permissions.service';
 import { IntegrationService, IntegrationDto } from './integration.service';
 import { CalendarSyncService } from './calendar-sync.service';
 import { CreateProjectDto } from './dto/create-project.dto';
@@ -31,6 +32,7 @@ export class ProjectsController {
     private readonly trackingGateway: TrackingGateway,
     private readonly integrationService: IntegrationService,
     private readonly calendarSyncService: CalendarSyncService,
+    private readonly projectPermissionsService: ProjectPermissionsService,
   ) {}
 
   @Get('workspaces')
@@ -46,6 +48,50 @@ export class ProjectsController {
   @Get('workspaces/:workspaceId/members')
   getMembersByWorkspace(@Req() req: any, @Param('workspaceId') workspaceId: string) {
     return this.projectsService.getWorkspaceMembers(req.user.id, workspaceId);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  PERMISSIONS PROJETS & AUDIT (Lot A)
+  // ═══════════════════════════════════════════════════════════════════
+
+  @Get('audit/logs')
+  getAuditLogs(@Req() req: any, @Query('limit') limit?: string) {
+    return this.projectPermissionsService.getAuditLogs(
+      req.user.id,
+      limit ? parseInt(limit, 10) : undefined,
+    );
+  }
+
+  @Get(':id/members')
+  getProjectMembers(@Req() req: any, @Param('id') projectId: string) {
+    return this.projectPermissionsService.getProjectMembers(projectId, req.user.id);
+  }
+
+  @Post(':id/members')
+  assignProjectRole(
+    @Req() req: any,
+    @Param('id') projectId: string,
+    @Body() body: { targetUserId: string; role: ProjectRole },
+  ) {
+    return this.projectPermissionsService.assignProjectRole(
+      projectId,
+      body.targetUserId,
+      body.role,
+      req.user.id,
+    );
+  }
+
+  @Delete(':id/members/:userId')
+  removeProjectRole(
+    @Req() req: any,
+    @Param('id') projectId: string,
+    @Param('userId') targetUserId: string,
+  ) {
+    return this.projectPermissionsService.removeProjectRole(
+      projectId,
+      targetUserId,
+      req.user.id,
+    );
   }
 
   @Get('timeblocks/all')
