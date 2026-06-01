@@ -8,6 +8,7 @@ import { TimeBlocksService } from './timeblocks.service';
 import { MilestonesService } from './milestones.service';
 import { ResourcesService } from './resources.service';
 import { FinancesService } from './finances.service';
+import { ProjectPermissionsService } from './project-permissions.service';
 import { Prisma, TaskPriority, ProjectStatus, DeliverableStatus, DependencyType, DeliveryStatus, WorkspaceRole, TaskStatus } from '@prisma/client';
 import * as crypto from 'crypto';
 import { UpdateTaskDto } from './dto/update-task.dto';
@@ -34,6 +35,7 @@ export class ProjectsService {
     private readonly milestonesService: MilestonesService,
     private readonly resourcesService: ResourcesService,
     private readonly financesService: FinancesService,
+    private readonly projectPermissionsService: ProjectPermissionsService,
   ) {}
 
   // ═══════════════════════════════════════════════════════════════════
@@ -145,7 +147,7 @@ export class ProjectsService {
       throw new ForbiddenException('Unauthorized: read-only access (VIEWER)');
     }
 
-    return this.prisma.project.create({
+    const project = await this.prisma.project.create({
       data: {
         name,
         description,
@@ -158,6 +160,25 @@ export class ProjectsService {
         billingType: billingType !== undefined ? billingType : 'TIME_AND_MATERIALS',
       },
     });
+
+    // Assigner le créateur comme MANAGER
+    await this.prisma.projectMembership.create({
+      data: {
+        projectId: project.id,
+        userId,
+        role: 'MANAGER',
+      },
+    });
+
+    await this.projectPermissionsService.logAction(
+      userId,
+      'PROJECT_CREATE',
+      'Project',
+      project.id,
+      { project },
+    );
+
+    return project;
   }
 
   async getProjects(userId: string) {
@@ -168,6 +189,7 @@ export class ProjectsService {
         OR: [
           { userId },
           { workspace: { memberships: { some: { userId } } } },
+          { projectMemberships: { some: { userId } } },
         ],
       },
       include: {
@@ -192,14 +214,13 @@ export class ProjectsService {
   }
 
   async getProject(projectId: string, userId: string) {
+    // Vérifier l'accès au projet
+    await this.projectPermissionsService.assertProjectRole(projectId, userId, ['MANAGER', 'CONTRIBUTOR', 'COMMENTER', 'CLIENT']);
+
     return this.prisma.project.findFirst({
       where: {
         id: projectId,
         deletedAt: null,
-        OR: [
-          { userId },
-          { workspace: { memberships: { some: { userId } } } },
-        ],
       },
       include: {
         workspace: true,
@@ -222,19 +243,11 @@ export class ProjectsService {
   }
 
   async updateProject(projectId: string, userId: string, data: UpdateProjectDto) {
-    const project = await this.getProject(projectId, userId);
-    if (!project) {
-      throw new Error('Project not found or unauthorized');
-    }
+    await this.projectPermissionsService.assertProjectRole(projectId, userId, ['MANAGER', 'CONTRIBUTOR']);
 
-    if (project.workspaceId) {
-      const membership = await this.assertWorkspaceMember(project.workspaceId, userId);
-      if (membership.role === WorkspaceRole.VIEWER) {
-        throw new ForbiddenException('Unauthorized: read-only access (VIEWER)');
-      }
-    }
+    const oldProject = await this.prisma.project.findUnique({ where: { id: projectId } });
 
-    return this.prisma.project.update({
+    const updated = await this.prisma.project.update({
       where: { id: projectId },
       data: {
         ...(data.name !== undefined ? { name: data.name } : {}),
@@ -246,29 +259,40 @@ export class ProjectsService {
         ...(data.billingType !== undefined ? { billingType: data.billingType } : {}),
       },
     });
+
+    await this.projectPermissionsService.logAction(
+      userId,
+      'PROJECT_UPDATE',
+      'Project',
+      projectId,
+      { before: oldProject, after: updated },
+    );
+
+    return updated;
   }
 
   async deleteProject(projectId: string, userId: string) {
-    const project = await this.getProject(projectId, userId);
-    if (!project) {
-      throw new Error('Project not found or unauthorized');
-    }
-
-    if (project.workspaceId) {
-      const membership = await this.assertWorkspaceMember(project.workspaceId, userId);
-      if (membership.role === WorkspaceRole.VIEWER) {
-        throw new ForbiddenException('Unauthorized: read-only access (VIEWER)');
-      }
-    }
+    await this.projectPermissionsService.assertProjectRole(projectId, userId, ['MANAGER']);
 
     await this.prisma.task.updateMany({
       where: { projectId },
       data: { deletedAt: new Date() },
     });
-    return this.prisma.project.update({
+
+    const deleted = await this.prisma.project.update({
       where: { id: projectId },
       data: { deletedAt: new Date() },
     });
+
+    await this.projectPermissionsService.logAction(
+      userId,
+      'PROJECT_DELETE',
+      'Project',
+      projectId,
+      { deleted },
+    );
+
+    return deleted;
   }
 
   // ═══════════════════════════════════════════════════════════════════
