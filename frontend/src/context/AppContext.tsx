@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useMemo } from 'react'
+import React, { createContext, useContext, useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { io, Socket } from 'socket.io-client'
 
 export interface TaskAssignee {
@@ -220,7 +220,7 @@ interface AppContextType {
   getProjectCriticalPath: (projectId: string) => Promise<{ criticalTaskIds: string[], slacks: Record<string, number> } | null>
   updateResourceProfile: (userId: string, weeklyCapacityMinutes?: number, skills?: string, costRateCents?: number) => Promise<void>
   createResourceAllocation: (projectId: string, userId: string, allocationPercent: number, roleLabel?: string, startDate?: string, endDate?: string) => Promise<void>
-  refreshData: () => Promise<void>
+  refreshData: () => void
   // Invitations / Collaboration
   createInvitation: (workspaceId: string, email: string | null, role: 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER', projectId?: string, durationDays?: number) => Promise<{ invitation: any; rawToken: string } | null>
   listInvitations: (workspaceId: string) => Promise<any[]>
@@ -274,6 +274,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activeTab, setActiveTab] = useState<'dashboard' | 'kanban' | 'calendar' | 'notes' | 'pomodoro' | 'governance' | 'resources' | 'agile' | 'gantt' | 'finances'>('dashboard')
   const [isConnected, setIsConnected] = useState(false)
   const [socket, setSocket] = useState<Socket | null>(null)
+  const refreshTimeoutRef = useRef<any>(null)
+
+  useEffect(() => {
+    return () => {
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current)
+      }
+    }
+  }, [])
 
   // Pomodoro States
   const [pomodoroState, setPomodoroState] = useState<'idle' | 'focus' | 'break'>('idle')
@@ -296,12 +305,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [])
 
   // Helper pour générer les headers HTTP avec le token JWT
-  const getHeaders = () => {
+  const getHeaders = useCallback(() => {
     return {
       'Content-Type': 'application/json',
       'Authorization': user?.token ? `Bearer ${user.token}` : ''
     }
-  }
+  }, [user?.token])
 
   // Gérer la connexion WebSocket et tester l'API Backend
   useEffect(() => {
@@ -406,35 +415,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [user])
 
   // Charger les données réelles depuis le backend
-  const refreshData = async () => {
+  const refreshData = useCallback(() => {
     if (!user || !isConnected) return
 
-    try {
-      const [projRes, noteRes, membersRes, tbRes, activeRes, workspacesRes, capacityRes] = await Promise.all([
-        fetch(`${BACKEND_URL}/projects`, { headers: getHeaders() }),
-        fetch(`${BACKEND_URL}/notes`, { headers: getHeaders() }),
-        fetch(`${BACKEND_URL}/projects/members`, { headers: getHeaders() }),
-        fetch(`${BACKEND_URL}/projects/timeblocks/all`, { headers: getHeaders() }),
-        fetch(`${BACKEND_URL}/tracking/active`, { headers: getHeaders() }),
-        fetch(`${BACKEND_URL}/projects/workspaces`, { headers: getHeaders() }),
-        fetch(`${BACKEND_URL}/projects/resources/capacity`, { headers: getHeaders() })
-      ])
-
-      if (projRes.ok) setProjects(await projRes.json())
-      if (noteRes.ok) setNotes(await noteRes.json())
-      if (membersRes.ok) setWorkspaceMembers(await membersRes.json())
-      if (tbRes.ok) setTimeBlocks(await tbRes.json())
-      if (workspacesRes.ok) setWorkspaces(await workspacesRes.json())
-      if (capacityRes.ok) setResourceCapacity(await capacityRes.json())
-      if (activeRes.ok) {
-        const text = await activeRes.text()
-        const act = text ? JSON.parse(text) : null
-        setActiveTimer(act)
-      }
-    } catch (e) {
-      console.error('Erreur lors du chargement des données depuis le backend :', e)
+    if (refreshTimeoutRef.current) {
+      clearTimeout(refreshTimeoutRef.current)
     }
-  }
+
+    refreshTimeoutRef.current = setTimeout(async () => {
+      try {
+        const [projRes, noteRes, membersRes, tbRes, activeRes, workspacesRes, capacityRes] = await Promise.all([
+          fetch(`${BACKEND_URL}/projects`, { headers: getHeaders() }),
+          fetch(`${BACKEND_URL}/notes`, { headers: getHeaders() }),
+          fetch(`${BACKEND_URL}/projects/members`, { headers: getHeaders() }),
+          fetch(`${BACKEND_URL}/projects/timeblocks/all`, { headers: getHeaders() }),
+          fetch(`${BACKEND_URL}/tracking/active`, { headers: getHeaders() }),
+          fetch(`${BACKEND_URL}/projects/workspaces`, { headers: getHeaders() }),
+          fetch(`${BACKEND_URL}/projects/resources/capacity`, { headers: getHeaders() })
+        ])
+
+        if (projRes.ok) setProjects(await projRes.json())
+        if (noteRes.ok) setNotes(await noteRes.json())
+        if (membersRes.ok) setWorkspaceMembers(await membersRes.json())
+        if (tbRes.ok) setTimeBlocks(await tbRes.json())
+        if (workspacesRes.ok) setWorkspaces(await workspacesRes.json())
+        if (capacityRes.ok) setResourceCapacity(await capacityRes.json())
+        if (activeRes.ok) {
+          const text = await activeRes.text()
+          const act = text ? JSON.parse(text) : null
+          setActiveTimer(act)
+        }
+      } catch (e) {
+        console.error('Erreur lors du chargement des données depuis le backend :', e)
+      }
+    }, 200)
+  }, [user, isConnected, getHeaders])
 
   useEffect(() => {
     refreshData()
