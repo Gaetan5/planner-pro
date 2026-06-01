@@ -193,6 +193,9 @@ export class AuthService {
    * Inscription classique (Email, Mot de passe, Nom)
    */
   async register(email: string, passwordRaw: string, name: string) {
+    if (!email || !passwordRaw || !name) {
+      throw new BadRequestException('Tous les champs (email, mot de passe, nom) sont requis.');
+    }
     const emailLower = email.toLowerCase().trim();
     const existing = await this.prisma.user.findUnique({
       where: { email: emailLower },
@@ -236,6 +239,9 @@ export class AuthService {
    * Connexion classique (Email, Mot de passe)
    */
   async login(email: string, passwordRaw: string) {
+    if (!email || !passwordRaw) {
+      throw new BadRequestException('L\'email et le mot de passe sont requis.');
+    }
     const emailLower = email.toLowerCase().trim();
     const user = await this.prisma.user.findUnique({
       where: { email: emailLower },
