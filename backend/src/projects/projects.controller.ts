@@ -563,4 +563,12 @@ END:VCALENDAR`;
   getBurndownChart(@Req() req: any, @Param('sprintId') sprintId: string) {
     return this.sprintService.getBurndownChart(sprintId, req.user.id);
   }
+
+  @Get('workspaces/:workspaceId/finances')
+  getWorkspaceFinancialSummary(
+    @Req() req: any,
+    @Param('workspaceId') workspaceId: string,
+  ) {
+    return this.projectsService.getWorkspaceFinancialSummary(workspaceId, req.user.id);
+  }
 }
