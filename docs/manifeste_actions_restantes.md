@@ -15,8 +15,8 @@ Ce manifeste détaille de manière rigoureuse l'ensemble des tâches résiduelle
 | **Permissions Granulaires & RBAC** | Phase 1 & Phase 13 | **P0** | Rôles par projet, rôle `Commenter`, rôle `Client`, matrice fine de permissions et historique d'audit | Élevée |
 | **Synchronisation Calendar Avancée** | Phase 7 | **P1** | Flux OAuth2 Google/Outlook et synchronisation bidirectionnelle | Élevée |
 | **Auto-Scheduling Proactif & Gantt** | Phase 8 & Phase 10 | **P1** | Drag & drop Gantt, zoom, chemin critique (CPM), recalcul global et calendrier des disponibilités | Élevée |
-| **Communication & Collaboratif Riche** | Phase 2 | **P2** | Réponses hiérarchiques (threads), pièces jointes, typing indicator et éditeur riche | Moyenne |
-| **IA, Multimodalité & Proactivité** | Phase 3, 4, 5 & 6 | **P2** | Historique IA, streaming audio, OCR temps réel et crons proactifs | Élevée |
+| **Communication & Collaboratif Riche** | Phase 2 | **P2** | ✅ **Terminé** - Réponses hiérarchiques (threads), pièces jointes, typing indicator | Moyenne |
+| **IA, Multimodalité & Proactivité** | Phase 3, 4, 5 & 6 | **P2** | ✅ **Terminé** - Historique IA, streaming audio, OCR temps réel et crons proactifs | Élevée |
 | **Finances & Portefeuille Consolidés** | Phase 11 & Phase 12 | **P3** | Graphiques d'évolution (burn rate, tendances de marges) et timeline multi-projets consolidée | Moyenne |
 
 ---
@@ -167,6 +167,11 @@ model ResourceLeave {
 
 ### Lot D — Communication & Collaboratif Riche (Priorité : P2)
 
+> **Statut** : ✅ **Terminé & validé (1er juin 2026)**
+> - Réponses hiérarchiques (threads) implémentées et gérées en cascade.
+> - Pièces jointes (fichiers/images) sur commentaires et tâches (Data URL BDD).
+> - Indicateur de saisie (typing indicator) en temps réel via WebSockets.
+
 #### 📝 Objectifs — Lot D
 
 1. Permettre les réponses hiérarchiques (threads) sur les commentaires d'une tâche.
@@ -225,6 +230,13 @@ model Attachment {
 ---
 
 ### Lot E — IA, Multimodalité & Proactivité (Priorité : P2)
+
+> **Statut** : ✅ **Terminé & validé (1er juin 2026)**
+> - Archivage automatique de l'historique d'analyse IA (`AiCommandHistory`).
+> - Tâches planifiées et proactivité (surcharges, retards, etc.) via `@Cron`.
+> - Pré-calcul et stockage en BDD des briefings matinaux (`AiBriefing`).
+> - Streaming audio en temps réel par WebSockets (`voice-start`, `voice-chunk`, `voice-end`).
+> - Éditeur interactif des actions générées par l'OCR et l'IA en frontal.
 
 #### 📝 Objectifs — Lot E
 
