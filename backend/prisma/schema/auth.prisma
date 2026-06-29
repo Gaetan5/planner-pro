@@ -1,0 +1,41 @@
+model User {
+  id                String         @id @default(uuid())
+  email             String         @unique
+  name              String?
+  passwordHash      String?
+  githubId          String?        @unique
+  githubUsername    String?
+  githubAccessToken String?
+  ownedWorkspaces   Workspace[]    @relation("WorkspaceOwner")
+  memberships       Membership[]
+  projects          Project[]
+  tasks             Task[]
+  taskAssignments   TaskAssignee[]
+  resourceProfiles  ResourceProfile[]
+  resourceAllocations ResourceAllocation[]
+  notes             Note[]
+  refreshTokens     RefreshToken[]
+  timeLogs          TimeLog[]
+  sentInvitations    Invitation[]        @relation("SentInvitations")
+  comments           Comment[]
+  notifications      Notification[]      @relation("UserNotifications")
+  sentNotifications  Notification[]      @relation("SentNotifications")
+  projectMemberships ProjectMembership[]
+  auditLogs          AuditLog[]
+  resourceLeaves     ResourceLeave[]
+  aiCommandHistories AiCommandHistory[]
+  aiBriefing         AiBriefing?
+  createdAt          DateTime            @default(now())
+}
+
+model RefreshToken {
+  id          String    @id @default(uuid())
+  hashedToken String    @unique
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([userId])
+}

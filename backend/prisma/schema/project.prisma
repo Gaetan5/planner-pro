@@ -1,0 +1,151 @@
+model Project {
+  id          String    @id @default(uuid())
+  name        String
+  description String?   @db.Text
+  githubRepo  String?   // Ex: "gaetan/planner-pro"
+  status      ProjectStatus @default(PLANNING)
+  startDate   DateTime?
+  dueDate     DateTime?
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  workspaceId String?
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id])
+  phases      ProjectPhaseItem[]
+  milestones  Milestone[]
+  deliverables Deliverable[]
+  deliveries  DeliveryRecord[]
+  resourceAllocations ResourceAllocation[]
+  tasks               Task[]
+  invitations         Invitation[]
+  projectMemberships  ProjectMembership[]
+  budgetCents         Int?
+  billingType         String?              @default("TIME_AND_MATERIALS")
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  deletedAt           DateTime?
+
+  @@index([userId])
+  @@index([workspaceId])
+}
+
+model ProjectPhaseItem {
+  id          String    @id @default(uuid())
+  name        String
+  status      PhaseStatus @default(NOT_STARTED)
+  order       Int       @default(0)
+  startDate   DateTime?
+  dueDate     DateTime?
+  projectId   String
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([projectId])
+}
+
+model Milestone {
+  id          String    @id @default(uuid())
+  name        String
+  description String?   @db.Text
+  dueDate     DateTime?
+  completedAt DateTime?
+  projectId   String
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([projectId])
+}
+
+model Deliverable {
+  id          String            @id @default(uuid())
+  title       String
+  description String?           @db.Text
+  status      DeliverableStatus @default(DRAFT)
+  dueDate     DateTime?
+  acceptedAt  DateTime?
+  projectId   String
+  project     Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@index([projectId])
+}
+
+model DeliveryRecord {
+  id          String         @id @default(uuid())
+  projectId   String
+  project     Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  status      DeliveryStatus @default(DRAFT)
+  summary     String?        @db.Text
+  deliveredAt DateTime?
+  acceptedAt  DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  checklist   DeliveryChecklistItem[]
+
+  @@index([projectId])
+}
+
+model DeliveryChecklistItem {
+  id          String         @id @default(uuid())
+  deliveryId  String
+  delivery    DeliveryRecord @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  title       String
+  checked     Boolean        @default(false)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([deliveryId])
+}
+
+model ProjectMembership {
+  id          String      @id @default(uuid())
+  projectId   String
+  userId      String
+  role        ProjectRole
+  project     Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@unique([projectId, userId])
+  @@index([userId])
+  @@index([projectId])
+}
+
+enum ProjectStatus {
+  PLANNING
+  ACTIVE
+  ON_HOLD
+  AT_RISK
+  DELIVERED
+  CLOSED
+}
+
+enum PhaseStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  DONE
+}
+
+enum DeliverableStatus {
+  DRAFT
+  READY_FOR_REVIEW
+  ACCEPTED
+  DELIVERED
+}
+
+enum ProjectRole {
+  MANAGER
+  CONTRIBUTOR
+  COMMENTER
+  CLIENT
+}
+
+enum DeliveryStatus {
+  DRAFT
+  READY_FOR_ACCEPTANCE
+  ACCEPTED
+  REJECTED
+}
