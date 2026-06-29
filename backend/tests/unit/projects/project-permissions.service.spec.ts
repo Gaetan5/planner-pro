@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ProjectPermissionsService } from './project-permissions.service';
-import { PrismaService } from '../prisma/prisma.service';
+import { ProjectPermissionsService } from '../../../src/projects/project-permissions.service';
+import { PrismaService } from '../../../src/prisma/prisma.service';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ProjectRole } from '@prisma/client';
 

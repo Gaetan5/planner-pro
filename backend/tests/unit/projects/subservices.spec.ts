@@ -1,8 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { FinancesService } from './finances.service';
-import { MilestonesService } from './milestones.service';
-import { TimeBlocksService } from './timeblocks.service';
-import { PrismaService } from '../prisma/prisma.service';
+import { FinancesService } from '../../../src/projects/finances.service';
+import { MilestonesService } from '../../../src/projects/milestones.service';
+import { TimeBlocksService } from '../../../src/projects/timeblocks.service';
+import { PrismaService } from '../../../src/prisma/prisma.service';
 import { WorkspaceRole, DeliverableStatus } from '@prisma/client';
 import { ForbiddenException, BadRequestException } from '@nestjs/common';
 

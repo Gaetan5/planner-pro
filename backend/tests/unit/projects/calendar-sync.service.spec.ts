@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { CalendarSyncService } from './calendar-sync.service';
-import { PrismaService } from '../prisma/prisma.service';
+import { CalendarSyncService } from '../../../src/projects/calendar-sync.service';
+import { PrismaService } from '../../../src/prisma/prisma.service';
 import { NotFoundException } from '@nestjs/common';
 
 describe('CalendarSyncService', () => {

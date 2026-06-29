@@ -1,8 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { CommentsService } from './comments.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { IntegrationService } from './integration.service';
-import { NotificationsService } from '../notifications/notifications.service';
+import { CommentsService } from '../../../src/projects/comments.service';
+import { PrismaService } from '../../../src/prisma/prisma.service';
+import { IntegrationService } from '../../../src/projects/integration.service';
+import { NotificationsService } from '../../../src/notifications/notifications.service';
 import { WorkspaceRole } from '@prisma/client';
 
 describe('CommentsService', () => {

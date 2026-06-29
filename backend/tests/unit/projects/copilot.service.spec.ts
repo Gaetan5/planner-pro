@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { CopilotService } from './copilot.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { GeminiService } from '../notes/gemini.service';
+import { CopilotService } from '../../../src/projects/copilot.service';
+import { PrismaService } from '../../../src/prisma/prisma.service';
+import { GeminiService } from '../../../src/notes/gemini.service';
 
 describe('CopilotService', () => {
   let service: CopilotService;

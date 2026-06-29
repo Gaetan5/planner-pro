@@ -1,10 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { TasksService } from './tasks.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { NotesService } from '../notes/notes.service';
-import { IntegrationService } from './integration.service';
-import { NotificationsService } from '../notifications/notifications.service';
-import { ProjectPermissionsService } from './project-permissions.service';
+import { TasksService } from '../../../src/projects/tasks.service';
+import { PrismaService } from '../../../src/prisma/prisma.service';
+import { NotesService } from '../../../src/notes/notes.service';
+import { IntegrationService } from '../../../src/projects/integration.service';
+import { NotificationsService } from '../../../src/notifications/notifications.service';
+import { ProjectPermissionsService } from '../../../src/projects/project-permissions.service';
 import { BadRequestException } from '@nestjs/common';
 
 describe('TasksService - Critical Path Method (CPM)', () => {

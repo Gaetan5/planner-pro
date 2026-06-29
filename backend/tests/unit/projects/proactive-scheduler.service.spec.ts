@@ -1,8 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ProactiveSchedulerService } from './proactive-scheduler.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { CopilotService } from './copilot.service';
-import { NotificationsService } from '../notifications/notifications.service';
+import { ProactiveSchedulerService } from '../../../src/projects/proactive-scheduler.service';
+import { PrismaService } from '../../../src/prisma/prisma.service';
+import { CopilotService } from '../../../src/projects/copilot.service';
+import { NotificationsService } from '../../../src/notifications/notifications.service';
 
 describe('ProactiveSchedulerService', () => {
   let service: ProactiveSchedulerService;

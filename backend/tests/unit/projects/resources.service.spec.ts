@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ResourcesService } from './resources.service';
-import { PrismaService } from '../prisma/prisma.service';
+import { ResourcesService } from '../../../src/projects/resources.service';
+import { PrismaService } from '../../../src/prisma/prisma.service';
 import { ForbiddenException, BadRequestException } from '@nestjs/common';
 import { WorkspaceRole } from '@prisma/client';
 

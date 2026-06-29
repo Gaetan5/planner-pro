@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { SprintService } from './sprint.service';
-import { PrismaService } from '../prisma/prisma.service';
+import { SprintService } from '../../../src/projects/sprint.service';
+import { PrismaService } from '../../../src/prisma/prisma.service';
 import { SprintStatus } from '@prisma/client';
 import { ForbiddenException, NotFoundException, BadRequestException } from '@nestjs/common';
 
