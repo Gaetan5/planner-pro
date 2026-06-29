@@ -1,15 +1,15 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ProjectsService } from './projects.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { NotesService } from '../notes/notes.service';
-import { IntegrationService } from './integration.service';
-import { TasksService } from './tasks.service';
-import { DependenciesService } from './dependencies.service';
-import { TimeBlocksService } from './timeblocks.service';
-import { MilestonesService } from './milestones.service';
-import { ResourcesService } from './resources.service';
-import { FinancesService } from './finances.service';
-import { ProjectPermissionsService } from './project-permissions.service';
+import { ProjectsService } from '../../../src/projects/projects.service';
+import { PrismaService } from '../../../src/prisma/prisma.service';
+import { NotesService } from '../../../src/notes/notes.service';
+import { IntegrationService } from '../../../src/projects/integration.service';
+import { TasksService } from '../../../src/projects/tasks.service';
+import { DependenciesService } from '../../../src/projects/dependencies.service';
+import { TimeBlocksService } from '../../../src/projects/timeblocks.service';
+import { MilestonesService } from '../../../src/projects/milestones.service';
+import { ResourcesService } from '../../../src/projects/resources.service';
+import { FinancesService } from '../../../src/projects/finances.service';
+import { ProjectPermissionsService } from '../../../src/projects/project-permissions.service';
 import * as crypto from 'crypto';
 
 describe('ProjectsService - GitHub Webhooks', () => {

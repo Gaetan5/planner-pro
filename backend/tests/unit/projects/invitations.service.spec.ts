@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { InvitationsService } from './invitations.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { MailService } from '../mail/mail.service';
+import { InvitationsService } from '../../../src/projects/invitations.service';
+import { PrismaService } from '../../../src/prisma/prisma.service';
+import { MailService } from '../../../src/mail/mail.service';
 import { WorkspaceRole, InvitationStatus } from '@prisma/client';
 import * as crypto from 'crypto';
 

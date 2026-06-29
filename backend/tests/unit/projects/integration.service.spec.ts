@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { IntegrationService } from './integration.service';
-import { PrismaService } from '../prisma/prisma.service';
+import { IntegrationService } from '../../../src/projects/integration.service';
+import { PrismaService } from '../../../src/prisma/prisma.service';
 import { NotFoundException } from '@nestjs/common';
 
 describe('IntegrationService', () => {
