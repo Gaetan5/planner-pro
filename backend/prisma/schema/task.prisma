@@ -1,0 +1,104 @@
+model Task {
+  id          String         @id @default(uuid())
+  title       String
+  description String?        @db.Text
+  status      TaskStatus     @default(TODO)
+  priority    TaskPriority   @default(MEDIUM)
+  startDate   DateTime?
+  dueDate     DateTime?
+  estimatedMinutes Int?
+  progress    Int            @default(0)
+  labels      String?        @db.Text
+  projectId   String
+  project     Project        @relation(fields: [projectId], references: [id])
+  userId      String
+  user        User           @relation(fields: [userId], references: [id])
+  assignees   TaskAssignee[]
+  dependencies TaskDependency[] @relation("TaskDependencies")
+  dependents   TaskDependency[] @relation("TaskDependents")
+  timeBlocks  TimeBlock[]
+  timeLogs    TimeLog[]
+  comments    Comment[]
+  attachments Attachment[]
+  noteId      String?
+  note        Note?          @relation(fields: [noteId], references: [id], onDelete: SetNull)
+  sprintId    String?
+  sprint      Sprint?        @relation(fields: [sprintId], references: [id], onDelete: SetNull)
+  storyPoints Int?
+  completedAt DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  deletedAt   DateTime?
+
+  @@index([projectId])
+  @@index([userId])
+  @@index([noteId])
+  @@index([sprintId])
+}
+
+model TaskAssignee {
+  id        String   @id @default(uuid())
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([taskId, userId])
+  @@index([userId])
+}
+
+model TaskDependency {
+  id              String   @id @default(uuid())
+  taskId          String
+  task            Task     @relation("TaskDependencies", fields: [taskId], references: [id], onDelete: Cascade)
+  dependsOnTaskId String
+  dependsOnTask   Task     @relation("TaskDependents", fields: [dependsOnTaskId], references: [id], onDelete: Cascade)
+  type            DependencyType @default(FINISH_TO_START)
+  createdAt       DateTime @default(now())
+
+  @@unique([taskId, dependsOnTaskId])
+  @@index([dependsOnTaskId])
+}
+
+model TimeBlock {
+  id        String   @id @default(uuid())
+  startTime DateTime
+  endTime   DateTime
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id])
+
+  @@index([taskId])
+}
+
+model TimeLog {
+  id        String    @id @default(uuid())
+  startTime DateTime
+  endTime   DateTime?
+  duration  Int?      // in seconds
+  taskId    String
+  task      Task      @relation(fields: [taskId], references: [id])
+  userId    String?
+  user      User?     @relation(fields: [userId], references: [id])
+
+  @@index([taskId])
+  @@index([userId])
+}
+
+enum DependencyType {
+  FINISH_TO_START
+  START_TO_START
+  FINISH_TO_FINISH
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+}

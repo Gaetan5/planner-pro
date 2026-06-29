@@ -5,9 +5,10 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
-    "build": "nest build",
+    "build": "pnpm prisma:import && nest build",
+    "prisma:import": "prisma-import -s \"./prisma/schema/*.prisma\" -o ./prisma/schema.prisma",
     "start": "nest start",
-    "start:dev": "nest start --watch",
+    "start:dev": "pnpm prisma:import && nest start --watch",
     "start:prod": "node dist/main",
     "test": "jest"
   },
@@ -45,6 +46,7 @@
     "@types/nodemailer": "^8.0.0",
     "jest": "29.7.0",
     "prisma": "5.22.0",
+    "prisma-import": "^1.0.5",
     "ts-jest": "29.2.5",
     "typescript": "5.1.3"
   },

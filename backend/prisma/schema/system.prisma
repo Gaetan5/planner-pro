@@ -1,0 +1,119 @@
+model Comment {
+  id          String       @id @default(uuid())
+  content     String       @db.Text
+  taskId      String
+  task        Task         @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User         @relation(fields: [userId], references: [id])
+  parentId    String?
+  parent      Comment?     @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies     Comment[]    @relation("CommentReplies")
+  attachments Attachment[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([taskId])
+  @@index([userId])
+  @@index([parentId])
+}
+
+model Attachment {
+  id        String   @id @default(uuid())
+  fileName  String
+  fileUrl   String   @db.Text
+  fileType  String
+  fileSize  Int
+  commentId String?
+  comment   Comment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  taskId    String?
+  task      Task?    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@index([commentId])
+  @@index([taskId])
+}
+
+model Integration {
+  id           String    @id @default(uuid())
+  type         String    // "SLACK", "TEAMS", "GOOGLE_CALENDAR", "OUTLOOK"
+  name         String
+  url          String?   @db.Text
+  calendarId   String?
+  active       Boolean   @default(true)
+  accessToken  String?   @db.Text
+  refreshToken String?   @db.Text
+  expiresAt    DateTime?
+  workspaceId  String
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([workspaceId])
+}
+
+model Sprint {
+  id          String       @id @default(uuid())
+  name        String
+  startDate   DateTime
+  endDate     DateTime
+  status      SprintStatus @default(PLANNED)
+  workspaceId String
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  tasks       Task[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([workspaceId])
+}
+
+model Notification {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+  senderId    String?
+  sender      User?    @relation("SentNotifications", fields: [senderId], references: [id])
+  type        String   // "MENTION", "ASSIGNMENT", "SYSTEM", etc.
+  title       String
+  content     String   @db.Text
+  read        Boolean  @default(false)
+  taskId      String?
+  projectId   String?
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([senderId])
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  action      String   // ex: "TASK_CREATE", "PROJECT_DELETE"
+  entityType  String   // ex: "Task", "Project"
+  entityId    String
+  changes     Json     // Contenu avant / après
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Note {
+  id        String    @id @default(uuid())
+  title     String
+  content   String    @db.Text
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  tasks     Task[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([userId])
+}
+
+enum SprintStatus {
+  PLANNED
+  ACTIVE
+  COMPLETED
+}
