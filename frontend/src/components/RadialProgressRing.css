@@ -20,21 +20,21 @@
   display: flex;
   align-items: baseline;
   justify-content: center;
-  font-family: 'Outfit', sans-serif;
+  font-family: var(--font-primary);
   color: var(--text-primary);
   pointer-events: none;
 }
 
 .radial-progress-ring-number {
-  font-size: 1.8rem;
+  font-size: var(--font-4xl);
   font-weight: 700;
-  text-shadow: 0 0 10px rgba(255, 255, 255, 0.15);
+  text-shadow: var(--shadow-sm);
   letter-spacing: -0.05em;
 }
 
 .radial-progress-ring-percent {
-  font-size: 0.9rem;
+  font-size: var(--font-md);
   font-weight: 500;
   color: var(--text-secondary);
-  margin-left: 2px;
+  margin-left: var(--space-xs);
 }
