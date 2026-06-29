@@ -1,4 +1,4 @@
-import { encrypt, decrypt } from './encryption.util';
+import { encrypt, decrypt } from '../../src/auth/encryption.util';
 
 describe('Encryption Utility (AES-256-GCM)', () => {
   const originalEnv = process.env;
