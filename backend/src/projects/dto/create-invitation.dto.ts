@@ -8,7 +8,7 @@ export class CreateInvitationDto {
   email?: string;
 
   @IsEnum(WorkspaceRole, { message: "Le rôle spécifié est invalide." })
-  role: WorkspaceRole;
+  role!: WorkspaceRole;
 
   @IsUUID('4', { message: "L'ID de projet doit être un UUID valide." })
   @IsOptional()

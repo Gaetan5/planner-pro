@@ -5,7 +5,7 @@ import { Type } from 'class-transformer';
 export class CreateProjectDto {
   @IsString()
   @IsNotEmpty()
-  name: string;
+  name!: string;
 
   @IsString()
   @IsOptional()

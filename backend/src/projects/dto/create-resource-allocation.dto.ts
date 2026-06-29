@@ -4,13 +4,13 @@ import { Type } from 'class-transformer';
 export class CreateResourceAllocationDto {
   @IsString()
   @IsNotEmpty()
-  userId: string;
+  userId!: string;
 
   @Type(() => Number)
   @IsInt()
   @Min(0)
   @Max(100)
-  allocationPercent: number;
+  allocationPercent!: number;
 
   @IsString()
   @IsOptional()

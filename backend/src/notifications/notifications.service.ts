@@ -74,7 +74,7 @@ export class NotificationsService {
         taskTitle,
         notification.content,
       );
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("Erreur lors de la préparation de l'email de mention :", error);
     }
   }

@@ -5,7 +5,7 @@ import { TaskPriority } from '@prisma/client';
 export class CreateTaskDto {
   @IsString()
   @IsNotEmpty()
-  title: string;
+  title!: string;
 
   @IsString()
   @IsOptional()

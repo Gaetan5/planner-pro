@@ -3,7 +3,7 @@ import { IsString, IsNotEmpty, IsOptional, IsISO8601 } from 'class-validator';
 export class CreateMilestoneDto {
   @IsString()
   @IsNotEmpty()
-  name: string;
+  name!: string;
 
   @IsString()
   @IsOptional()

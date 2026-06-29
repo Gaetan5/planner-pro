@@ -162,9 +162,9 @@ describe('CopilotService', () => {
       
       const bottleneckAlert = result.find(a => a.type === 'BOTTLENECK');
       expect(bottleneckAlert).toBeDefined();
-      expect(bottleneckAlert.severity).toBe('HIGH');
-      expect(bottleneckAlert.taskId).toBe('task-blocked');
-      expect(bottleneckAlert.message).toContain('est bloquée par "Rédiger l\'audit"');
+      expect(bottleneckAlert?.severity).toBe('HIGH');
+      expect(bottleneckAlert?.taskId).toBe('task-blocked');
+      expect(bottleneckAlert?.message).toContain('est bloquée par "Rédiger l\'audit"');
     });
 
     it('devrait détecter un membre en surcharge de travail (OVERLOADED)', async () => {
@@ -203,9 +203,9 @@ describe('CopilotService', () => {
 
       const overloadAlert = result.find(a => a.type === 'OVERLOADED');
       expect(overloadAlert).toBeDefined();
-      expect(overloadAlert.severity).toBe('MEDIUM');
-      expect(overloadAlert.userId).toBe('alice-id');
-      expect(overloadAlert.message).toContain('est en surcharge de travail');
+      expect(overloadAlert?.severity).toBe('MEDIUM');
+      expect(overloadAlert?.userId).toBe('alice-id');
+      expect(overloadAlert?.message).toContain('est en surcharge de travail');
     });
   });
 

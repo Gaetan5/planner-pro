@@ -202,11 +202,13 @@ export class TasksService {
         { task: finalTask },
       );
 
-      this.integrationService.sendNotification(
-        project.workspaceId,
-        'Nouvelle Tâche',
-        `La tâche "${finalTask.title}" a été créée dans le projet "${project.name}". Priorité : ${finalTask.priority}.`,
-      );
+      if (project.workspaceId) {
+        this.integrationService.sendNotification(
+          project.workspaceId,
+          'Nouvelle Tâche',
+          `La tâche "${finalTask.title}" a été créée dans le projet "${project.name}". Priorité : ${finalTask.priority}.`,
+        );
+      }
     }
 
     return finalTask;
@@ -269,7 +271,7 @@ export class TasksService {
         { before: task, after: finalTask },
       );
 
-      if (data.status === 'DONE' && task.status !== 'DONE') {
+      if (data.status === 'DONE' && task.status !== 'DONE' && task.project.workspaceId) {
         this.integrationService.sendNotification(
           task.project.workspaceId,
           'Tâche Terminée',

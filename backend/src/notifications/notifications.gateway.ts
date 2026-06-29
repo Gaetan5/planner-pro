@@ -20,7 +20,7 @@ import { createClient } from 'redis';
 })
 export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit {
   @WebSocketServer()
-  server: Server;
+  server!: Server;
 
   constructor(private readonly jwtService: JwtService) {}
 
@@ -52,7 +52,7 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
       client.data.userId = payload.sub;
       client.join(`user:${client.data.userId}`);
       console.log(`Notifications Gateway: Client connecté et authentifié : ${client.data.userId} (Socket: ${client.id})`);
-    } catch (error) {
+    } catch (error: unknown) {
       client.disconnect(true);
     }
   }
