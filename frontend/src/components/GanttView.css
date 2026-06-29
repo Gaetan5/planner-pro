@@ -8,7 +8,7 @@
   height: 100%;
   gap: var(--space-lg);
   color: var(--text-primary);
-  animation: fadeIn 0.4s ease-out;
+  animation: fadeIn var(--transition-normal);
 }
 
 /* 1. Header & Controls */
@@ -72,7 +72,7 @@
   border: 1px solid var(--glass-border);
   color: var(--text-primary);
   border-radius: var(--radius-sm);
-  padding: 6px var(--space-md);
+  padding: var(--space-xs) var(--space-md);
   font-family: var(--font-primary);
   font-size: var(--font-xs);
   font-weight: 500;
@@ -104,7 +104,7 @@
   font-family: var(--font-primary);
   font-size: var(--font-xs);
   font-weight: 600;
-  padding: 6px var(--space-md);
+  padding: var(--space-xs) var(--space-md);
   border-radius: var(--radius-xs);
   cursor: pointer;
   transition: all var(--transition-fast);
@@ -132,7 +132,7 @@
   color: rgba(239, 68, 68, 0.95);
   font-size: var(--font-xs);
   font-weight: 500;
-  animation: slideDown 0.3s ease-out;
+  animation: slideDown var(--transition-normal);
 }
 
 [data-theme="light"] .gantt-conflict-banner {
@@ -349,7 +349,7 @@
 }
 
 .month-label {
-  font-size: 8px;
+  font-size: var(--font-xs);
   text-transform: uppercase;
   color: var(--text-muted);
   font-weight: 600;
@@ -440,7 +440,7 @@
   user-select: none;
   box-shadow: var(--shadow-sm);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  padding: 0 4px;
+  padding: 0 var(--space-xs);
   overflow: hidden;
   transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
 }
@@ -481,7 +481,7 @@
   text-overflow: ellipsis;
   text-align: center;
   flex: 1;
-  padding: 0 6px;
+  padding: 0 var(--space-sm);
   pointer-events: none;
 }
 
@@ -600,24 +600,24 @@
 
 /* 6. Critical Path Highlighting */
 .gantt-task-bar--critical {
-  border: 1.5px solid #f43f5e !important;
+  border: 1.5px solid var(--color-error) !important;
   box-shadow: 0 0 10px rgba(244, 63, 94, 0.4) !important;
 }
 
 .dependency-svg-path--critical {
-  stroke: #f43f5e !important;
+  stroke: var(--color-error) !important;
   stroke-width: 2px !important;
   animation: pulse-critical 2s infinite ease-in-out;
 }
 
 @keyframes pulse-critical {
-  0% { stroke: #f43f5e; opacity: 1; filter: drop-shadow(0 0 4px rgba(244, 63, 94, 0.6)); }
+  0% { stroke: var(--color-error); opacity: 1; filter: drop-shadow(0 0 4px rgba(244, 63, 94, 0.6)); }
   50% { stroke: #e11d48; opacity: 0.6; filter: drop-shadow(0 0 1px rgba(244, 63, 94, 0.2)); }
-  100% { stroke: #f43f5e; opacity: 1; filter: drop-shadow(0 0 4px rgba(244, 63, 94, 0.6)); }
+  100% { stroke: var(--color-error); opacity: 1; filter: drop-shadow(0 0 4px rgba(244, 63, 94, 0.6)); }
 }
 
 .zoom-btn--active-critical {
-  background: #f43f5e !important;
+  background: var(--color-error) !important;
   color: white !important;
   box-shadow: var(--shadow-sm);
 }
