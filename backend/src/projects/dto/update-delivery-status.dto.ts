@@ -3,5 +3,5 @@ import { DeliveryStatus } from '@prisma/client';
 
 export class UpdateDeliveryStatusDto {
   @IsEnum(DeliveryStatus)
-  status: DeliveryStatus;
+  status!: DeliveryStatus;
 }

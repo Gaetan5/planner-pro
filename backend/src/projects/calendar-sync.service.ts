@@ -208,7 +208,7 @@ export class CalendarSyncService {
       this.logger.warn(`Unsupported calendar format from URL: ${url}`);
       return [];
     } catch (err: any) {
-      this.logger.error(`Error fetching external calendar from ${url}: ${err.message}`);
+      this.logger.error(`Error fetching external calendar from ${url}: ${err instanceof Error ? err.message : String(err)}`);
       return [];
     }
   }
@@ -390,7 +390,7 @@ export class CalendarSyncService {
           this.logger.warn(`Échec d'échange de token OAuth avec le fournisseur externe. Utilisation du mock en fallback. Détails : ${errText}`);
         }
       } catch (err: any) {
-        this.logger.error(`Erreur HTTP lors de l'échange OAuth : ${err.message}. Repli sur mock.`);
+        this.logger.error(`Erreur HTTP lors de l'échange OAuth : ${err instanceof Error ? err.message : String(err)}. Repli sur mock.`);
       }
     }
 
@@ -485,7 +485,7 @@ export class CalendarSyncService {
           this.logger.warn(`Échec de rafraîchissement du jeton OAuth. Fallback sur mock.`);
         }
       } catch (err: any) {
-        this.logger.error(`Erreur HTTP lors du rafraîchissement OAuth : ${err.message}. Repli sur mock.`);
+        this.logger.error(`Erreur HTTP lors du rafraîchissement OAuth : ${err instanceof Error ? err.message : String(err)}. Repli sur mock.`);
       }
     }
 

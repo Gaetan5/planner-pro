@@ -26,7 +26,7 @@ export class MailService {
           secure: process.env.SMTP_SECURE === 'true' || port === '465',
           auth: user && pass ? { user, pass } : undefined,
         });
-      } catch (error) {
+      } catch (error: unknown) {
         this.logger.error("Échec de création du transporteur SMTP réel, repli sur le mode simulé.", error);
         this.transporter = null;
       }
@@ -311,7 +311,7 @@ export class MailService {
         });
         this.logger.log(`Email envoyé avec succès à ${to}. MessageId: ${info.messageId}`);
         return true;
-      } catch (error) {
+      } catch (error: unknown) {
         this.logger.error(`Échec de l'envoi de l'email réel à ${to} :`, error);
         this.logSimulatedEmail(to, subject, text);
         return false;

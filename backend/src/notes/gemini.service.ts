@@ -125,8 +125,8 @@ ${content}
       
       const tasks: ExtractedTask[] = JSON.parse(responseText);
       return tasks;
-    } catch (error) {
-      this.logger.error(`Erreur lors de l'extraction des tâches via Gemini: ${error.message}`, error.stack);
+    } catch (error: unknown) {
+      this.logger.error(`Erreur lors de l'extraction des tâches via Gemini: ${error instanceof Error ? error.message : String(error)}`, error instanceof Error ? error.stack : undefined);
       throw error;
     }
   }
@@ -245,8 +245,8 @@ ${content}
       
       const parsed = JSON.parse(responseText);
       return parsed.actions || [];
-    } catch (error) {
-      this.logger.error(`Erreur lors de l'analyse de la commande IA via Gemini: ${error.message}`, error.stack);
+    } catch (error: unknown) {
+      this.logger.error(`Erreur lors de l'analyse de la commande IA via Gemini: ${error instanceof Error ? error.message : String(error)}`, error instanceof Error ? error.stack : undefined);
       throw error;
     }
   }
@@ -276,8 +276,8 @@ ${content}
       const transcription = response.response.text();
       this.logger.log(`Transcription réussie : "${transcription.trim()}"`);
       return transcription.trim();
-    } catch (error) {
-      this.logger.error(`Erreur lors de la transcription audio via Gemini: ${error.message}`, error.stack);
+    } catch (error: unknown) {
+      this.logger.error(`Erreur lors de la transcription audio via Gemini: ${error instanceof Error ? error.message : String(error)}`, error instanceof Error ? error.stack : undefined);
       throw error;
     }
   }
@@ -384,8 +384,8 @@ ${content}
       
       const parsed = JSON.parse(responseText);
       return parsed.actions || [];
-    } catch (error) {
-      this.logger.error(`Erreur lors de l'analyse d'image via Gemini: ${error.message}`, error.stack);
+    } catch (error: unknown) {
+      this.logger.error(`Erreur lors de l'analyse d'image via Gemini: ${error instanceof Error ? error.message : String(error)}`, error instanceof Error ? error.stack : undefined);
       throw error;
     }
   }

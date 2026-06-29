@@ -47,7 +47,7 @@ export class ProactiveSchedulerService {
             // Notifier l'utilisateur
             await this.notificationsService.createNotification({
               userId: alert.userId,
-              senderId: null,
+              senderId: undefined,
               type: 'SYSTEM',
               title: 'Alerte Surcharge',
               content: alert.message,
@@ -58,7 +58,7 @@ export class ProactiveSchedulerService {
               if (admin.userId !== alert.userId) {
                 await this.notificationsService.createNotification({
                   userId: admin.userId,
-                  senderId: null,
+                  senderId: undefined,
                   type: 'SYSTEM',
                   title: `Surcharge membre: ${alert.userName}`,
                   content: alert.message,
@@ -72,7 +72,7 @@ export class ProactiveSchedulerService {
             for (const admin of administrators) {
               await this.notificationsService.createNotification({
                 userId: admin.userId,
-                senderId: null,
+                senderId: undefined,
                 type: 'SYSTEM',
                 title: `Alerte Critique Workspace: ${alert.type}`,
                 content: alert.message,
@@ -82,7 +82,7 @@ export class ProactiveSchedulerService {
           }
         }
       } catch (err: any) {
-        this.logger.error(`Erreur lors du traitement proactif pour le workspace ${ws.id}: ${err.message}`, err.stack);
+        this.logger.error(`Erreur lors du traitement proactif pour le workspace ${ws.id}: ${err instanceof Error ? err.message : String(err)}`, err.stack);
       }
     }
 
@@ -122,7 +122,7 @@ export class ProactiveSchedulerService {
           },
         });
       } catch (err: any) {
-        this.logger.error(`Erreur lors de la génération de briefing pour l'utilisateur ${u.id}: ${err.message}`, err.stack);
+        this.logger.error(`Erreur lors de la génération de briefing pour l'utilisateur ${u.id}: ${err instanceof Error ? err.message : String(err)}`, err.stack);
       }
     }
 

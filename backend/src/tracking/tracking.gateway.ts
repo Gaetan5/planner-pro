@@ -25,7 +25,7 @@ import { AiService } from '../projects/ai.service';
 })
 export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit {
   @WebSocketServer()
-  server: Server;
+  server!: Server;
 
   constructor(
     private readonly trackingService: TrackingService,
@@ -63,7 +63,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
       
       const activeTracking = await this.trackingService.getActiveTracking(client.data.userId);
       client.emit('active-timer-state', activeTracking);
-    } catch (error) {
+    } catch (error: unknown) {
       console.log('Accès WebSocket refusé : Validation de l\'identité échouée.');
       client.disconnect(true);
     }
@@ -87,8 +87,8 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
       // Diffuser le nouvel état à TOUS les clients connectés du même utilisateur
       this.server.to(`user:${userId}`).emit('timer-started', log);
       return { status: 'success', data: log };
-    } catch (error) {
-      return { status: 'error', message: error.message };
+    } catch (error: unknown) {
+      return { status: 'error', message: error instanceof Error ? error.message : String(error) };
     }
   }
 
@@ -103,8 +103,8 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
       // Diffuser l'arrêt à TOUS les clients connectés du même utilisateur
       this.server.to(`user:${userId}`).emit('timer-stopped', log);
       return { status: 'success', data: log };
-    } catch (error) {
-      return { status: 'error', message: error.message };
+    } catch (error: unknown) {
+      return { status: 'error', message: error instanceof Error ? error.message : String(error) };
     }
   }
 
@@ -204,8 +204,8 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
       return { status: 'success', data: result };
     } catch (err: any) {
       console.error('Erreur lors du traitement de la voix en streaming:', err);
-      client.emit('voice-error', { message: err.message });
-      return { status: 'error', message: err.message };
+      client.emit('voice-error', { message: err instanceof Error ? err.message : String(err) });
+      return { status: 'error', message: err instanceof Error ? err.message : String(err) };
     }
   }
 }

@@ -198,7 +198,7 @@ export class ProjectPermissionsService {
           ipAddress: ipAddress || null,
         },
       });
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("Échec d'écriture du log d'audit :", err);
     }
   }

@@ -4,7 +4,7 @@ import { DeliverableStatus } from '@prisma/client';
 export class CreateDeliverableDto {
   @IsString()
   @IsNotEmpty()
-  title: string;
+  title!: string;
 
   @IsString()
   @IsOptional()

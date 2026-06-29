@@ -293,8 +293,8 @@ Consignes d'écriture :
 
       const response = await model.generateContent(prompt);
       return response.response.text().trim();
-    } catch (error) {
-      this.logger.error(`Erreur lors de la génération du briefing matinal via Gemini: ${error.message}`, error.stack);
+    } catch (error: unknown) {
+      this.logger.error(`Erreur lors de la génération du briefing matinal via Gemini: ${error instanceof Error ? error.message : String(error)}`, error instanceof Error ? error.stack : undefined);
       // Fallback sur le texte de démo en cas d'erreur de clé d'API
       return `Bonjour ${userName} ! Vos tâches prioritaires du jour incluent ${assignedTasks.length > 0 ? `"${assignedTasks[0].title}"` : 'des revues de projets'}. Pensez à consulter votre tableau Kanban. Bon travail !`;
     }

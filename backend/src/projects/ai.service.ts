@@ -322,9 +322,9 @@ export class AiService {
           default:
             throw new BadRequestException(`Type d'action inconnu : ${action.type}`);
         }
-      } catch (err) {
+      } catch (err: unknown) {
         resolvedAction.resolved = false;
-        resolvedAction.warning = err.message;
+        resolvedAction.warning = err instanceof Error ? err instanceof Error ? err.message : String(err) : String(err);
         resolvedAction.description = `Action invalide [${action.type}]`;
       }
 

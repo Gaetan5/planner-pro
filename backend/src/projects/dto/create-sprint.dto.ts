@@ -4,15 +4,15 @@ import { SprintStatus } from '@prisma/client';
 export class CreateSprintDto {
   @IsString()
   @IsNotEmpty()
-  name: string;
+  name!: string;
 
   @IsISO8601()
   @IsNotEmpty()
-  startDate: string;
+  startDate!: string;
 
   @IsISO8601()
   @IsNotEmpty()
-  endDate: string;
+  endDate!: string;
 
   @IsEnum(SprintStatus)
   @IsOptional()

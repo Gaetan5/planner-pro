@@ -108,7 +108,7 @@ export class IntegrationService {
       // On lance sans "await" global pour que cela ne bloque pas l'exécution principale (fire and forget)
       // mais on capture les erreurs localement.
       this.postToWebhook(integration.url, integration.type, eventName, text).catch((err) => {
-        this.logger.error(`Échec d'envoi du webhook ${integration.type} (${integration.name}) : ${err.message}`);
+        this.logger.error(`Échec d'envoi du webhook ${integration.type} (${integration.name}) : ${err instanceof Error ? err.message : String(err)}`);
       });
     }
   }

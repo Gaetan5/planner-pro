@@ -3,7 +3,7 @@ import Redis from 'ioredis';
 
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
-  private redisClient: Redis;
+  private redisClient!: Redis;
 
   onModuleInit() {
     const host = process.env.REDIS_HOST || 'localhost';

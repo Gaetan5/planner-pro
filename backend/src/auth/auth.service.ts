@@ -218,7 +218,7 @@ export class AuthService {
     // Création des données d'onboarding par défaut
     try {
       await this.createOnboardingData(user.id, user.name || 'Nouvel Utilisateur');
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("Erreur lors de la création des données d'onboarding :", err);
     }
 

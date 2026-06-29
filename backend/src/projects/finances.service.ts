@@ -138,10 +138,10 @@ export class FinancesService {
 
     const validSummaries = projectSummaries.filter((s) => s !== null);
 
-    const totalBudget = validSummaries.reduce((sum, s) => sum + (s.budgetCents || 0), 0);
-    const totalCost = validSummaries.reduce((sum, s) => sum + s.actualCostCents, 0);
-    const totalRevenue = validSummaries.reduce((sum, s) => sum + s.actualRevenueCents, 0);
-    const totalHours = validSummaries.reduce((sum, s) => sum + s.totalHours, 0);
+    const totalBudget = validSummaries.reduce((sum, s) => sum + (s?.budgetCents || 0), 0);
+    const totalCost = validSummaries.reduce((sum, s) => sum + (s?.actualCostCents ?? 0), 0);
+    const totalRevenue = validSummaries.reduce((sum, s) => sum + (s?.actualRevenueCents ?? 0), 0);
+    const totalHours = validSummaries.reduce((sum, s) => sum + (s?.totalHours ?? 0), 0);
 
     const totalMargin = totalRevenue - totalCost;
     const totalMarginPercent = totalRevenue > 0 ? Math.round((totalMargin / totalRevenue) * 100) : 0;

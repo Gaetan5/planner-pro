@@ -196,8 +196,8 @@ export class NotesService {
       try {
         aiTasks = await this.gemini.extractTasksFromText(content, new Date());
         console.log(`[Gemini NLP] ${aiTasks.length} tâches analysées par l'IA.`);
-      } catch (err) {
-        console.error('Erreur lors de l\'appel de Gemini pour l\'extraction NLP, bascule sur le mode standard:', err.message);
+      } catch (err: unknown) {
+        console.error('Erreur lors de l\'appel de Gemini pour l\'extraction NLP, bascule sur le mode standard:', err instanceof Error ? err.message : String(err));
       }
     }
 
