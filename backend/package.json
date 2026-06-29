@@ -6,7 +6,7 @@
   "license": "UNLICENSED",
   "scripts": {
     "build": "pnpm prisma:import && nest build",
-    "prisma:import": "prisma-import -s \"./prisma/schema/*.prisma\" -o ./prisma/schema.prisma",
+    "prisma:import": "prisma-import -f -s \"./prisma/schema/*.prisma\" -o ./prisma/schema.prisma",
     "start": "nest start",
     "start:dev": "pnpm prisma:import && nest start --watch",
     "start:prod": "node dist/main",
