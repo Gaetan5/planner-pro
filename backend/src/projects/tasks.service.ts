@@ -1,8 +1,8 @@
-import { Injectable, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotesService } from '../notes/notes.service';
 import { IntegrationService } from './integration.service';
-import { Prisma, TaskPriority, TaskStatus, WorkspaceRole } from '@prisma/client';
+import { Prisma, TaskPriority, TaskStatus } from '@prisma/client';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -25,7 +25,6 @@ export class TasksService {
     private readonly notificationsService: NotificationsService,
     private readonly projectPermissionsService: ProjectPermissionsService,
   ) {}
-
 
   parseTaskDates(data: CreateTaskDto | UpdateTaskDto) {
     return {
@@ -162,7 +161,6 @@ export class TasksService {
     ]);
     return project;
   }
-
 
   async createTask(
     projectId: string,
@@ -334,10 +332,6 @@ export class TasksService {
     return deleted;
   }
 
-
-
-
-
   /**
    * Propage récursivement le décalage de planification aux tâches dépendantes (effet domino).
    */
@@ -387,7 +381,6 @@ export class TasksService {
       }
     }
   }
-
 
   async closeTaskFromWebhook(taskId: string): Promise<boolean> {
     const task = await this.prisma.task.findFirst({

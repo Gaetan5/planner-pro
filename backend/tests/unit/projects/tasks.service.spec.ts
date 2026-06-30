@@ -9,27 +9,33 @@ import { BadRequestException } from '@nestjs/common';
 
 describe('TasksService - Critical Path Method (CPM)', () => {
   let service: TasksService;
-  let prisma: PrismaService;
-  let permissions: ProjectPermissionsService;
 
-  const mockPrisma: any = {
+  const mockPrisma = {
     $transaction: jest.fn(async (callback) => callback(mockPrisma)),
     task: {
       findMany: jest.fn(),
       findFirst: jest.fn(),
       findUnique: jest.fn(),
       update: jest.fn(),
+      create: jest.fn(),
     },
     taskDependency: {
       findMany: jest.fn(),
     },
     taskAssignee: {
       deleteMany: jest.fn(),
+      createMany: jest.fn(),
     },
     membership: {
       findMany: jest.fn(),
     },
-  };
+    user: {
+      findUnique: jest.fn(),
+    },
+    auditLog: {
+      create: jest.fn(),
+    },
+  } as unknown as PrismaService;
 
   const mockNotes = {
     syncTaskStatusToNote: jest.fn(),
@@ -56,9 +62,6 @@ describe('TasksService - Critical Path Method (CPM)', () => {
     }).compile();
 
     service = module.get<TasksService>(TasksService);
-    prisma = module.get<PrismaService>(PrismaService);
-    permissions = module.get<ProjectPermissionsService>(ProjectPermissionsService);
-
     jest.clearAllMocks();
   });
 
@@ -83,7 +86,7 @@ describe('TasksService - Critical Path Method (CPM)', () => {
         },
       ];
 
-      mockPrisma.task.findMany.mockResolvedValue(mockTasks);
+      (mockPrisma.task.findMany as jest.Mock).mockResolvedValue(mockTasks);
       mockPermissions.assertProjectRole.mockResolvedValue(true);
 
       const result = await service.getCriticalPath('project-1', 'user-1');
@@ -135,7 +138,7 @@ describe('TasksService - Critical Path Method (CPM)', () => {
         },
       ];
 
-      mockPrisma.task.findMany.mockResolvedValue(mockTasks);
+      (mockPrisma.task.findMany as jest.Mock).mockResolvedValue(mockTasks);
       mockPermissions.assertProjectRole.mockResolvedValue(true);
 
       const result = await service.getCriticalPath('project-1', 'user-1');
@@ -161,7 +164,7 @@ describe('TasksService - Critical Path Method (CPM)', () => {
         },
       ];
 
-      mockPrisma.task.findMany.mockResolvedValue(mockTasks);
+      (mockPrisma.task.findMany as jest.Mock).mockResolvedValue(mockTasks);
       mockPermissions.assertProjectRole.mockResolvedValue(true);
 
       await expect(service.getCriticalPath('project-1', 'user-1')).rejects.toThrow(
@@ -219,7 +222,7 @@ describe('TasksService - Critical Path Method (CPM)', () => {
       mockPrisma.task.findFirst = jest.fn().mockResolvedValue(mockTask);
       mockPermissions.assertProjectRole.mockResolvedValue(true);
 
-      let updatedData: any = {};
+      let updatedData: Record<string, unknown> = {};
       mockPrisma.task.update = jest.fn().mockImplementation(({ data }) => {
         updatedData = data;
         return {
