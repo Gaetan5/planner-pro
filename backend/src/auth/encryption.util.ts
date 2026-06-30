@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes, pbkdf2Sync } from 'crypto';
+import * as argon2 from 'argon2';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12;
@@ -64,25 +65,31 @@ export function decrypt(cipherText: string): string {
 }
 
 /**
- * Hache un mot de passe avec PBKDF2 et un sel aléatoire de 16 octets.
- * Renvoie une chaîne au format "salt:hash".
+ * Hache un mot de passe avec Argon2id.
  */
-export function hashPassword(password: string): string {
-  const salt = randomBytes(16).toString('hex');
-  const hash = pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
-  return `${salt}:${hash}`;
+export async function hashPassword(password: string): Promise<string> {
+  return await argon2.hash(password, { type: argon2.argon2id });
 }
 
 /**
- * Vérifie si un mot de passe correspond à un hachage stocké.
+ * Vérifie si un mot de passe correspond à un hachage stocké (Argon2 ou PBKDF2 legacy).
+ * Renvoie un objet indiquant si le mot de passe est valide et s'il nécessite une migration.
  */
-export function verifyPassword(password: string, storedHash: string): boolean {
+export async function verifyPassword(password: string, storedHash: string): Promise<{ isValid: boolean; needsMigration: boolean }> {
+  // Détection du format : Argon2 commence par $argon2
+  if (storedHash.startsWith('$argon2')) {
+    const isValid = await argon2.verify(storedHash, password);
+    return { isValid, needsMigration: false };
+  }
+
+  // Legacy PBKDF2 support
   const parts = storedHash.split(':');
   if (parts.length !== 2) {
-    return false;
+    return { isValid: false, needsMigration: false };
   }
   const [salt, hash] = parts;
   const verifyHash = pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
-  return hash === verifyHash;
+  
+  return { isValid: hash === verifyHash, needsMigration: true };
 }
 

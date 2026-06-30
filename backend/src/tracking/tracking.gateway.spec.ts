@@ -3,6 +3,8 @@ import { TrackingGateway } from './tracking.gateway';
 import { TrackingService } from './tracking.service';
 import { JwtService } from '@nestjs/jwt';
 import { AiService } from '../projects/ai.service';
+import { ProjectPermissionsService } from '../projects/project-permissions.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { Socket } from 'socket.io';
 
 describe('TrackingGateway', () => {
@@ -23,6 +25,16 @@ describe('TrackingGateway', () => {
     transcribeAndAnalyzeVoice: jest.fn(),
   };
 
+  const mockProjectPermissionsService = {
+    assertProjectRole: jest.fn(),
+  };
+
+  const mockPrismaService = {
+    task: {
+      findUnique: jest.fn(),
+    },
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -30,6 +42,8 @@ describe('TrackingGateway', () => {
         { provide: TrackingService, useValue: mockTrackingService },
         { provide: JwtService, useValue: mockJwtService },
         { provide: AiService, useValue: mockAiService },
+        { provide: ProjectPermissionsService, useValue: mockProjectPermissionsService },
+        { provide: PrismaService, useValue: mockPrismaService },
       ],
     }).compile();
 

@@ -15,6 +15,8 @@ import { SkipThrottle } from '@nestjs/throttler';
 import { createAdapter } from '@socket.io/redis-adapter';
 import { createClient } from 'redis';
 import { AiService } from '../projects/ai.service';
+import { ProjectPermissionsService } from '../projects/project-permissions.service';
+import { PrismaService } from '../prisma/prisma.service';
 
 @SkipThrottle()
 @WebSocketGateway({
@@ -31,6 +33,8 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
     private readonly trackingService: TrackingService,
     private readonly jwtService: JwtService,
     private readonly aiService: AiService,
+    private readonly projectPermissionsService: ProjectPermissionsService,
+    private readonly prisma: PrismaService,
   ) {}
 
   async afterInit(server: Server) {
@@ -121,9 +125,26 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
     @MessageBody() data: { taskId: string },
     @ConnectedSocket() client: Socket,
   ) {
-    client.join(`task:${data.taskId}`);
-    console.log(`Socket ${client.id} a rejoint la room task:${data.taskId}`);
-    return { status: 'success' };
+    const userId = client.data.userId;
+    if (!userId) return { status: 'error', message: 'Non authentifié.' };
+
+    const task = await this.prisma.task.findUnique({
+      where: { id: data.taskId },
+      select: { projectId: true },
+    });
+
+    if (!task) return { status: 'error', message: 'Tâche introuvable.' };
+
+    try {
+      // Vérifier la permission d'accès au projet
+      await this.projectPermissionsService.assertProjectRole(task.projectId, userId, ['MANAGER', 'CONTRIBUTOR', 'COMMENTER', 'CLIENT']);
+      
+      client.join(`task:${data.taskId}`);
+      console.log(`Socket ${client.id} a rejoint la room task:${data.taskId}`);
+      return { status: 'success' };
+    } catch (error) {
+      return { status: 'error', message: 'Accès au projet non autorisé.' };
+    }
   }
 
   @SubscribeMessage('leave-task')

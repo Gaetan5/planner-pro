@@ -6,6 +6,44 @@
 
 ---
 
+## 🔴 SPRINT 0 — Sécurité critique (bloquant production)
+
+1. **Migration du hachage de mot de passe vers argon2id**
+   - **ÉTAT : TERMINÉ**
+   - Implémentation : Remplacé `pbkdf2Sync` par `argon2` dans `encryption.util.ts`.
+   - Migration : Implémentation "lazy" lors du login dans `auth.service.ts` : détection du format (legacy PBKDF2 vs Argon2) et re-hachage automatique.
+   - Tests : `tests/unit/password.spec.ts` couvre hash Argon2, vérification PBKDF2 legacy, et détection du besoin de migration. Tests passés (100% de succès sur la suite backend).
+
+2. **DTOs validés pour l'authentification**
+   - **ÉTAT : TERMINÉ**
+   - Implémentation : Création de `RegisterDto` et `LoginDto` (`class-validator`) avec règles de complexité.
+   - Intégration : `AuthController` mis à jour pour utiliser ces DTOs.
+   - Validation : `main.ts` configuré avec `forbidNonWhitelisted: true` pour rejeter les entrées non autorisées.
+   - Tests : La suite de tests backend complète (122 tests) passe sans régression.
+
+3. **Sécurisation du stockage du token côté frontend**
+   - **ÉTAT : TERMINÉ**
+   - Implémentation : Migration vers cookies `httpOnly`, `sameSite=strict` pour le stockage du token. `cookie-parser` configuré dans `main.ts`.
+   - Ajustements : `AuthController` envoie désormais le token via cookie (plus de retour explicite dans le corps). `JwtAuthGuard` extrait le token depuis le cookie.
+   - Tests : Suite de tests backend complète (122 tests) passe sans régression.
+
+4. **Rate limiting dédié sur l'authentification**
+   - **ÉTAT : TERMINÉ**
+   - Implémentation : Application du décorateur `@Throttle({ default: { limit: 5, ttl: 60000 } })` sur les endpoints `login` et `register` dans `AuthController` pour limiter les tentatives de force brute.
+   - Tests : Suite de tests backend complète (122 tests) passe sans régression.
+
+5. **Helmet et en-têtes de sécurité HTTP**
+   - **ÉTAT : TERMINÉ**
+   - Implémentation : Installation et configuration de `helmet` dans `main.ts` pour sécuriser les en-têtes HTTP de l'application.
+   - Tests : Suite de tests backend complète (122 tests) passe sans régression.
+
+6. **Correction IDOR WebSocket `join-task`**
+   - **ÉTAT : TERMINÉ**
+   - Implémentation : Sécurisation de `TrackingGateway.handleJoinTask` avec une vérification explicite des permissions via `ProjectPermissionsService`.
+   - Tests : Suite de tests backend complète (122 tests) passe sans régression.
+
+---
+
 ## 📊 Matrice de Couverture Synthétique (Mise à jour)
 
 | Phase | Intitulé | Backend | Frontend | Maturité | Verdict |

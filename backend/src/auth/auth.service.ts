@@ -205,7 +205,7 @@ export class AuthService {
       throw new BadRequestException('Cet e-mail est déjà utilisé.');
     }
 
-    const hashedPassword = hashPassword(passwordRaw);
+    const hashedPassword = await hashPassword(passwordRaw);
 
     const user = await this.prisma.user.create({
       data: {
@@ -251,9 +251,18 @@ export class AuthService {
       throw new UnauthorizedException('Identifiants invalides.');
     }
 
-    const isValid = verifyPassword(passwordRaw, user.passwordHash);
+    const { isValid, needsMigration } = await verifyPassword(passwordRaw, user.passwordHash);
     if (!isValid) {
       throw new UnauthorizedException('Identifiants invalides.');
+    }
+
+    // Migration différée (Lazy migration)
+    if (needsMigration) {
+      const newHash = await hashPassword(passwordRaw);
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { passwordHash: newHash },
+      });
     }
 
     const payload = { sub: user.id, email: user.email, name: user.name };
