@@ -26,7 +26,6 @@ export class TasksService {
     private readonly projectPermissionsService: ProjectPermissionsService,
   ) {}
 
-  // ─── Helpers partagés ───────────────────────────────────────────────
 
   parseTaskDates(data: CreateTaskDto | UpdateTaskDto) {
     return {
@@ -76,7 +75,6 @@ export class TasksService {
     const allowedUserIds = workspaceId ? await this.getAccessibleUserIds(workspaceId) : [];
     const uniqueAssigneeIds = [...new Set(assigneeIds)].filter((id) => allowedUserIds.includes(id));
 
-    // Récupérer les assignés existants pour savoir qui est nouveau
     const existingAssignees = await this.prisma.taskAssignee.findMany({
       where: { taskId },
       select: { userId: true },
@@ -92,18 +90,15 @@ export class TasksService {
       });
     }
 
-    // Récupérer les infos de la tâche pour formater la notification
     const task = await this.prisma.task.findUnique({
       where: { id: taskId },
       select: { title: true, projectId: true },
     });
 
     if (task && actingUserId) {
-      // Les utilisateurs qui sont dans uniqueAssigneeIds mais pas dans existingUserIds sont nouvellement assignés
       const newAssignees = uniqueAssigneeIds.filter((id) => !existingUserIds.includes(id));
 
       if (newAssignees.length > 0) {
-        // Récupérer le nom de la personne qui fait l'assignation
         const actor = await this.prisma.user.findUnique({
           where: { id: actingUserId },
           select: { name: true, email: true },
@@ -139,7 +134,6 @@ export class TasksService {
       throw new BadRequestException('Task not found or unauthorized');
     }
 
-    // Vérifier les permissions fines (au moins CLIENT)
     await this.projectPermissionsService.assertProjectRole(task.projectId, userId, [
       'MANAGER',
       'CONTRIBUTOR',
@@ -160,7 +154,6 @@ export class TasksService {
       throw new BadRequestException('Project not found or unauthorized');
     }
 
-    // Vérifier les permissions fines (au moins CLIENT)
     await this.projectPermissionsService.assertProjectRole(projectId, userId, [
       'MANAGER',
       'CONTRIBUTOR',
@@ -170,7 +163,6 @@ export class TasksService {
     return project;
   }
 
-  // ─── CRUD Tâches ───────────────────────────────────────────────────
 
   async createTask(
     projectId: string,
@@ -182,7 +174,6 @@ export class TasksService {
   ) {
     const project = await this.assertProjectAccess(projectId, userId);
 
-    // Pour créer, l'utilisateur doit être au moins CONTRIBUTOR ou MANAGER
     await this.projectPermissionsService.assertProjectRole(projectId, userId, [
       'MANAGER',
       'CONTRIBUTOR',
@@ -241,13 +232,11 @@ export class TasksService {
   async updateTask(taskId: string, userId: string, data: UpdateTaskDto) {
     const task = await this.assertTaskAccess(taskId, userId);
 
-    // Pour modifier, au moins CONTRIBUTOR ou MANAGER
     await this.projectPermissionsService.assertProjectRole(task.projectId, userId, [
       'MANAGER',
       'CONTRIBUTOR',
     ]);
 
-    // Règle 1 (Kanban ➔ Gantt)
     if (
       data.status === TaskStatus.IN_PROGRESS &&
       !task.startDate &&
@@ -257,13 +246,11 @@ export class TasksService {
     ) {
       const defaultStart = new Date();
       const defaultDue = new Date();
-      defaultDue.setDate(defaultDue.getDate() + 2); // Échéance à +2 jours
 
       data.startDate = defaultStart.toISOString();
       data.dueDate = defaultDue.toISOString();
     }
 
-    // Règle 2 (Gantt ➔ Kanban)
     const newStart = data.startDate
       ? new Date(data.startDate)
       : task.startDate
@@ -277,7 +264,6 @@ export class TasksService {
 
     const impactedTaskIds: string[] = [];
 
-    // Exécuter l'update et l'auto-scheduling dans une transaction interactive Prisma
     const updatedTask = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.task.update({
         where: { id: taskId },
@@ -285,7 +271,6 @@ export class TasksService {
         include: TASK_INCLUDE,
       });
 
-      // Lancer la propagation (effet domino) si le dueDate a changé
       const oldDue = task.dueDate ? new Date(task.dueDate) : null;
       const newDue = data.dueDate ? new Date(data.dueDate) : null;
 
@@ -332,7 +317,6 @@ export class TasksService {
   async deleteTask(taskId: string, userId: string) {
     const task = await this.assertTaskAccess(taskId, userId);
 
-    // Pour supprimer, au moins CONTRIBUTOR ou MANAGER
     await this.projectPermissionsService.assertProjectRole(task.projectId, userId, [
       'MANAGER',
       'CONTRIBUTOR',
@@ -350,7 +334,9 @@ export class TasksService {
     return deleted;
   }
 
-  // ─── Propagation Domino (Auto-Scheduling) ─────────────────────────
+
+
+
 
   /**
    * Propage récursivement le décalage de planification aux tâches dépendantes (effet domino).
@@ -359,7 +345,7 @@ export class TasksService {
     taskId: string,
     newDueDate: Date,
     visited: Set<string>,
-    tx: any,
+    tx: Prisma.TransactionClient,
     impactedIds: string[],
   ): Promise<void> {
     const dependencies = await tx.taskDependency.findMany({
@@ -402,7 +388,6 @@ export class TasksService {
     }
   }
 
-  // ─── GitHub Webhooks ──────────────────────────────────────────────
 
   async closeTaskFromWebhook(taskId: string): Promise<boolean> {
     const task = await this.prisma.task.findFirst({

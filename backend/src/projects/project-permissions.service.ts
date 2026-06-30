@@ -151,7 +151,7 @@ export class ProjectPermissionsService {
     }
 
     // Si MANAGER fait partie des rôles attendus et que l'utilisateur est MANAGER
-    if (allowedRoles.includes(projectMembership.role as any)) {
+    if (allowedRoles.includes(projectMembership.role as ProjectRole)) {
       return;
     }
 
@@ -184,7 +184,7 @@ export class ProjectPermissionsService {
     action: string,
     entityType: string,
     entityId: string,
-    changes: any,
+    changes: Record<string, unknown>,
     ipAddress?: string,
   ) {
     try {
