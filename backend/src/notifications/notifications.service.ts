@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsGateway } from './notifications.gateway';
 import { MailService } from '../mail/mail.service';
+import { Notification } from '@prisma/client';
 
 @Injectable()
 export class NotificationsService {
@@ -48,7 +49,11 @@ export class NotificationsService {
     return notification;
   }
 
-  private async sendMentionEmailAsync(notification: any) {
+  private async sendMentionEmailAsync(
+    notification: Notification & {
+      sender?: { name?: string | null; email?: string | null } | null;
+    },
+  ) {
     try {
       const recipient = await this.prisma.user.findUnique({
         where: { id: notification.userId },
