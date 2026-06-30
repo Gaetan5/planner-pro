@@ -79,7 +79,7 @@ describe('CalendarSyncService', () => {
 
       const result = await service.exportToCalendar('workspace-123', integrationId);
 
-      expect(result).toEqual({ success: true, exportedCount: 2 });
+      expect(result).toEqual({ success: true, exportedCount: 2, exportedRealCount: 0 });
     });
   });
 
@@ -218,6 +218,34 @@ describe('CalendarSyncService', () => {
       });
 
       await expect(service.refreshAccessToken('int-123')).rejects.toThrow(NotFoundException);
+    });
+
+    it('devrait lever une erreur en production si les credentials manquent', async () => {
+      const originalEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
+
+      mockPrisma.integration.findUnique.mockResolvedValue({
+        id: 'int-123',
+        type: 'GOOGLE_CALENDAR',
+        refreshToken: 'iv:tag:enc',
+      });
+
+      await expect(service.refreshAccessToken('int-123')).rejects.toThrow();
+
+      process.env.NODE_ENV = originalEnv;
+    });
+  });
+
+  describe('production error handling', () => {
+    it('devrait lever une erreur en production si handleOAuthCallback manque de credentials', async () => {
+      const originalEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
+
+      await expect(
+        service.handleOAuthCallback('ws-123', 'GOOGLE_CALENDAR', 'code'),
+      ).rejects.toThrow();
+
+      process.env.NODE_ENV = originalEnv;
     });
   });
 });

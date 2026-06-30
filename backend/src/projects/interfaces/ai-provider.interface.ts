@@ -1,5 +1,5 @@
-import { ParsedAiAction } from '../notes/gemini.service';
-import { ExtractedTask } from '../notes/gemini.service';
+import { ParsedAiAction } from '../../notes/gemini.service';
+import { ExtractedTask } from '../../notes/gemini.service';
 
 export interface AiProvider {
   isAvailable(): boolean;

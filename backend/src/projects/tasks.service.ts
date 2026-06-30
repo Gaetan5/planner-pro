@@ -8,7 +8,7 @@ import { CreateTaskDto } from './dto/create-task.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ProjectPermissionsService } from './project-permissions.service';
 
-const TASK_INCLUDE = {
+export const TASK_INCLUDE = {
   assignees: {
     include: { user: { select: { id: true, name: true, email: true } } },
   },

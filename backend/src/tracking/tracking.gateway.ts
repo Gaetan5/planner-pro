@@ -67,9 +67,19 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
       client.join(`user:${client.data.userId}`);
       console.log(`Client authentifié : ${client.data.userId} (Socket: ${client.id})`);
 
+      // Rejoindre les salons de workspace associés
+      const userWorkspaces = await this.prisma.membership.findMany({
+        where: { userId: client.data.userId },
+        select: { workspaceId: true },
+      });
+      for (const membership of userWorkspaces) {
+        client.join(`workspace:${membership.workspaceId}`);
+        console.log(`Socket ${client.id} a rejoint la room workspace:${membership.workspaceId}`);
+      }
+
       const activeTracking = await this.trackingService.getActiveTracking(client.data.userId);
       client.emit('active-timer-state', activeTracking);
-    } catch (_error: unknown) {
+    } catch {
       console.log("Accès WebSocket refusé : Validation de l'identité échouée.");
       client.disconnect(true);
     }
@@ -93,8 +103,11 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
       // Diffuser le nouvel état à TOUS les clients connectés du même utilisateur
       this.server.to(`user:${userId}`).emit('timer-started', log);
       return { status: 'success', data: log };
-    } catch (_error: unknown) {
-      return { status: 'error', message: _error instanceof Error ? _error.message : String(_error) };
+    } catch (err: unknown) {
+      return {
+        status: 'error',
+        message: err instanceof Error ? err.message : String(err),
+      };
     }
   }
 
@@ -109,8 +122,11 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
       // Diffuser l'arrêt à TOUS les clients connectés du même utilisateur
       this.server.to(`user:${userId}`).emit('timer-stopped', log);
       return { status: 'success', data: log };
-    } catch (_error: unknown) {
-      return { status: 'error', message: _error instanceof Error ? _error.message : String(_error) };
+    } catch (err: unknown) {
+      return {
+        status: 'error',
+        message: err instanceof Error ? err.message : String(err),
+      };
     }
   }
 
@@ -146,7 +162,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
       client.join(`task:${data.taskId}`);
       console.log(`Socket ${client.id} a rejoint la room task:${data.taskId}`);
       return { status: 'success' };
-    } catch (error) {
+    } catch {
       return { status: 'error', message: 'Accès au projet non autorisé.' };
     }
   }
@@ -225,10 +241,11 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
       // Renvoyer le résultat à l'utilisateur
       client.emit('voice-result', result);
       return { status: 'success', data: result };
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Erreur lors du traitement de la voix en streaming:', err);
-      client.emit('voice-error', { message: err instanceof Error ? err.message : String(err) });
-      return { status: 'error', message: err instanceof Error ? err.message : String(err) };
+      const errMsg = err instanceof Error ? err.message : String(err);
+      client.emit('voice-error', { message: errMsg });
+      return { status: 'error', message: errMsg };
     }
   }
 }

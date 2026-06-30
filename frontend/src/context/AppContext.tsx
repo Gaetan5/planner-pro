@@ -223,7 +223,7 @@ interface AppContextType {
     description?: string,
     priority?: string,
     options?: CreateTaskOptions,
-  ) => Promise<any>;
+  ) => Promise<Task>;
   updateTask: (taskId: string, data: Partial<Task>) => Promise<void>;
   deleteTask: (taskId: string) => Promise<void>;
   startTimer: (taskId: string) => void;
@@ -298,8 +298,8 @@ interface AppContextType {
     role: 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER',
     projectId?: string,
     durationDays?: number,
-  ) => Promise<{ invitation: any; rawToken: string } | null>;
-  listInvitations: (workspaceId: string) => Promise<any[]>;
+  ) => Promise<{ invitation: unknown; rawToken: string } | null>;
+  listInvitations: (workspaceId: string) => Promise<unknown[]>;
   revokeInvitation: (invitationId: string) => Promise<void>;
   checkInvitation: (
     token: string,
@@ -311,55 +311,55 @@ interface AppContextType {
     taskId: string,
     content: string,
     parentId?: string,
-    attachments?: any[],
-  ) => Promise<any>;
-  getComments: (taskId: string) => Promise<any[]>;
+    attachments?: unknown[],
+  ) => Promise<unknown>;
+  getComments: (taskId: string) => Promise<unknown[]>;
   deleteComment: (commentId: string) => Promise<void>;
-  updateComment: (commentId: string, content: string) => Promise<any>;
+  updateComment: (commentId: string, content: string) => Promise<unknown>;
   createTaskAttachment: (
     taskId: string,
     fileName: string,
     fileUrl: string,
     fileType: string,
     fileSize: number,
-  ) => Promise<any>;
-  getTaskAttachments: (taskId: string) => Promise<any[]>;
+  ) => Promise<unknown>;
+  getTaskAttachments: (taskId: string) => Promise<unknown[]>;
   deleteTaskAttachment: (attachmentId: string) => Promise<void>;
   parseAiCommand: (
     workspaceId: string,
     projectId: string | null,
     command: string,
-  ) => Promise<any[]>;
+  ) => Promise<unknown[]>;
   executeAiActions: (
     workspaceId: string,
     projectId: string | null,
-    actions: any[],
+    actions: unknown[],
   ) => Promise<{ success: boolean; executedCount: number }>;
   parseAiVoiceCommand: (
     workspaceId: string,
     projectId: string | null,
     audioBlob: Blob,
-  ) => Promise<{ transcription: string; actions: any[] }>;
+  ) => Promise<{ transcription: string; actions: unknown[] }>;
   parseAiImageCommand: (
     workspaceId: string,
     projectId: string | null,
     imageBlob: Blob,
-  ) => Promise<any[]>;
-  getCopilotAlerts: (workspaceId: string) => Promise<any[]>;
+  ) => Promise<unknown[]>;
+  getCopilotAlerts: (workspaceId: string) => Promise<unknown[]>;
   getCopilotBriefing: (workspaceId: string, isMock?: boolean) => Promise<{ briefing: string }>;
   // Intégrations & Synchronisation Réelle
-  listIntegrations: (workspaceId: string) => Promise<any[]>;
+  listIntegrations: (workspaceId: string) => Promise<unknown[]>;
   createIntegration: (
     workspaceId: string,
     type: 'SLACK' | 'TEAMS' | 'GOOGLE_CALENDAR' | 'OUTLOOK',
     name: string,
     url?: string,
     calendarId?: string,
-  ) => Promise<any>;
-  toggleIntegration: (integrationId: string) => Promise<any>;
-  deleteIntegration: (integrationId: string) => Promise<any>;
-  exportToCalendar: (workspaceId: string, integrationId: string) => Promise<any>;
-  getCalendarConflicts: (workspaceId: string) => Promise<any[]>;
+  ) => Promise<unknown>;
+  toggleIntegration: (integrationId: string) => Promise<unknown>;
+  deleteIntegration: (integrationId: string) => Promise<unknown>;
+  exportToCalendar: (workspaceId: string, integrationId: string) => Promise<unknown>;
+  getCalendarConflicts: (workspaceId: string) => Promise<unknown[]>;
   // Agile
   createSprint: (
     name: string,
@@ -372,7 +372,7 @@ interface AppContextType {
     status: 'PLANNED' | 'ACTIVE' | 'COMPLETED',
   ) => Promise<void>;
   associateTasksToSprint: (sprintId: string | null, taskIds: string[]) => Promise<void>;
-  getBurndownData: (sprintId: string) => Promise<any>;
+  getBurndownData: (sprintId: string) => Promise<unknown>;
   getVelocityData: (workspaceId: string) => Promise<number>;
   currentUserRole: 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER' | null;
   isReadOnly: boolean;
@@ -404,7 +404,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   >('dashboard');
   const [isConnected, setIsConnected] = useState(false);
   const [socket, setSocket] = useState<Socket | null>(null);
-  const refreshTimeoutRef = useRef<any>(null);
+  const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     return () => {
@@ -444,7 +444,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Gérer la connexion WebSocket et tester l'API Backend
   useEffect(() => {
-    let activeSocket: any = null;
+    let activeSocket: Socket | null = null;
 
     if (!user) {
       if (socket) {
@@ -476,10 +476,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const handleConnect = () => {
             console.log('Connecté au WebSocket backend');
           };
-          const handleActiveTimerState = (state: any) => {
+          const handleActiveTimerState = (
+            state: { id: string; startTime: string; taskId: string; task?: Task } | null,
+          ) => {
             setActiveTimer(state);
           };
-          const handleTimerStarted = (log: any) => {
+          const handleTimerStarted = (log: {
+            id: string;
+            startTime: string;
+            taskId: string;
+            task?: Task;
+          }) => {
             setActiveTimer({
               id: log.id,
               startTime: log.startTime,
@@ -490,16 +497,59 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const handleTimerStopped = () => {
             setActiveTimer(null);
           };
-          const handleTaskStatusChanged = () => {
-            refreshData();
+          const patchTaskLocal = (task: Task) => {
+            setProjects((prevProjects) =>
+              prevProjects.map((p) => {
+                if (p.id !== task.projectId) return p;
+                const tasks = p.tasks || [];
+                const exist = tasks.some((t) => t.id === task.id);
+                const updatedTasks = exist
+                  ? tasks.map((t) => (t.id === task.id ? { ...t, ...task } : t))
+                  : [...tasks, task];
+                return { ...p, tasks: updatedTasks };
+              }),
+            );
           };
-          const handleTaskSchedulePropagated = (data: any) => {
-            refreshData();
+
+          const patchMultipleTasksLocal = (projectId: string, tasksToPatch: Task[]) => {
+            setProjects((prevProjects) =>
+              prevProjects.map((p) => {
+                if (p.id !== projectId) return p;
+                const tasks = p.tasks || [];
+                const updatedTasks = tasks.map((t) => {
+                  const patch = tasksToPatch.find((pt) => pt.id === t.id);
+                  return patch ? { ...t, ...patch } : t;
+                });
+                return { ...p, tasks: updatedTasks };
+              }),
+            );
+          };
+
+          const handleTaskStatusChanged = (data: { taskId: string; task?: Task }) => {
+            if (data.task) {
+              patchTaskLocal(data.task);
+            } else {
+              refreshData();
+            }
+          };
+          const handleTaskSchedulePropagated = (data: {
+            projectId: string;
+            impactedTaskIds?: string[];
+            impactedTasks?: Task[];
+          }) => {
+            if (data.impactedTasks && data.projectId) {
+              patchMultipleTasksLocal(data.projectId, data.impactedTasks);
+            } else {
+              refreshData();
+            }
             sendBrowserNotification('Auto-Scheduling Activé', {
               body: `${data.impactedTaskIds?.length || 'Plusieurs'} tâche(s) ont été décalées par effet domino suite à un changement d'échéance.`,
             });
           };
-          const handleMentionNotification = (data: any) => {
+          const handleProjectDataUpdated = () => {
+            refreshData();
+          };
+          const handleMentionNotification = (data: { message?: string }) => {
             sendBrowserNotification('Nouvelle Mention !', {
               body: data.message || 'Vous avez été mentionné dans un commentaire.',
             });
@@ -520,6 +570,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           newSocket.on('timer-stopped', handleTimerStopped);
           newSocket.on('task-status-changed', handleTaskStatusChanged);
           newSocket.on('task-schedule-propagated', handleTaskSchedulePropagated);
+          newSocket.on('project-data-updated', handleProjectDataUpdated);
           newSocket.on('mention-notification', handleMentionNotification);
         } else {
           setIsConnected(false);
@@ -540,6 +591,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         activeSocket.off('timer-stopped');
         activeSocket.off('task-status-changed');
         activeSocket.off('task-schedule-propagated');
+        activeSocket.off('project-data-updated');
         activeSocket.off('mention-notification');
         activeSocket.disconnect();
       }
@@ -1079,7 +1131,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     taskId: string,
     content: string,
     parentId?: string,
-    attachments?: any[],
+    attachments?: unknown[],
   ) => {
     const res = await fetch(`${BACKEND_URL}/projects/tasks/${taskId}/comments`, {
       method: 'POST',
@@ -1228,7 +1280,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const executeAiActions = async (
     workspaceId: string,
     projectId: string | null,
-    actions: any[],
+    actions: unknown[],
   ) => {
     const res = await fetch(`${BACKEND_URL}/projects/ai/execute`, {
       method: 'POST',
@@ -1326,9 +1378,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const listIntegrations = async (workspaceId: string) => {
-    const res = await fetch(`${BACKEND_URL}/projects/workspaces/${workspaceId}/integrations`, {
-      headers: getHeaders(),
-    });
+    const res = await fetch(
+      `${BACKEND_URL}/projects/workspaces/${workspaceId}/integrations/status`,
+      {
+        headers: getHeaders(),
+      },
+    );
     if (res.ok) return res.json();
     return [];
   };

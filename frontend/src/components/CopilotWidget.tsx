@@ -61,9 +61,9 @@ export const CopilotWidget: React.FC = () => {
     setLoadingAlerts(true);
     setError(null);
     try {
-      const data = await getCopilotAlerts(workspaceId);
+      const data = (await getCopilotAlerts(workspaceId)) as CopilotAlert[];
       setAlerts(data);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
       setError('Erreur lors de la récupération des alertes.');
     } finally {
@@ -89,7 +89,7 @@ export const CopilotWidget: React.FC = () => {
       // de façon sécurisée.
       const data = await getCopilotBriefing(workspaceId, false);
       setBriefing(data.briefing);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
       setError('Impossible de générer le briefing IA.');
     } finally {
@@ -113,7 +113,7 @@ export const CopilotWidget: React.FC = () => {
 
     // Retirer les caractères Markdown complexes pour la lecture vocale
     const cleanText = briefing
-      .replace(/[\*#_`-]/g, '')
+      .replace(/[*#_`-]/g, '')
       .replace(/📅/g, 'Agenda.')
       .replace(/⚠️/g, 'Attention.')
       .replace(/💡/g, 'Recommandation.');

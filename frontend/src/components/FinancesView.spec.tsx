@@ -2,7 +2,6 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { FinancesView } from './FinancesView';
 import { useApp } from '../context/AppContext';
-import React from 'react';
 
 // Mock du hook useApp
 vi.mock('../context/AppContext', () => ({
@@ -14,10 +13,15 @@ global.fetch = vi.fn();
 describe('FinancesView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (useApp as any).mockReturnValue({
-      user: { token: 'fake-token' },
-      workspaces: [{ id: 'w1' }],
-    });
+    vi.mocked(useApp).mockReturnValue({
+      user: { token: 'fake-token' } as unknown as {
+        token: string;
+        id: string;
+        email: string;
+        name: string;
+      },
+      workspaces: [{ id: 'w1', name: 'W1', ownerId: 'u1' }],
+    } as unknown as ReturnType<typeof useApp>);
   });
 
   it('doit afficher le chargement initialement', () => {
@@ -26,15 +30,17 @@ describe('FinancesView', () => {
   });
 
   it('doit afficher une erreur si l API échoue', async () => {
-    (fetch as any).mockResolvedValueOnce({
+    vi.mocked(global.fetch).mockResolvedValueOnce({
       ok: false,
       status: 500,
-    });
+    } as unknown as Response);
 
     render(<FinancesView />);
 
     await waitFor(() => {
-      expect(screen.getByText(/Erreur lors du chargement des données financières/i)).toBeInTheDocument();
+      expect(
+        screen.getByText(/Erreur lors du chargement des données financières/i),
+      ).toBeInTheDocument();
     });
   });
 });
