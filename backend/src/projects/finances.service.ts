@@ -125,7 +125,10 @@ export class FinancesService {
     };
   }
 
-  async getWorkspaceFinancialSummary(workspaceId: string, userId: string): Promise<WorkspaceSummary> {
+  async getWorkspaceFinancialSummary(
+    workspaceId: string,
+    userId: string,
+  ): Promise<WorkspaceSummary> {
     await this.assertWorkspaceRole(workspaceId, userId, [WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
 
     const projects = await this.prisma.project.findMany({

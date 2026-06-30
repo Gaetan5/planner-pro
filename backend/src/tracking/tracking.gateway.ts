@@ -38,13 +38,17 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
   ) {}
 
   async afterInit(server: Server) {
-    const pubClient = createClient({
-      url: `redis://${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || 6379}`,
-    });
-    const subClient = pubClient.duplicate();
-    await Promise.all([pubClient.connect(), subClient.connect()]);
-    server.adapter(createAdapter(pubClient, subClient));
-    console.log('Socket.io Redis adapter configuré avec succès.');
+    try {
+      const pubClient = createClient({
+        url: `redis://${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || 6379}`,
+      });
+      const subClient = pubClient.duplicate();
+      await Promise.all([pubClient.connect(), subClient.connect()]);
+      server.adapter(createAdapter(pubClient, subClient));
+      console.log('Socket.io Redis adapter configuré avec succès.');
+    } catch (err: unknown) {
+      console.error("Erreur lors de la configuration de l'adaptateur Redis pour le tracking:", err);
+    }
   }
 
   async handleConnection(client: Socket) {

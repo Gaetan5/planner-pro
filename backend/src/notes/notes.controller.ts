@@ -1,6 +1,7 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards } from '@nestjs/common';
 import { NotesService } from './notes.service';
 import { JwtAuthGuard } from '../auth/jwt.guard';
+import { User, AuthenticatedUser } from '../auth/user.decorator';
 
 @Controller('notes')
 @UseGuards(JwtAuthGuard)
@@ -8,22 +9,22 @@ export class NotesController {
   constructor(private readonly notesService: NotesService) {}
 
   @Post()
-  createNote(@Req() req: any, @Body() body: { title: string; content: string }) {
-    return this.notesService.createNote(req.user.id, body.title, body.content);
+  createNote(@User() user: AuthenticatedUser, @Body() body: { title: string; content: string }) {
+    return this.notesService.createNote(user.id, body.title, body.content);
   }
 
   @Put(':id')
   updateNote(
-    @Req() req: any,
+    @User() user: AuthenticatedUser,
     @Param('id') id: string,
     @Body() body: { title: string; content: string },
   ) {
-    return this.notesService.updateNote(req.user.id, id, body.title, body.content);
+    return this.notesService.updateNote(user.id, id, body.title, body.content);
   }
 
   @Get()
-  getNotes(@Req() req: any) {
-    return this.notesService.getNotes(req.user.id);
+  getNotes(@User() user: AuthenticatedUser) {
+    return this.notesService.getNotes(user.id);
   }
 
   @Get(':id')

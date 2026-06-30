@@ -4,12 +4,12 @@ import { NotesController } from './notes.controller';
 import { PrismaModule } from '../prisma/prisma.module';
 import { RedisModule } from '../redis/redis.module';
 
-import { GeminiService } from './gemini.service';
+import { GeminiProvider } from './gemini-provider.service';
 
 @Module({
   imports: [PrismaModule, RedisModule],
-  providers: [NotesService, GeminiService],
+  providers: [NotesService, GeminiProvider],
   controllers: [NotesController],
-  exports: [NotesService, GeminiService],
+  exports: [NotesService, GeminiProvider],
 })
 export class NotesModule {}

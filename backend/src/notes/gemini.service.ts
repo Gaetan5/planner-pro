@@ -12,11 +12,7 @@ export interface ExtractedTask {
 
 export interface ParsedAiAction {
   type:
-    | 'CREATE_TASK'
-    | 'ASSIGN_TASK'
-    | 'CREATE_DEPENDENCY'
-    | 'CREATE_TIMEBLOCK'
-    | 'UPDATE_TASK_STATUS';
+    'CREATE_TASK' | 'ASSIGN_TASK' | 'CREATE_DEPENDENCY' | 'CREATE_TIMEBLOCK' | 'UPDATE_TASK_STATUS';
   taskTitle?: string;
   taskDescription?: string;
   priority?: 'LOW' | 'MEDIUM' | 'HIGH';
