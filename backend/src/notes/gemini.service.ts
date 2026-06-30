@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { AiProvider } from '../projects/interfaces/ai-provider.interface';
 
 export interface ExtractedTask {
   title: string;
@@ -11,7 +12,11 @@ export interface ExtractedTask {
 
 export interface ParsedAiAction {
   type:
-    'CREATE_TASK' | 'ASSIGN_TASK' | 'CREATE_DEPENDENCY' | 'CREATE_TIMEBLOCK' | 'UPDATE_TASK_STATUS';
+    | 'CREATE_TASK'
+    | 'ASSIGN_TASK'
+    | 'CREATE_DEPENDENCY'
+    | 'CREATE_TIMEBLOCK'
+    | 'UPDATE_TASK_STATUS';
   taskTitle?: string;
   taskDescription?: string;
   priority?: 'LOW' | 'MEDIUM' | 'HIGH';
@@ -26,7 +31,7 @@ export interface ParsedAiAction {
 }
 
 @Injectable()
-export class GeminiService {
+export class GeminiService implements AiProvider {
   private readonly logger = new Logger(GeminiService.name);
   private genAI: GoogleGenerativeAI | null = null;
 

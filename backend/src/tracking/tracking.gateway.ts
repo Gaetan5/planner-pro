@@ -94,7 +94,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
       this.server.to(`user:${userId}`).emit('timer-started', log);
       return { status: 'success', data: log };
     } catch (_error: unknown) {
-      return { status: 'error', message: error instanceof Error ? error.message : String(error) };
+      return { status: 'error', message: _error instanceof Error ? _error.message : String(_error) };
     }
   }
 
@@ -110,7 +110,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
       this.server.to(`user:${userId}`).emit('timer-stopped', log);
       return { status: 'success', data: log };
     } catch (_error: unknown) {
-      return { status: 'error', message: error instanceof Error ? error.message : String(error) };
+      return { status: 'error', message: _error instanceof Error ? _error.message : String(_error) };
     }
   }
 
