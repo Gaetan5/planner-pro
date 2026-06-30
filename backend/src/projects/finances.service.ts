@@ -1,6 +1,7 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { WorkspaceRole } from '@prisma/client';
+import { ProjectFinance, WorkspaceSummary } from './interfaces/finances.interface';
 
 @Injectable()
 export class FinancesService {
@@ -27,7 +28,7 @@ export class FinancesService {
     return membership;
   }
 
-  async getProjectFinances(projectId: string, userId: string) {
+  async getProjectFinances(projectId: string, userId: string): Promise<ProjectFinance> {
     const project = await this.prisma.project.findFirst({
       where: { id: projectId, deletedAt: null },
       include: { workspace: true, tasks: { where: { deletedAt: null } } },
@@ -124,7 +125,7 @@ export class FinancesService {
     };
   }
 
-  async getWorkspaceFinancialSummary(workspaceId: string, userId: string) {
+  async getWorkspaceFinancialSummary(workspaceId: string, userId: string): Promise<WorkspaceSummary> {
     await this.assertWorkspaceRole(workspaceId, userId, [WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
 
     const projects = await this.prisma.project.findMany({
@@ -141,12 +142,12 @@ export class FinancesService {
       }),
     );
 
-    const validSummaries = projectSummaries.filter((s) => s !== null);
+    const validSummaries = projectSummaries.filter((s): s is ProjectFinance => s !== null);
 
-    const totalBudget = validSummaries.reduce((sum, s) => sum + (s?.budgetCents || 0), 0);
-    const totalCost = validSummaries.reduce((sum, s) => sum + (s?.actualCostCents ?? 0), 0);
-    const totalRevenue = validSummaries.reduce((sum, s) => sum + (s?.actualRevenueCents ?? 0), 0);
-    const totalHours = validSummaries.reduce((sum, s) => sum + (s?.totalHours ?? 0), 0);
+    const totalBudget = validSummaries.reduce((sum, s) => sum + (s.budgetCents || 0), 0);
+    const totalCost = validSummaries.reduce((sum, s) => sum + s.actualCostCents, 0);
+    const totalRevenue = validSummaries.reduce((sum, s) => sum + s.actualRevenueCents, 0);
+    const totalHours = validSummaries.reduce((sum, s) => sum + s.totalHours, 0);
 
     const totalMargin = totalRevenue - totalCost;
     const totalMarginPercent =

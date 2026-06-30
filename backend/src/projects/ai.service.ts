@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { GeminiService, ParsedAiAction } from '../notes/gemini.service';
+import { CreateTaskDto } from './dto/create-task.dto';
 import { ProjectsService } from './projects.service';
 import { TaskPriority, TaskStatus, DependencyType } from '@prisma/client';
 
@@ -424,9 +425,9 @@ export class AiService {
             targetProjectId = activeProject.id;
           }
 
-          const options: any = {};
+          const options: Partial<CreateTaskDto> = {};
           if (action.dueDate) {
-            options.dueDate = new Date(action.dueDate);
+            options.dueDate = action.dueDate;
           }
           if (action.estimatedMinutes) {
             options.estimatedMinutes = action.estimatedMinutes;
@@ -523,7 +524,10 @@ export class AiService {
       .trim();
   }
 
-  private resolveMember(nameOrEmail: string, members: any[]): any | null {
+  private resolveMember(
+    nameOrEmail: string,
+    members: { userId: string; user: { name: string | null; email: string } }[],
+  ) {
     const search = this.normalizeString(nameOrEmail);
     if (!search) return null;
 
@@ -532,7 +536,9 @@ export class AiService {
     if (match) return match;
 
     // 2. Recherche par correspondance sur le nom complet
-    match = members.find((m) => m.user.name && this.normalizeString(m.user.name).includes(search));
+    match = members.find(
+      (m) => m.user.name && this.normalizeString(m.user.name).includes(search),
+    );
     if (match) return match;
 
     // 3. Recherche par préfixe d'email
@@ -542,7 +548,7 @@ export class AiService {
     return null;
   }
 
-  private resolveTask(titleSearch: string, tasks: any[]): any | null {
+  private resolveTask(titleSearch: string, tasks: { id: string; title: string }[]) {
     const search = this.normalizeString(titleSearch);
     if (!search) return null;
 
