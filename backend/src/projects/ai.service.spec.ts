@@ -60,7 +60,7 @@ describe('AiService', () => {
     const workspaceId = 'workspace-123';
     const projectId = 'project-123';
 
-    it('devrait analyser la création de tâche et résoudre l\'assignation d\'un membre', async () => {
+    it("devrait analyser la création de tâche et résoudre l'assignation d'un membre", async () => {
       mockGeminiService.parseCommand.mockResolvedValue([
         {
           type: 'CREATE_TASK',
@@ -73,13 +73,21 @@ describe('AiService', () => {
       ]);
 
       mockPrisma.membership.findMany.mockResolvedValue([
-        { userId: 'alice-id', user: { id: 'alice-id', name: 'Alice Smith', email: 'alice@test.com' } },
+        {
+          userId: 'alice-id',
+          user: { id: 'alice-id', name: 'Alice Smith', email: 'alice@test.com' },
+        },
         { userId: 'bob-id', user: { id: 'bob-id', name: 'Bob Jones', email: 'bob@test.com' } },
       ]);
 
       mockPrisma.task.findMany.mockResolvedValue([]);
 
-      const result = await service.analyzeCommand(userId, workspaceId, projectId, 'Créer tâche maquetter DB pour Alice');
+      const result = await service.analyzeCommand(
+        userId,
+        workspaceId,
+        projectId,
+        'Créer tâche maquetter DB pour Alice',
+      );
 
       expect(result).toHaveLength(1);
       const action = result[0];
@@ -91,7 +99,7 @@ describe('AiService', () => {
       expect(action.warning).toBeUndefined();
     });
 
-    it('devrait marquer non résolu si l\'assigné est introuvable', async () => {
+    it("devrait marquer non résolu si l'assigné est introuvable", async () => {
       mockGeminiService.parseCommand.mockResolvedValue([
         {
           type: 'CREATE_TASK',
@@ -101,12 +109,20 @@ describe('AiService', () => {
       ]);
 
       mockPrisma.membership.findMany.mockResolvedValue([
-        { userId: 'alice-id', user: { id: 'alice-id', name: 'Alice Smith', email: 'alice@test.com' } },
+        {
+          userId: 'alice-id',
+          user: { id: 'alice-id', name: 'Alice Smith', email: 'alice@test.com' },
+        },
       ]);
 
       mockPrisma.task.findMany.mockResolvedValue([]);
 
-      const result = await service.analyzeCommand(userId, workspaceId, projectId, 'créer tâche pour Charles');
+      const result = await service.analyzeCommand(
+        userId,
+        workspaceId,
+        projectId,
+        'créer tâche pour Charles',
+      );
 
       expect(result).toHaveLength(1);
       expect(result[0].resolved).toBe(false);
@@ -130,7 +146,12 @@ describe('AiService', () => {
         { id: 'task-sec-id', title: 'Configurer la sécurité globale' },
       ]);
 
-      const result = await service.analyzeCommand(userId, workspaceId, projectId, 'Assigne Bob sur Secu');
+      const result = await service.analyzeCommand(
+        userId,
+        workspaceId,
+        projectId,
+        'Assigne Bob sur Secu',
+      );
 
       expect(result).toHaveLength(1);
       const action = result[0];
@@ -221,7 +242,7 @@ describe('AiService', () => {
     it('devrait appeler transcribeAudio si isAvailable et non mocké', async () => {
       mockGeminiService.isAvailable.mockReturnValue(true);
       mockGeminiService.transcribeAudio.mockResolvedValue('créer tâche Maquetter la DB pour Alice');
-      
+
       mockGeminiService.parseCommand.mockResolvedValue([
         {
           type: 'CREATE_TASK',
@@ -231,7 +252,10 @@ describe('AiService', () => {
       ]);
 
       mockPrisma.membership.findMany.mockResolvedValue([
-        { userId: 'alice-id', user: { id: 'alice-id', name: 'Alice Smith', email: 'alice@test.com' } },
+        {
+          userId: 'alice-id',
+          user: { id: 'alice-id', name: 'Alice Smith', email: 'alice@test.com' },
+        },
       ]);
       mockPrisma.task.findMany.mockResolvedValue([]);
 
@@ -255,7 +279,10 @@ describe('AiService', () => {
     it('devrait utiliser une transcription mockée si isMock est vrai', async () => {
       mockGeminiService.isAvailable.mockReturnValue(true);
       mockPrisma.membership.findMany.mockResolvedValue([
-        { userId: 'alice-id', user: { id: 'alice-id', name: 'Alice Smith', email: 'alice@test.com' } },
+        {
+          userId: 'alice-id',
+          user: { id: 'alice-id', name: 'Alice Smith', email: 'alice@test.com' },
+        },
       ]);
       mockPrisma.task.findMany.mockResolvedValue([]);
 
@@ -270,7 +297,9 @@ describe('AiService', () => {
       );
 
       expect(mockGeminiService.transcribeAudio).not.toHaveBeenCalled();
-      expect(result.transcription).toBe('MOCK: créer tâche Configurer la sécurité globale pour Alice');
+      expect(result.transcription).toBe(
+        'MOCK: créer tâche Configurer la sécurité globale pour Alice',
+      );
       expect(result.actions).toHaveLength(1);
       expect(result.actions[0].type).toBe('CREATE_TASK');
       expect(result.actions[0].taskTitle).toBe('Configurer la sécurité globale');
@@ -294,7 +323,10 @@ describe('AiService', () => {
       ]);
 
       mockPrisma.membership.findMany.mockResolvedValue([
-        { userId: 'alice-id', user: { id: 'alice-id', name: 'Alice Smith', email: 'alice@test.com' } },
+        {
+          userId: 'alice-id',
+          user: { id: 'alice-id', name: 'Alice Smith', email: 'alice@test.com' },
+        },
       ]);
       mockPrisma.task.findMany.mockResolvedValue([]);
 
@@ -318,7 +350,10 @@ describe('AiService', () => {
     it('devrait retourner le mock si isMock est true', async () => {
       mockGeminiService.isAvailable.mockReturnValue(true);
       mockPrisma.membership.findMany.mockResolvedValue([
-        { userId: 'alice-id', user: { id: 'alice-id', name: 'Alice Smith', email: 'alice@test.com' } },
+        {
+          userId: 'alice-id',
+          user: { id: 'alice-id', name: 'Alice Smith', email: 'alice@test.com' },
+        },
       ]);
       mockPrisma.task.findMany.mockResolvedValue([]);
 

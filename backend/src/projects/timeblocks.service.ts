@@ -10,10 +10,7 @@ export class TimeBlocksService {
       where: {
         id: taskId,
         deletedAt: null,
-        OR: [
-          { userId },
-          { project: { workspace: { memberships: { some: { userId } } } } },
-        ],
+        OR: [{ userId }, { project: { workspace: { memberships: { some: { userId } } } } }],
       },
     });
     if (!task) {
@@ -28,10 +25,7 @@ export class TimeBlocksService {
         id: timeBlockId,
         task: {
           deletedAt: null,
-          OR: [
-            { userId },
-            { project: { workspace: { memberships: { some: { userId } } } } },
-          ],
+          OR: [{ userId }, { project: { workspace: { memberships: { some: { userId } } } } }],
         },
       },
     });
@@ -58,17 +52,16 @@ export class TimeBlocksService {
       where: {
         task: {
           deletedAt: null,
-          OR: [
-            { userId },
-            { project: { workspace: { memberships: { some: { userId } } } } },
-          ],
+          OR: [{ userId }, { project: { workspace: { memberships: { some: { userId } } } } }],
         },
-        ...(start || end ? {
-          startTime: {
-            ...(start ? { gte: start } : {}),
-            ...(end ? { lt: end } : {}),
-          }
-        } : {}),
+        ...(start || end
+          ? {
+              startTime: {
+                ...(start ? { gte: start } : {}),
+                ...(end ? { lt: end } : {}),
+              },
+            }
+          : {}),
       },
       include: {
         task: {

@@ -23,8 +23,9 @@
   background: rgba(18, 18, 26, 0.8) !important;
   border: 1px solid rgba(255, 255, 255, 0.08) !important;
   border-radius: 18px !important;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), 
-              0 0 40px rgba(139, 92, 246, 0.1) !important;
+  box-shadow:
+    0 20px 50px rgba(0, 0, 0, 0.5),
+    0 0 40px rgba(139, 92, 246, 0.1) !important;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -36,8 +37,9 @@
 [data-theme='light'] .ai-command-bar-modal {
   background: rgba(255, 255, 255, 0.85) !important;
   border: 1px solid rgba(0, 0, 0, 0.08) !important;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15), 
-              0 0 30px rgba(139, 92, 246, 0.05) !important;
+  box-shadow:
+    0 20px 40px rgba(0, 0, 0, 0.15),
+    0 0 30px rgba(139, 92, 246, 0.05) !important;
   color: #1f2937;
 }
 
@@ -145,8 +147,9 @@
 }
 .ai-command-input:focus {
   border-color: rgba(139, 92, 246, 0.5);
-  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.15), 
-              inset 0 1px 2px rgba(0, 0, 0, 0.3);
+  box-shadow:
+    0 0 0 3px rgba(139, 92, 246, 0.15),
+    inset 0 1px 2px rgba(0, 0, 0, 0.3);
   background: rgba(0, 0, 0, 0.3);
 }
 [data-theme='light'] .ai-command-input {
@@ -499,12 +502,24 @@
 }
 
 /* Couleurs de texte personnalisées */
-.text-emerald { color: #10b981; }
-.text-blue { color: #3b82f6; }
-.text-purple { color: #8b5cf6; }
-.text-orange { color: #f59e0b; }
-.text-pink { color: #ec4899; }
-.text-violet { color: #a78bfa; }
+.text-emerald {
+  color: #10b981;
+}
+.text-blue {
+  color: #3b82f6;
+}
+.text-purple {
+  color: #8b5cf6;
+}
+.text-orange {
+  color: #f59e0b;
+}
+.text-pink {
+  color: #ec4899;
+}
+.text-violet {
+  color: #a78bfa;
+}
 
 /* Footer de la Command Bar */
 .ai-command-bar-footer {
@@ -604,8 +619,12 @@
 
 /* Animations */
 @keyframes ai-fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 @keyframes ai-slide-up {
@@ -631,18 +650,36 @@
 }
 
 @keyframes ai-pulse-glow {
-  from { transform: scale(0.9); opacity: 0.6; }
-  to { transform: scale(1.1); opacity: 1; }
+  from {
+    transform: scale(0.9);
+    opacity: 0.6;
+  }
+  to {
+    transform: scale(1.1);
+    opacity: 1;
+  }
 }
 
 @keyframes ai-pulse-sparkle {
-  0%, 100% { transform: scale(1) rotate(0deg); opacity: 1; }
-  50% { transform: scale(1.15) rotate(15deg); opacity: 0.85; filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.6)); }
+  0%,
+  100% {
+    transform: scale(1) rotate(0deg);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.15) rotate(15deg);
+    opacity: 0.85;
+    filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.6));
+  }
 }
 
 @keyframes ai-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* --- Capture vocale et Onde sonore (Waveform) --- */
@@ -719,24 +756,58 @@
 }
 
 /* Animations de l'onde avec des délais pour un effet naturel */
-.waveform .bar:nth-child(1) { animation-delay: 0.1s; height: 12px; }
-.waveform .bar:nth-child(2) { animation-delay: 0.4s; height: 18px; }
-.waveform .bar:nth-child(3) { animation-delay: 0.2s; height: 8px; }
-.waveform .bar:nth-child(4) { animation-delay: 0.6s; height: 22px; }
-.waveform .bar:nth-child(5) { animation-delay: 0.3s; height: 14px; }
-.waveform .bar:nth-child(6) { animation-delay: 0.5s; height: 10px; }
-.waveform .bar:nth-child(7) { animation-delay: 0.1s; height: 20px; }
-.waveform .bar:nth-child(8) { animation-delay: 0.7s; height: 6px; }
+.waveform .bar:nth-child(1) {
+  animation-delay: 0.1s;
+  height: 12px;
+}
+.waveform .bar:nth-child(2) {
+  animation-delay: 0.4s;
+  height: 18px;
+}
+.waveform .bar:nth-child(3) {
+  animation-delay: 0.2s;
+  height: 8px;
+}
+.waveform .bar:nth-child(4) {
+  animation-delay: 0.6s;
+  height: 22px;
+}
+.waveform .bar:nth-child(5) {
+  animation-delay: 0.3s;
+  height: 14px;
+}
+.waveform .bar:nth-child(6) {
+  animation-delay: 0.5s;
+  height: 10px;
+}
+.waveform .bar:nth-child(7) {
+  animation-delay: 0.1s;
+  height: 20px;
+}
+.waveform .bar:nth-child(8) {
+  animation-delay: 0.7s;
+  height: 6px;
+}
 
 /* Animations keyframes */
 @keyframes ai-pulse-recording {
-  from { box-shadow: 0 0 10px rgba(239, 68, 68, 0.4); transform: scale(1); }
-  to { box-shadow: 0 0 20px rgba(239, 68, 68, 0.7); transform: scale(1.03); }
+  from {
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.4);
+    transform: scale(1);
+  }
+  to {
+    box-shadow: 0 0 20px rgba(239, 68, 68, 0.7);
+    transform: scale(1.03);
+  }
 }
 
 @keyframes ai-pulse-opacity {
-  from { opacity: 0.5; }
-  to { opacity: 1; }
+  from {
+    opacity: 0.5;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 @keyframes ai-wave {
@@ -848,7 +919,9 @@
   width: 100%;
   height: 2px;
   background: linear-gradient(to right, transparent, #a78bfa, #f472b6, #a78bfa, transparent);
-  box-shadow: 0 0 8px #a78bfa, 0 0 16px #f472b6;
+  box-shadow:
+    0 0 8px #a78bfa,
+    0 0 16px #f472b6;
   animation: laser-scan-anim 1.8s ease-in-out infinite;
   z-index: 5;
 }

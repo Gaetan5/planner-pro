@@ -1,92 +1,107 @@
-import React, { useState } from 'react'
-import { Sparkles, Kanban, Timer, CalendarRange, Info, X, ChevronRight, ChevronLeft, CheckCircle2 } from 'lucide-react'
-import './OnboardingModal.css'
+import React, { useState } from 'react';
+import {
+  Sparkles,
+  Kanban,
+  Timer,
+  CalendarRange,
+  Info,
+  X,
+  ChevronRight,
+  ChevronLeft,
+  CheckCircle2,
+} from 'lucide-react';
+import './OnboardingModal.css';
 
 interface OnboardingModalProps {
-  onClose: () => void
+  onClose: () => void;
 }
 
 export const OnboardingModal: React.FC<OnboardingModalProps> = ({ onClose }) => {
-  const [currentStep, setCurrentStep] = useState(0)
+  const [currentStep, setCurrentStep] = useState(0);
 
   const steps = [
     {
-      title: "Bienvenue sur Planner-Pro",
-      description: "Le hub de planification immersif conçu pour les ingénieurs et équipes d'élite. Planner-Pro combine la gestion de projet moderne et l'intelligence artificielle pour maximiser votre Focus & Flow.",
+      title: 'Bienvenue sur Planner-Pro',
+      description:
+        "Le hub de planification immersif conçu pour les ingénieurs et équipes d'élite. Planner-Pro combine la gestion de projet moderne et l'intelligence artificielle pour maximiser votre Focus & Flow.",
       icon: <Info className="onboarding-icon onboarding-icon--blue" size={48} />,
-      badge: "Présentation",
+      badge: 'Présentation',
       tips: [
-        "Un projet de démarrage a été créé automatiquement pour vous !",
-        "Utilisez les différents onglets pour alterner les perspectives sur vos tâches.",
-        "Le thème sombre (activé par défaut) réduit la fatigue oculaire lors des sessions nocturnes."
-      ]
+        'Un projet de démarrage a été créé automatiquement pour vous !',
+        'Utilisez les différents onglets pour alterner les perspectives sur vos tâches.',
+        'Le thème sombre (activé par défaut) réduit la fatigue oculaire lors des sessions nocturnes.',
+      ],
     },
     {
-      title: "Le Kanban Interactif",
-      description: "Visualisez votre flux de travail et gérez vos priorités de manière agile. Notre Kanban réagit en temps réel et intègre des micro-animations pour rendre la mise à jour de vos tâches agréable.",
+      title: 'Le Kanban Interactif',
+      description:
+        'Visualisez votre flux de travail et gérez vos priorités de manière agile. Notre Kanban réagit en temps réel et intègre des micro-animations pour rendre la mise à jour de vos tâches agréable.',
       icon: <Kanban className="onboarding-icon onboarding-icon--purple" size={48} />,
-      badge: "Gestion Agile",
+      badge: 'Gestion Agile',
       tips: [
-        "Glissez-déposez vos tâches entre À faire, En cours et Terminé.",
-        "Double-cliquez sur une carte pour voir ou ajouter des commentaires en temps réel.",
-        "Assignez des priorités (Basse, Moyenne, Haute) pour structurer vos journées."
-      ]
+        'Glissez-déposez vos tâches entre À faire, En cours et Terminé.',
+        'Double-cliquez sur une carte pour voir ou ajouter des commentaires en temps réel.',
+        'Assignez des priorités (Basse, Moyenne, Haute) pour structurer vos journées.',
+      ],
     },
     {
-      title: "Planification Gantt & Moteur Domino",
-      description: "Visualisez vos échéances et les dépendances sous forme de frise chronologique. Planner-Pro intègre un moteur d'Auto-Scheduling : modifiez une tâche parente, et toutes ses dépendantes s'ajustent automatiquement !",
+      title: 'Planification Gantt & Moteur Domino',
+      description:
+        "Visualisez vos échéances et les dépendances sous forme de frise chronologique. Planner-Pro intègre un moteur d'Auto-Scheduling : modifiez une tâche parente, et toutes ses dépendantes s'ajustent automatiquement !",
       icon: <CalendarRange className="onboarding-icon onboarding-icon--pink" size={48} />,
-      badge: "Planning Temporel",
+      badge: 'Planning Temporel',
       tips: [
-        "Créez des dépendances en reliant les tâches directement sur le diagramme.",
+        'Créez des dépendances en reliant les tâches directement sur le diagramme.',
         "Visualisez le Chemin Critique mis en évidence en rouge pour anticiper les goulots d'étranglement.",
-        "Consultez les conflits d'allocation et la capacité hebdomadaire de votre équipe."
-      ]
+        "Consultez les conflits d'allocation et la capacité hebdomadaire de votre équipe.",
+      ],
     },
     {
-      title: "Focus & Flow avec Pomodoro",
-      description: "Suivez votre temps réel de travail et évitez le burnout grâce à notre minuteur Pomodoro intégré et synchronisé avec le Time Tracking.",
+      title: 'Focus & Flow avec Pomodoro',
+      description:
+        'Suivez votre temps réel de travail et évitez le burnout grâce à notre minuteur Pomodoro intégré et synchronisé avec le Time Tracking.',
       icon: <Timer className="onboarding-icon onboarding-icon--green" size={48} />,
-      badge: "Productivité",
+      badge: 'Productivité',
       tips: [
-        "Sélectionnez une tâche pour y associer directement vos sessions de concentration.",
-        "Les blocs de temps enregistrés alimentent automatiquement la capacité des ressources.",
-        "Respectez les pauses de 5 minutes suggérées pour maintenir une productivité maximale."
-      ]
+        'Sélectionnez une tâche pour y associer directement vos sessions de concentration.',
+        'Les blocs de temps enregistrés alimentent automatiquement la capacité des ressources.',
+        'Respectez les pauses de 5 minutes suggérées pour maintenir une productivité maximale.',
+      ],
     },
     {
       title: "L'Assistant IA Copilot Prédictif",
-      description: "Propulsé par l'IA de pointe, votre Copilot analyse la charge de travail, identifie les risques de retard et propose un briefing personnalisé pour démarrer votre journée.",
+      description:
+        "Propulsé par l'IA de pointe, votre Copilot analyse la charge de travail, identifie les risques de retard et propose un briefing personnalisé pour démarrer votre journée.",
       icon: <Sparkles className="onboarding-icon onboarding-icon--gold" size={48} />,
-      badge: "Intelligence Artificielle",
+      badge: 'Intelligence Artificielle',
       tips: [
         "Ouvrez la barre de commande avec ⌘+K (ou l'icône Sparkles).",
         "Demandez à l'IA : 'Crée un projet Site Web avec 4 tâches' pour automatiser sa création.",
-        "Générez un briefing vocal ou visuel pour analyser l'avancement global en un instant."
-      ]
-    }
-  ]
+        "Générez un briefing vocal ou visuel pour analyser l'avancement global en un instant.",
+      ],
+    },
+  ];
 
   const nextStep = () => {
     if (currentStep < steps.length - 1) {
-      setCurrentStep(currentStep + 1)
+      setCurrentStep(currentStep + 1);
     } else {
-      handleComplete()
+      handleComplete();
     }
-  }
+  };
 
   const prevStep = () => {
     if (currentStep > 0) {
-      setCurrentStep(currentStep - 1)
+      setCurrentStep(currentStep - 1);
     }
-  }
+  };
 
   const handleComplete = () => {
-    localStorage.setItem('planner_onboarding_completed', 'true')
-    onClose()
-  }
+    localStorage.setItem('planner_onboarding_completed', 'true');
+    onClose();
+  };
 
-  const current = steps[currentStep]
+  const current = steps[currentStep];
 
   return (
     <div className="onboarding-overlay">
@@ -111,9 +126,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ onClose }) => 
         <div className="onboarding-body fade-in" key={currentStep}>
           <div className="onboarding-header">
             <span className="onboarding-badge">{current.badge}</span>
-            <div className="onboarding-icon-wrapper">
-              {current.icon}
-            </div>
+            <div className="onboarding-icon-wrapper">{current.icon}</div>
             <h2 className="onboarding-title">{current.title}</h2>
           </div>
 
@@ -147,10 +160,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ onClose }) => 
             Étape {currentStep + 1} sur {steps.length}
           </span>
 
-          <button
-            className="btn-primary onboarding-nav-btn"
-            onClick={nextStep}
-          >
+          <button className="btn-primary onboarding-nav-btn" onClick={nextStep}>
             {currentStep === steps.length - 1 ? (
               <>
                 Démarrer
@@ -166,5 +176,5 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ onClose }) => 
         </div>
       </div>
     </div>
-  )
-}
+  );
+};

@@ -41,10 +41,12 @@ export class TasksService {
       ...(data.title !== undefined ? { title: data.title } : {}),
       ...(data.description !== undefined ? { description: data.description } : {}),
       ...(data.priority !== undefined ? { priority: data.priority } : {}),
-      ...('status' in data && data.status !== undefined ? {
-        status: data.status,
-        completedAt: data.status === 'DONE' ? new Date() : null,
-      } : {}),
+      ...('status' in data && data.status !== undefined
+        ? {
+            status: data.status,
+            completedAt: data.status === 'DONE' ? new Date() : null,
+          }
+        : {}),
       ...(dates.startDate !== undefined ? { startDate: dates.startDate } : {}),
       ...(dates.dueDate !== undefined ? { dueDate: dates.dueDate } : {}),
       ...(data.estimatedMinutes !== undefined ? { estimatedMinutes: data.estimatedMinutes } : {}),
@@ -63,7 +65,12 @@ export class TasksService {
     return memberships.map((membership) => membership.userId);
   }
 
-  async replaceTaskAssignees(taskId: string, workspaceId: string | null, assigneeIds?: string[], actingUserId?: string) {
+  async replaceTaskAssignees(
+    taskId: string,
+    workspaceId: string | null,
+    assigneeIds?: string[],
+    actingUserId?: string,
+  ) {
     if (!assigneeIds) return;
 
     const allowedUserIds = workspaceId ? await this.getAccessibleUserIds(workspaceId) : [];
@@ -74,7 +81,7 @@ export class TasksService {
       where: { taskId },
       select: { userId: true },
     });
-    const existingUserIds = existingAssignees.map(a => a.userId);
+    const existingUserIds = existingAssignees.map((a) => a.userId);
 
     await this.prisma.taskAssignee.deleteMany({ where: { taskId } });
 
@@ -93,7 +100,7 @@ export class TasksService {
 
     if (task && actingUserId) {
       // Les utilisateurs qui sont dans uniqueAssigneeIds mais pas dans existingUserIds sont nouvellement assignés
-      const newAssignees = uniqueAssigneeIds.filter(id => !existingUserIds.includes(id));
+      const newAssignees = uniqueAssigneeIds.filter((id) => !existingUserIds.includes(id));
 
       if (newAssignees.length > 0) {
         // Récupérer le nom de la personne qui fait l'assignation
@@ -101,7 +108,7 @@ export class TasksService {
           where: { id: actingUserId },
           select: { name: true, email: true },
         });
-        const actorName = actor ? (actor.name || actor.email) : 'Un utilisateur';
+        const actorName = actor ? actor.name || actor.email : 'Un utilisateur';
 
         for (const userId of newAssignees) {
           if (userId !== actingUserId) {
@@ -131,9 +138,14 @@ export class TasksService {
     if (!task) {
       throw new BadRequestException('Task not found or unauthorized');
     }
-    
+
     // Vérifier les permissions fines (au moins CLIENT)
-    await this.projectPermissionsService.assertProjectRole(task.projectId, userId, ['MANAGER', 'CONTRIBUTOR', 'COMMENTER', 'CLIENT']);
+    await this.projectPermissionsService.assertProjectRole(task.projectId, userId, [
+      'MANAGER',
+      'CONTRIBUTOR',
+      'COMMENTER',
+      'CLIENT',
+    ]);
     return task;
   }
 
@@ -149,7 +161,12 @@ export class TasksService {
     }
 
     // Vérifier les permissions fines (au moins CLIENT)
-    await this.projectPermissionsService.assertProjectRole(projectId, userId, ['MANAGER', 'CONTRIBUTOR', 'COMMENTER', 'CLIENT']);
+    await this.projectPermissionsService.assertProjectRole(projectId, userId, [
+      'MANAGER',
+      'CONTRIBUTOR',
+      'COMMENTER',
+      'CLIENT',
+    ]);
     return project;
   }
 
@@ -166,7 +183,10 @@ export class TasksService {
     const project = await this.assertProjectAccess(projectId, userId);
 
     // Pour créer, l'utilisateur doit être au moins CONTRIBUTOR ou MANAGER
-    await this.projectPermissionsService.assertProjectRole(projectId, userId, ['MANAGER', 'CONTRIBUTOR']);
+    await this.projectPermissionsService.assertProjectRole(projectId, userId, [
+      'MANAGER',
+      'CONTRIBUTOR',
+    ]);
 
     const dates = this.parseTaskDates(options);
     const task = await this.prisma.task.create({
@@ -194,13 +214,9 @@ export class TasksService {
     });
 
     if (finalTask) {
-      await this.projectPermissionsService.logAction(
-        userId,
-        'TASK_CREATE',
-        'Task',
-        finalTask.id,
-        { task: finalTask },
-      );
+      await this.projectPermissionsService.logAction(userId, 'TASK_CREATE', 'Task', finalTask.id, {
+        task: finalTask,
+      });
 
       if (project.workspaceId) {
         this.integrationService.sendNotification(
@@ -222,12 +238,42 @@ export class TasksService {
       include: TASK_INCLUDE,
     });
   }
-
   async updateTask(taskId: string, userId: string, data: UpdateTaskDto) {
     const task = await this.assertTaskAccess(taskId, userId);
 
     // Pour modifier, au moins CONTRIBUTOR ou MANAGER
-    await this.projectPermissionsService.assertProjectRole(task.projectId, userId, ['MANAGER', 'CONTRIBUTOR']);
+    await this.projectPermissionsService.assertProjectRole(task.projectId, userId, [
+      'MANAGER',
+      'CONTRIBUTOR',
+    ]);
+
+    // Règle 1 (Kanban ➔ Gantt)
+    if (
+      data.status === TaskStatus.IN_PROGRESS &&
+      !task.startDate &&
+      !task.dueDate &&
+      !data.startDate &&
+      !data.dueDate
+    ) {
+      const defaultStart = new Date();
+      const defaultDue = new Date();
+      defaultDue.setDate(defaultDue.getDate() + 2); // Échéance à +2 jours
+
+      data.startDate = defaultStart.toISOString();
+      data.dueDate = defaultDue.toISOString();
+    }
+
+    // Règle 2 (Gantt ➔ Kanban)
+    const newStart = data.startDate
+      ? new Date(data.startDate)
+      : task.startDate
+        ? new Date(task.startDate)
+        : null;
+    const currentStatus = data.status || task.status;
+
+    if (newStart && newStart <= new Date() && currentStatus === TaskStatus.TODO) {
+      data.status = TaskStatus.IN_PROGRESS;
+    }
 
     const impactedTaskIds: string[] = [];
 
@@ -263,13 +309,10 @@ export class TasksService {
     });
 
     if (finalTask) {
-      await this.projectPermissionsService.logAction(
-        userId,
-        'TASK_UPDATE',
-        'Task',
-        taskId,
-        { before: task, after: finalTask },
-      );
+      await this.projectPermissionsService.logAction(userId, 'TASK_UPDATE', 'Task', taskId, {
+        before: task,
+        after: finalTask,
+      });
 
       if (data.status === 'DONE' && task.status !== 'DONE' && task.project.workspaceId) {
         this.integrationService.sendNotification(
@@ -290,20 +333,19 @@ export class TasksService {
     const task = await this.assertTaskAccess(taskId, userId);
 
     // Pour supprimer, au moins CONTRIBUTOR ou MANAGER
-    await this.projectPermissionsService.assertProjectRole(task.projectId, userId, ['MANAGER', 'CONTRIBUTOR']);
+    await this.projectPermissionsService.assertProjectRole(task.projectId, userId, [
+      'MANAGER',
+      'CONTRIBUTOR',
+    ]);
 
     const deleted = await this.prisma.task.update({
       where: { id: taskId },
       data: { deletedAt: new Date() },
     });
 
-    await this.projectPermissionsService.logAction(
-      userId,
-      'TASK_DELETE',
-      'Task',
-      taskId,
-      { deleted },
-    );
+    await this.projectPermissionsService.logAction(userId, 'TASK_DELETE', 'Task', taskId, {
+      deleted,
+    });
 
     return deleted;
   }

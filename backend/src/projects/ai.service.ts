@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { GeminiService, ParsedAiAction } from '../notes/gemini.service';
 import { ProjectsService } from './projects.service';
@@ -34,7 +34,9 @@ export class AiService {
     projectId: string | null,
     commandText: string,
   ): Promise<ResolvedAiAction[]> {
-    this.logger.log(`Analyse de la commande IA de l'utilisateur ${userId} pour le workspace ${workspaceId}`);
+    this.logger.log(
+      `Analyse de la commande IA de l'utilisateur ${userId} pour le workspace ${workspaceId}`,
+    );
 
     // Étape 1 : Demander à Gemini de parser l'intention en actions élémentaires
     let parsedActions: ParsedAiAction[] = [];
@@ -47,35 +49,41 @@ export class AiService {
         const taskTitle = hasAssignee ? taskPart.split('pour')[0].trim() : taskPart;
         const assigneeName = hasAssignee ? taskPart.split('pour')[1].trim() : undefined;
 
-        parsedActions = [{
-          type: 'CREATE_TASK',
-          taskTitle,
-          priority: 'HIGH',
-          dueDate: '2026-06-01',
-          estimatedMinutes: 120,
-          assigneeName,
-        }];
+        parsedActions = [
+          {
+            type: 'CREATE_TASK',
+            taskTitle,
+            priority: 'HIGH',
+            dueDate: '2026-06-01',
+            estimatedMinutes: 120,
+            assigneeName,
+          },
+        ];
       } else if (cleanCommand.includes('assigner')) {
         // Ex: "assigner Alice sur Configurer la sécurité globale"
         const parts = cleanCommand.replace('assigner', '').split('sur');
-        parsedActions = [{
-          type: 'ASSIGN_TASK',
-          assigneeName: parts[0]?.trim(),
-          taskTitle: parts[1]?.trim(),
-        }];
+        parsedActions = [
+          {
+            type: 'ASSIGN_TASK',
+            assigneeName: parts[0]?.trim(),
+            taskTitle: parts[1]?.trim(),
+          },
+        ];
       } else if (cleanCommand.includes('planifier')) {
         // Ex: "planifier Configurer la sécurité globale"
-        parsedActions = [{
-          type: 'CREATE_TIMEBLOCK',
-          taskTitle: cleanCommand.replace('planifier', '').trim(),
-          timeBlockStart: '2026-06-01T10:00:00.000Z',
-          timeBlockEnd: '2026-06-01T12:00:00.000Z',
-        }];
+        parsedActions = [
+          {
+            type: 'CREATE_TIMEBLOCK',
+            taskTitle: cleanCommand.replace('planifier', '').trim(),
+            timeBlockStart: '2026-06-01T10:00:00.000Z',
+            timeBlockEnd: '2026-06-01T12:00:00.000Z',
+          },
+        ];
       }
     } else {
       parsedActions = await this.geminiService.parseCommand(commandText, new Date());
     }
-    
+
     const resolved = await this.resolveActions(workspaceId, parsedActions);
 
     // Archiver la requête dans l'historique
@@ -108,15 +116,19 @@ export class AiService {
     let parsedActions: ParsedAiAction[] = [];
 
     if (isMock || !this.geminiService.isAvailable()) {
-      this.logger.log("Mode mock ou Gemini indisponible détecté pour la vision. Utilisation d'actions simulées.");
-      parsedActions = [{
-        type: 'CREATE_TASK',
-        taskTitle: "Implémenter l'OCR",
-        priority: 'HIGH',
-        dueDate: '2026-06-05',
-        estimatedMinutes: 240,
-        assigneeName: 'Alice',
-      }];
+      this.logger.log(
+        "Mode mock ou Gemini indisponible détecté pour la vision. Utilisation d'actions simulées.",
+      );
+      parsedActions = [
+        {
+          type: 'CREATE_TASK',
+          taskTitle: "Implémenter l'OCR",
+          priority: 'HIGH',
+          dueDate: '2026-06-05',
+          estimatedMinutes: 240,
+          assigneeName: 'Alice',
+        },
+      ];
     } else {
       parsedActions = await this.geminiService.analyzeImage(imageBuffer, mimeType);
     }
@@ -141,7 +153,7 @@ export class AiService {
    */
   private async resolveActions(
     workspaceId: string,
-    parsedActions: ParsedAiAction[]
+    parsedActions: ParsedAiAction[],
   ): Promise<ResolvedAiAction[]> {
     // Charger tous les membres et les tâches pour la résolution d'entités
     const workspaceMembers = await this.prisma.membership.findMany({
@@ -162,7 +174,7 @@ export class AiService {
     for (let i = 0; i < parsedActions.length; i++) {
       const action = parsedActions[i];
       const tempId = `action-temp-${i}`;
-      
+
       const resolvedAction: ResolvedAiAction = {
         ...action,
         id: tempId,
@@ -174,7 +186,7 @@ export class AiService {
         switch (action.type) {
           case 'CREATE_TASK': {
             let desc = `Créer la tâche "${action.taskTitle || 'Sans titre'}"`;
-            
+
             // Priorité par défaut MEDIUM si non fournie
             const priority = action.priority || 'MEDIUM';
             desc += ` (Priorité ${priority}`;
@@ -207,7 +219,9 @@ export class AiService {
 
           case 'ASSIGN_TASK': {
             if (!action.taskTitle || !action.assigneeName) {
-              throw new BadRequestException("Titre de tâche et nom d'assigné requis pour ASSIGN_TASK.");
+              throw new BadRequestException(
+                "Titre de tâche et nom d'assigné requis pour ASSIGN_TASK.",
+              );
             }
 
             const task = this.resolveTask(action.taskTitle, activeTasks);
@@ -229,7 +243,8 @@ export class AiService {
               desc += ` à ${resolvedAction.assigneeName}`;
             } else {
               resolvedAction.resolved = false;
-              resolvedAction.warning = (resolvedAction.warning || '') + ` Membre "${action.assigneeName}" introuvable.`;
+              resolvedAction.warning =
+                (resolvedAction.warning || '') + ` Membre "${action.assigneeName}" introuvable.`;
             }
 
             resolvedAction.description = desc;
@@ -238,7 +253,9 @@ export class AiService {
 
           case 'CREATE_DEPENDENCY': {
             if (!action.taskTitle || !action.dependsOnTaskTitle) {
-              throw new BadRequestException("Tâche cible et tâche dépendante requises pour CREATE_DEPENDENCY.");
+              throw new BadRequestException(
+                'Tâche cible et tâche dépendante requises pour CREATE_DEPENDENCY.',
+              );
             }
 
             const task = this.resolveTask(action.taskTitle, activeTasks);
@@ -260,7 +277,9 @@ export class AiService {
               resolvedAction.dependsOnTaskTitle = dependsOnTask.title;
             } else {
               resolvedAction.resolved = false;
-              resolvedAction.warning = (resolvedAction.warning || '') + ` Tâche dépendante "${action.dependsOnTaskTitle}" introuvable.`;
+              resolvedAction.warning =
+                (resolvedAction.warning || '') +
+                ` Tâche dépendante "${action.dependsOnTaskTitle}" introuvable.`;
             }
 
             if (task && dependsOnTask) {
@@ -273,13 +292,16 @@ export class AiService {
 
           case 'CREATE_TIMEBLOCK': {
             if (!action.taskTitle || !action.timeBlockStart || !action.timeBlockEnd) {
-              throw new BadRequestException("Tâche, début et fin requis pour CREATE_TIMEBLOCK.");
+              throw new BadRequestException('Tâche, début et fin requis pour CREATE_TIMEBLOCK.');
             }
 
             const task = this.resolveTask(action.taskTitle, activeTasks);
             const start = new Date(action.timeBlockStart);
             const end = new Date(action.timeBlockEnd);
-            const startStr = start.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+            const startStr = start.toLocaleTimeString('fr-FR', {
+              hour: '2-digit',
+              minute: '2-digit',
+            });
             const endStr = end.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
             const dateStr = start.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
 
@@ -300,7 +322,7 @@ export class AiService {
 
           case 'UPDATE_TASK_STATUS': {
             if (!action.taskTitle || !action.status) {
-              throw new BadRequestException("Tâche et statut requis pour UPDATE_TASK_STATUS.");
+              throw new BadRequestException('Tâche et statut requis pour UPDATE_TASK_STATUS.');
             }
 
             const task = this.resolveTask(action.taskTitle, activeTasks);
@@ -324,7 +346,8 @@ export class AiService {
         }
       } catch (err: unknown) {
         resolvedAction.resolved = false;
-        resolvedAction.warning = err instanceof Error ? err instanceof Error ? err.message : String(err) : String(err);
+        resolvedAction.warning =
+          err instanceof Error ? (err instanceof Error ? err.message : String(err)) : String(err);
         resolvedAction.description = `Action invalide [${action.type}]`;
       }
 
@@ -351,8 +374,10 @@ export class AiService {
 
     // Bypass pour le mode test/mock ou si l'API n'est pas configurée
     if (isMock || !this.geminiService.isAvailable()) {
-      this.logger.log("Mode mock ou Gemini indisponible détecté pour la voix. Utilisation d'une transcription simulée.");
-      transcription = "MOCK: créer tâche Configurer la sécurité globale pour Alice";
+      this.logger.log(
+        "Mode mock ou Gemini indisponible détecté pour la voix. Utilisation d'une transcription simulée.",
+      );
+      transcription = 'MOCK: créer tâche Configurer la sécurité globale pour Alice';
     } else {
       transcription = await this.geminiService.transcribeAudio(audioBuffer, mimeType);
     }
@@ -374,7 +399,9 @@ export class AiService {
     projectId: string | null,
     actions: ResolvedAiAction[],
   ): Promise<{ success: boolean; executedCount: number }> {
-    this.logger.log(`Exécution de ${actions.length} actions automatisées par l'utilisateur ${userId}`);
+    this.logger.log(
+      `Exécution de ${actions.length} actions automatisées par l'utilisateur ${userId}`,
+    );
 
     let executedCount = 0;
 
@@ -383,14 +410,16 @@ export class AiService {
       switch (action.type) {
         case 'CREATE_TASK': {
           let targetProjectId = projectId;
-          
+
           if (!targetProjectId) {
             // Chercher le premier projet actif du workspace
             const activeProject = await this.prisma.project.findFirst({
               where: { workspaceId, deletedAt: null },
             });
             if (!activeProject) {
-              throw new NotFoundException("Aucun projet actif trouvé dans le workspace pour y ajouter la tâche.");
+              throw new NotFoundException(
+                'Aucun projet actif trouvé dans le workspace pour y ajouter la tâche.',
+              );
             }
             targetProjectId = activeProject.id;
           }
@@ -411,7 +440,7 @@ export class AiService {
             userId,
             action.taskTitle || 'Tâche sans titre',
             action.taskDescription,
-            action.priority as TaskPriority || TaskPriority.MEDIUM,
+            (action.priority as TaskPriority) || TaskPriority.MEDIUM,
             options,
           );
           executedCount++;
@@ -420,7 +449,9 @@ export class AiService {
 
         case 'ASSIGN_TASK': {
           if (!action.taskId || !action.assigneeId) {
-            throw new BadRequestException("taskId et assigneeId requis pour exécuter l'assignation.");
+            throw new BadRequestException(
+              "taskId et assigneeId requis pour exécuter l'assignation.",
+            );
           }
 
           await this.projectsService.updateTask(action.taskId, userId, {
@@ -432,14 +463,16 @@ export class AiService {
 
         case 'CREATE_DEPENDENCY': {
           if (!action.taskId || !action.dependsOnTaskId) {
-            throw new BadRequestException("taskId et dependsOnTaskId requis pour créer une dépendance.");
+            throw new BadRequestException(
+              'taskId et dependsOnTaskId requis pour créer une dépendance.',
+            );
           }
 
           await this.projectsService.addTaskDependency(
             action.taskId,
             userId,
             action.dependsOnTaskId,
-            action.dependencyType as DependencyType || DependencyType.FINISH_TO_START,
+            (action.dependencyType as DependencyType) || DependencyType.FINISH_TO_START,
           );
           executedCount++;
           break;
@@ -447,7 +480,7 @@ export class AiService {
 
         case 'CREATE_TIMEBLOCK': {
           if (!action.taskId || !action.timeBlockStart || !action.timeBlockEnd) {
-            throw new BadRequestException("taskId, début et fin de bloc requis pour planifier.");
+            throw new BadRequestException('taskId, début et fin de bloc requis pour planifier.');
           }
 
           await this.projectsService.createTimeBlock(
@@ -462,7 +495,7 @@ export class AiService {
 
         case 'UPDATE_TASK_STATUS': {
           if (!action.taskId || !action.status) {
-            throw new BadRequestException("taskId et statut requis pour modifier le statut.");
+            throw new BadRequestException('taskId et statut requis pour modifier le statut.');
           }
 
           await this.projectsService.updateTask(action.taskId, userId, {
@@ -495,15 +528,15 @@ export class AiService {
     if (!search) return null;
 
     // 1. Recherche stricte ou partielle de l'e-mail
-    let match = members.find(m => this.normalizeString(m.user.email) === search);
+    let match = members.find((m) => this.normalizeString(m.user.email) === search);
     if (match) return match;
 
     // 2. Recherche par correspondance sur le nom complet
-    match = members.find(m => m.user.name && this.normalizeString(m.user.name).includes(search));
+    match = members.find((m) => m.user.name && this.normalizeString(m.user.name).includes(search));
     if (match) return match;
 
     // 3. Recherche par préfixe d'email
-    match = members.find(m => this.normalizeString(m.user.email.split('@')[0]) === search);
+    match = members.find((m) => this.normalizeString(m.user.email.split('@')[0]) === search);
     if (match) return match;
 
     return null;
@@ -514,11 +547,11 @@ export class AiService {
     if (!search) return null;
 
     // 1. Recherche exacte
-    let match = tasks.find(t => this.normalizeString(t.title) === search);
+    let match = tasks.find((t) => this.normalizeString(t.title) === search);
     if (match) return match;
 
     // 2. Recherche partielle (le titre contient la chaîne)
-    match = tasks.find(t => this.normalizeString(t.title).includes(search));
+    match = tasks.find((t) => this.normalizeString(t.title).includes(search));
     if (match) return match;
 
     return null;

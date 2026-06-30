@@ -55,7 +55,7 @@ export class NotesService {
 
   async getNotes(userId: string) {
     const cacheKey = this.getCacheKey(userId);
-    
+
     // Essayer de lire depuis Redis
     try {
       const cachedNotes = await this.redis.get(cacheKey);
@@ -82,7 +82,7 @@ export class NotesService {
     try {
       await this.redis.set(cacheKey, JSON.stringify(notes), 300);
     } catch (e) {
-      console.warn('Impossible d\'écrire dans le cache Redis :', e);
+      console.warn("Impossible d'écrire dans le cache Redis :", e);
     }
 
     return notes;
@@ -142,7 +142,8 @@ export class NotesService {
     const lines = content.split('\n');
     let lineIndex = -1;
     let match: RegExpMatchArray | null = null;
-    const staticRegex = /^(\s*-\s*\[[ xX]?\]\s+)(.*?)(?:\s+#\w+)?\s*<!--\s*task:([a-zA-Z0-9-]+)\s*-->\s*$/;
+    const staticRegex =
+      /^(\s*-\s*\[[ xX]?\]\s+)(.*?)(?:\s+#\w+)?\s*<!--\s*task:([a-zA-Z0-9-]+)\s*-->\s*$/;
 
     let currentIndex = 0;
     for (const line of lines) {
@@ -174,7 +175,9 @@ export class NotesService {
 
       // Invalider le cache Redis
       await this.redis.del(this.getCacheKey(note.userId));
-      console.log(`Statut de la tâche "${taskTitle}" et titre synchronisés dans la note "${note.title}" (${isDone ? '[x]' : '[ ]'})`);
+      console.log(
+        `Statut de la tâche "${taskTitle}" et titre synchronisés dans la note "${note.title}" (${isDone ? '[x]' : '[ ]'})`,
+      );
     }
   }
 
@@ -197,7 +200,10 @@ export class NotesService {
         aiTasks = await this.gemini.extractTasksFromText(content, new Date());
         console.log(`[Gemini NLP] ${aiTasks.length} tâches analysées par l'IA.`);
       } catch (err: unknown) {
-        console.error('Erreur lors de l\'appel de Gemini pour l\'extraction NLP, bascule sur le mode standard:', err instanceof Error ? err.message : String(err));
+        console.error(
+          "Erreur lors de l'appel de Gemini pour l'extraction NLP, bascule sur le mode standard:",
+          err instanceof Error ? err.message : String(err),
+        );
       }
     }
 
@@ -232,7 +238,7 @@ export class NotesService {
 
         // Nettoyer le titre du hashtag de projet éventuel pour chercher dans les tâches IA
         const cleanText = taskText.replace(/#\w+/g, '').trim();
-        const aiTask = aiTasks.find(t => {
+        const aiTask = aiTasks.find((t) => {
           const aiCleanTitle = t.title.toLowerCase().trim();
           const localCleanTitle = cleanText.toLowerCase().trim();
           return aiCleanTitle.includes(localCleanTitle) || localCleanTitle.includes(aiCleanTitle);
@@ -247,9 +253,9 @@ export class NotesService {
             where: {
               OR: [
                 { name: { equals: aiTask.assigneeName } },
-                { githubUsername: { equals: aiTask.assigneeName } }
-              ]
-            }
+                { githubUsername: { equals: aiTask.assigneeName } },
+              ],
+            },
           });
           if (user) {
             assigneeId = user.id;
@@ -277,7 +283,10 @@ export class NotesService {
           project = await this.prisma.project.create({
             data: {
               name: targetProjectName,
-              description: targetProjectName === 'Inbox' ? 'Boîte de réception pour les tâches capturées dans les notes' : `Projet créé automatiquement via les notes`,
+              description:
+                targetProjectName === 'Inbox'
+                  ? 'Boîte de réception pour les tâches capturées dans les notes'
+                  : `Projet créé automatiquement via les notes`,
               userId,
             },
           });
@@ -293,17 +302,27 @@ export class NotesService {
 
           if (existingTask) {
             // Mettre à jour si le statut, le titre, la date limite ou le projet a changé dans la note
-            const statusChanged = (existingTask.status === 'DONE' && !isDone) ? 'TODO' : ((existingTask.status !== 'DONE' && isDone) ? 'DONE' : null);
+            const statusChanged =
+              existingTask.status === 'DONE' && !isDone
+                ? 'TODO'
+                : existingTask.status !== 'DONE' && isDone
+                  ? 'DONE'
+                  : null;
             const titleChanged = existingTask.title !== taskText;
             const projectChanged = existingTask.projectId !== project.id;
-            const dateChanged = dueDate ? (existingTask.dueDate ? existingTask.dueDate.toISOString().split('T')[0] !== dueDate.toISOString().split('T')[0] : true) : false;
+            const dateChanged = dueDate
+              ? existingTask.dueDate
+                ? existingTask.dueDate.toISOString().split('T')[0] !==
+                  dueDate.toISOString().split('T')[0]
+                : true
+              : false;
 
             if (statusChanged || titleChanged || projectChanged || dateChanged) {
               await this.prisma.task.update({
                 where: { id: taskId },
                 data: {
                   title: taskText,
-                  status: statusChanged || existingTask.status as any,
+                  status: statusChanged || (existingTask.status as any),
                   projectId: project.id,
                   dueDate: dueDate || undefined,
                 },
@@ -313,12 +332,12 @@ export class NotesService {
 
             if (assigneeId) {
               const existingAssignee = await this.prisma.taskAssignee.findUnique({
-                where: { taskId_userId: { taskId, userId: assigneeId } }
+                where: { taskId_userId: { taskId, userId: assigneeId } },
               });
               if (!existingAssignee) {
                 await this.prisma.taskAssignee.deleteMany({ where: { taskId } });
                 await this.prisma.taskAssignee.create({
-                  data: { taskId, userId: assigneeId }
+                  data: { taskId, userId: assigneeId },
                 });
               }
             }
@@ -339,7 +358,7 @@ export class NotesService {
             });
             if (assigneeId) {
               await this.prisma.taskAssignee.create({
-                data: { taskId, userId: assigneeId }
+                data: { taskId, userId: assigneeId },
               });
             }
             console.log(`Tâche "${taskId}" recréée avec l'ID de la note.`);
@@ -363,7 +382,7 @@ export class NotesService {
 
           if (assigneeId) {
             await this.prisma.taskAssignee.create({
-              data: { taskId: newTaskId, userId: assigneeId }
+              data: { taskId: newTaskId, userId: assigneeId },
             });
           }
 

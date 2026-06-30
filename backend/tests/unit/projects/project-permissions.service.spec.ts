@@ -29,10 +29,7 @@ describe('ProjectPermissionsService', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        ProjectPermissionsService,
-        { provide: PrismaService, useValue: mockPrisma },
-      ],
+      providers: [ProjectPermissionsService, { provide: PrismaService, useValue: mockPrisma }],
     }).compile();
 
     service = module.get<ProjectPermissionsService>(ProjectPermissionsService);
@@ -42,7 +39,7 @@ describe('ProjectPermissionsService', () => {
   });
 
   describe('assertProjectRole', () => {
-    it('devrait lever une erreur NotFoundException si le projet n\'existe pas', async () => {
+    it("devrait lever une erreur NotFoundException si le projet n'existe pas", async () => {
       mockPrisma.project.findFirst.mockResolvedValue(null);
 
       await expect(
@@ -78,7 +75,7 @@ describe('ProjectPermissionsService', () => {
       ).resolves.not.toThrow();
     });
 
-    it('devrait lever ForbiddenException si l\'utilisateur n\'a aucun lien avec le projet', async () => {
+    it("devrait lever ForbiddenException si l'utilisateur n'a aucun lien avec le projet", async () => {
       mockPrisma.project.findFirst.mockResolvedValue({
         id: 'proj-1',
         userId: 'creator-user',
@@ -145,7 +142,7 @@ describe('ProjectPermissionsService', () => {
   });
 
   describe('assignProjectRole', () => {
-    it('devrait insérer un log d\'audit lors d\'une attribution de rôle réussie', async () => {
+    it("devrait insérer un log d'audit lors d'une attribution de rôle réussie", async () => {
       mockPrisma.project.findFirst.mockResolvedValue({
         id: 'proj-1',
         userId: 'actor-user',
@@ -158,15 +155,22 @@ describe('ProjectPermissionsService', () => {
         role: 'CONTRIBUTOR',
       });
 
-      await service.assignProjectRole('proj-1', 'target-user', ProjectRole.CONTRIBUTOR, 'actor-user');
+      await service.assignProjectRole(
+        'proj-1',
+        'target-user',
+        ProjectRole.CONTRIBUTOR,
+        'actor-user',
+      );
 
-      expect(mockPrisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
-        data: expect.objectContaining({
-          userId: 'actor-user',
-          action: 'PROJECT_ROLE_ASSIGN',
-          entityType: 'ProjectMembership',
+      expect(mockPrisma.auditLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            userId: 'actor-user',
+            action: 'PROJECT_ROLE_ASSIGN',
+            entityType: 'ProjectMembership',
+          }),
         }),
-      }));
+      );
     });
   });
 });

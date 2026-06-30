@@ -121,7 +121,7 @@ describe('ProjectsService - GitHub Webhooks', () => {
   });
 
   describe('verifyGitHubSignature', () => {
-    it('devrait retourner true si aucun secret GITHUB_WEBHOOK_SECRET n\'est défini', async () => {
+    it("devrait retourner true si aucun secret GITHUB_WEBHOOK_SECRET n'est défini", async () => {
       // @ts-ignore - accès à une méthode privée pour le test
       const result = service.verifyGitHubSignature({ foo: 'bar' }, 'any-sig');
       expect(result).toBe(true);
@@ -160,7 +160,7 @@ describe('ProjectsService - GitHub Webhooks', () => {
       const taskId1 = 'b406e122-37b4-4b5c-b171-d68a9fdfc418';
       const taskId2 = 'c1234567-89ab-cdef-0123-456789abcdef';
       const text = `Ce commit fixes #${taskId1} et closes #${taskId2}. Ne devrait pas matcher un simple UUID ${taskId1} ou un mot-clé sans hash comme fix #${taskId1.substring(0, 10)}`;
-      
+
       // @ts-ignore
       const result = service.extractTaskIdsFromText(text);
       expect(result).toContain(taskId1);
@@ -198,11 +198,9 @@ describe('ProjectsService - GitHub Webhooks', () => {
       expect(mockTasksService.closeTaskFromWebhook).toHaveBeenCalledWith(mockTaskId);
     });
 
-    it('devrait fermer les tâches issues de messages de commits lors d\'un push', async () => {
+    it("devrait fermer les tâches issues de messages de commits lors d'un push", async () => {
       const payload = {
-        commits: [
-          { message: `Ajout des tests - closes #${mockTaskId}` },
-        ],
+        commits: [{ message: `Ajout des tests - closes #${mockTaskId}` }],
       };
 
       mockTasksService.closeTaskFromWebhook.mockResolvedValue(true);
@@ -233,7 +231,7 @@ describe('ProjectsService - GitHub Webhooks', () => {
     const workspaceId = 'workspace-123';
     const userId = 'user-owner';
 
-    it('devrait déléguer l\'optimisation à ResourcesService', async () => {
+    it("devrait déléguer l'optimisation à ResourcesService", async () => {
       const mockResult = {
         success: true,
         message: 'Optimisation réussie. 3 tâches réallouées.',
@@ -245,7 +243,10 @@ describe('ProjectsService - GitHub Webhooks', () => {
       const result = await service.optimizeWorkspaceResources(workspaceId, userId);
 
       expect(result).toEqual(mockResult);
-      expect(mockResourcesService.optimizeWorkspaceResources).toHaveBeenCalledWith(workspaceId, userId);
+      expect(mockResourcesService.optimizeWorkspaceResources).toHaveBeenCalledWith(
+        workspaceId,
+        userId,
+      );
     });
   });
 
@@ -253,13 +254,25 @@ describe('ProjectsService - GitHub Webhooks', () => {
     it('devrait déléguer createTask à TasksService', async () => {
       mockTasksService.createTask.mockResolvedValue({ id: 'task-new' });
       await service.createTask('proj-1', 'user-1', 'Test');
-      expect(mockTasksService.createTask).toHaveBeenCalledWith('proj-1', 'user-1', 'Test', undefined, undefined, undefined);
+      expect(mockTasksService.createTask).toHaveBeenCalledWith(
+        'proj-1',
+        'user-1',
+        'Test',
+        undefined,
+        undefined,
+        undefined,
+      );
     });
 
     it('devrait déléguer addTaskDependency à DependenciesService', async () => {
       mockDependenciesService.addTaskDependency.mockResolvedValue({ id: 'dep-1' });
       await service.addTaskDependency('task-1', 'user-1', 'task-2');
-      expect(mockDependenciesService.addTaskDependency).toHaveBeenCalledWith('task-1', 'user-1', 'task-2', undefined);
+      expect(mockDependenciesService.addTaskDependency).toHaveBeenCalledWith(
+        'task-1',
+        'user-1',
+        'task-2',
+        undefined,
+      );
     });
 
     it('devrait déléguer createTimeBlock à TimeBlocksService', async () => {
@@ -267,11 +280,19 @@ describe('ProjectsService - GitHub Webhooks', () => {
       const end = new Date(start.getTime() + 3600000);
       mockTimeBlocksService.createTimeBlock.mockResolvedValue({ id: 'tb-1' });
       await service.createTimeBlock('task-1', 'user-1', start, end);
-      expect(mockTimeBlocksService.createTimeBlock).toHaveBeenCalledWith('task-1', 'user-1', start, end);
+      expect(mockTimeBlocksService.createTimeBlock).toHaveBeenCalledWith(
+        'task-1',
+        'user-1',
+        start,
+        end,
+      );
     });
 
     it('devrait déléguer getProjectFinances à FinancesService', async () => {
-      mockFinancesService.getProjectFinances.mockResolvedValue({ projectId: 'proj-1', actualCostCents: 5000 });
+      mockFinancesService.getProjectFinances.mockResolvedValue({
+        projectId: 'proj-1',
+        actualCostCents: 5000,
+      });
       await service.getProjectFinances('proj-1', 'user-1');
       expect(mockFinancesService.getProjectFinances).toHaveBeenCalledWith('proj-1', 'user-1');
     });

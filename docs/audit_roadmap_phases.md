@@ -46,21 +46,21 @@
 
 ## 📊 Matrice de Couverture Synthétique (Mise à jour)
 
-| Phase | Intitulé | Backend | Frontend | Maturité | Verdict |
-| :---: | :--- | :---: | :---: | :---: | :--- |
-| 1 | Collaboration Réelle | ✅ 95% | ✅ 85% | **90%** | Solide, envoi d'email câblé |
-| 2 | Commentaires & Communication | ✅ 98% | ✅ 92% | **95%** | Très avancé, notifications temps réel et e-mails opérationnels |
-| 3 | Assistant IA de Productivité | ✅ 95% | ✅ 85% | **90%** | Moteur NLP mature |
-| 4 | Capture Vocale | ✅ 80% | ✅ 70% | **75%** | Fonctionnel avec Gemini |
-| 5 | OCR & Whiteboard Import | ✅ 80% | ✅ 70% | **75%** | Vision API câblée |
-| 6 | Copilote Proactif | ✅ 85% | ✅ 75% | **80%** | Alertes + Briefing IA |
-| 7 | Synchronisation Réelle | ✅ 80% | ✅ 70% | **75%** | Intégration iCal/ICS & JSON réelle avec simulateur dynamique |
-| 8 | Auto Scheduling Intelligent | ✅ 60% | ⚠️ 20% | **40%** | Effet domino backend OK |
-| 9 | Agile Professionnel | ✅ 80% | ✅ 75% | **78%** | Sprints, Burndown, Velocity |
-| 10 | Gantt Nouvelle Génération | ✅ 85% | ✅ 85% | **85%** | Drag & drop, zoom, liens interactifs et conflits opérationnels |
-| 11 | Finances & Rentabilité | ✅ 98% | ✅ 92% | **95%** | Intégration complète, rapports et sécurité d'accès OK |
-| 12 | Gestion de Portefeuille | ✅ 80% | ✅ 80% | **80%** | Dashboard complet, Health Scores composites calculés |
-| 13 | RBAC Avancé | ⚠️ 35% | ⚠️ 15% | **25%** | Rôles workspace stricts (dont limitation VIEWER), projet partiel |
+| Phase | Intitulé                     | Backend | Frontend | Maturité | Verdict                                                          |
+| :---: | :--------------------------- | :-----: | :------: | :------: | :--------------------------------------------------------------- |
+|   1   | Collaboration Réelle         | ✅ 95%  |  ✅ 85%  | **90%**  | Solide, envoi d'email câblé                                      |
+|   2   | Commentaires & Communication | ✅ 98%  |  ✅ 92%  | **95%**  | Très avancé, notifications temps réel et e-mails opérationnels   |
+|   3   | Assistant IA de Productivité | ✅ 95%  |  ✅ 85%  | **90%**  | Moteur NLP mature                                                |
+|   4   | Capture Vocale               | ✅ 80%  |  ✅ 70%  | **75%**  | Fonctionnel avec Gemini                                          |
+|   5   | OCR & Whiteboard Import      | ✅ 80%  |  ✅ 70%  | **75%**  | Vision API câblée                                                |
+|   6   | Copilote Proactif            | ✅ 85%  |  ✅ 75%  | **80%**  | Alertes + Briefing IA                                            |
+|   7   | Synchronisation Réelle       | ✅ 80%  |  ✅ 70%  | **75%**  | Intégration iCal/ICS & JSON réelle avec simulateur dynamique     |
+|   8   | Auto Scheduling Intelligent  | ✅ 60%  |  ⚠️ 20%  | **40%**  | Effet domino backend OK                                          |
+|   9   | Agile Professionnel          | ✅ 80%  |  ✅ 75%  | **78%**  | Sprints, Burndown, Velocity                                      |
+|  10   | Gantt Nouvelle Génération    | ✅ 85%  |  ✅ 85%  | **85%**  | Drag & drop, zoom, liens interactifs et conflits opérationnels   |
+|  11   | Finances & Rentabilité       | ✅ 98%  |  ✅ 92%  | **95%**  | Intégration complète, rapports et sécurité d'accès OK            |
+|  12   | Gestion de Portefeuille      | ✅ 80%  |  ✅ 80%  | **80%**  | Dashboard complet, Health Scores composites calculés             |
+|  13   | RBAC Avancé                  | ⚠️ 35%  |  ⚠️ 15%  | **25%**  | Rôles workspace stricts (dont limitation VIEWER), projet partiel |
 
 ---
 
@@ -170,7 +170,7 @@
 - `propagateScheduleUpdates()` dans [ProjectsService](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/projects/projects.service.ts) (délégué à `TasksService`) — **Effet domino complet** :
   - Propagation récursive en transaction Prisma.
   - Décalage automatique des tâches dépendantes (FINISH_TO_START).
-- `optimizeWorkspaceResources()` dans [ProjectsService` (délégué à `ResourcesService`) — algorithme glouton de réallocation.
+- `optimizeWorkspaceResources()` dans [ProjectsService`(délégué à`ResourcesService`) — algorithme glouton de réallocation.
 
 ### ⚠️ Ce qui manque — Auto Scheduling
 
@@ -283,9 +283,9 @@
 
 Voici les prochaines étapes recommandées :
 
-| Priorité | Action | Impact | Effort |
-| :---: | :--- | :---: | :---: |
-| **P0** | Phase 13 — Permissions et rôles par projet | 🔐 Sécurité & Cloisonnement | 3-4j |
-| **P1** | Phase 8 — Auto-scheduling proactif avec CPM (Critical Path Method) | 🧠 Intelligence | 4-5j |
-| **P1** | Intégration de flux OAuth2 réels pour Google Calendar/Outlook | 📅 Sync bidirectionnelle sans ICS public | 4-5j |
-| **P2** | Phase 1 — Gestion et assignation par équipe (`Team`) | 👥 Collaboration | 2-3j |
+| Priorité | Action                                                             |                  Impact                  | Effort |
+| :------: | :----------------------------------------------------------------- | :--------------------------------------: | :----: |
+|  **P0**  | Phase 13 — Permissions et rôles par projet                         |       🔐 Sécurité & Cloisonnement        |  3-4j  |
+|  **P1**  | Phase 8 — Auto-scheduling proactif avec CPM (Critical Path Method) |             🧠 Intelligence              |  4-5j  |
+|  **P1**  | Intégration de flux OAuth2 réels pour Google Calendar/Outlook      | 📅 Sync bidirectionnelle sans ICS public |  4-5j  |
+|  **P2**  | Phase 1 — Gestion et assignation par équipe (`Team`)               |             👥 Collaboration             |  2-3j  |

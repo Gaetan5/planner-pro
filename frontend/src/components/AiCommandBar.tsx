@@ -1,42 +1,43 @@
-import React, { useState, useEffect, useRef } from 'react'
-import { useApp } from '../context/AppContext'
-import { 
-  Sparkles, 
-  Trash2, 
-  Play, 
-  Check, 
-  AlertCircle, 
-  X, 
-  Loader2, 
-  Plus, 
-  User as UserIcon, 
-  Link2, 
+import React, { useState, useEffect, useRef } from 'react';
+import { useApp } from '../context/AppContext';
+import {
+  Sparkles,
+  Trash2,
+  Play,
+  Check,
+  AlertCircle,
+  X,
+  Loader2,
+  Plus,
+  User as UserIcon,
+  Link2,
   Clock,
   CheckSquare,
   Mic,
   MicOff,
-  Image as ImageIcon
-} from 'lucide-react'
-import './AiCommandBar.css'
+  Image as ImageIcon,
+} from 'lucide-react';
+import './AiCommandBar.css';
 
 export interface ResolvedAiAction {
-  id: string
-  type: 'CREATE_TASK' | 'ASSIGN_TASK' | 'CREATE_DEPENDENCY' | 'CREATE_TIMEBLOCK' | 'UPDATE_TASK_STATUS'
-  description: string
-  resolved: boolean
-  warning?: string
-  taskTitle?: string
-  priority?: string
-  dueDate?: string
-  estimatedMinutes?: number
-  assigneeName?: string
-  assigneeId?: string
-  dependsOnTaskTitle?: string
-  dependsOnTaskId?: string
-  dependencyType?: string
-  timeBlockStart?: string
-  timeBlockEnd?: string
-  status?: string
+  id: string;
+  type:
+    'CREATE_TASK' | 'ASSIGN_TASK' | 'CREATE_DEPENDENCY' | 'CREATE_TIMEBLOCK' | 'UPDATE_TASK_STATUS';
+  description: string;
+  resolved: boolean;
+  warning?: string;
+  taskTitle?: string;
+  priority?: string;
+  dueDate?: string;
+  estimatedMinutes?: number;
+  assigneeName?: string;
+  assigneeId?: string;
+  dependsOnTaskTitle?: string;
+  dependsOnTaskId?: string;
+  dependencyType?: string;
+  timeBlockStart?: string;
+  timeBlockEnd?: string;
+  status?: string;
 }
 
 export const AiCommandBar: React.FC = () => {
@@ -48,314 +49,320 @@ export const AiCommandBar: React.FC = () => {
     parseAiImageCommand,
     refreshData,
     socket,
-    workspaceMembers
-  } = useApp()
+    workspaceMembers,
+  } = useApp();
 
-  const [isOpen, setIsOpen] = useState(false)
-  const [commandText, setCommandText] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
-  const [actions, setActions] = useState<ResolvedAiAction[]>([])
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const [executionSuccess, setExecutionSuccess] = useState(false)
-  
-  const [selectedImage, setSelectedImage] = useState<File | null>(null)
-  const [imagePreview, setImagePreview] = useState<string | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  
-  const [isRecording, setIsRecording] = useState(false)
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  
-  const overlayRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const [isOpen, setIsOpen] = useState(false);
+  const [commandText, setCommandText] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [actions, setActions] = useState<ResolvedAiAction[]>([]);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [executionSuccess, setExecutionSuccess] = useState(false);
+
+  const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // Écouter les retours de la voix en streaming via WebSockets
   useEffect(() => {
     if (socket) {
       const handleVoiceResult = (result: any) => {
-        setIsLoading(false)
-        setCommandText(result.transcription)
-        setActions(result.actions)
+        setIsLoading(false);
+        setCommandText(result.transcription);
+        setActions(result.actions);
         if (result.actions.length === 0) {
-          setErrorMessage("Aucune action n'a pu être interprétée dans votre enregistrement.")
+          setErrorMessage("Aucune action n'a pu être interprétée dans votre enregistrement.");
         }
-      }
+      };
 
       const handleVoiceError = (err: any) => {
-        setIsLoading(false)
-        setErrorMessage(err.message || "Une erreur est survenue lors de l'analyse vocale en streaming.")
-      }
+        setIsLoading(false);
+        setErrorMessage(
+          err.message || "Une erreur est survenue lors de l'analyse vocale en streaming.",
+        );
+      };
 
-      socket.on('voice-result', handleVoiceResult)
-      socket.on('voice-error', handleVoiceError)
+      socket.on('voice-result', handleVoiceResult);
+      socket.on('voice-error', handleVoiceError);
 
       return () => {
-        socket.off('voice-result', handleVoiceResult)
-        socket.off('voice-error', handleVoiceError)
-      }
+        socket.off('voice-result', handleVoiceResult);
+        socket.off('voice-error', handleVoiceError);
+      };
     }
-  }, [socket])
+  }, [socket]);
 
   const startRecording = async () => {
     try {
-      setErrorMessage(null)
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      
-      const options = { mimeType: 'audio/webm' }
-      let recorder: MediaRecorder
-      
+      setErrorMessage(null);
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      const options = { mimeType: 'audio/webm' };
+      let recorder: MediaRecorder;
+
       try {
-        recorder = new MediaRecorder(stream, options)
+        recorder = new MediaRecorder(stream, options);
       } catch (e) {
-        recorder = new MediaRecorder(stream)
+        recorder = new MediaRecorder(stream);
       }
 
-      mediaRecorderRef.current = recorder
+      mediaRecorderRef.current = recorder;
 
       // Signaler le début du stream voix au serveur
       if (socket) {
-        socket.emit('voice-start')
+        socket.emit('voice-start');
       }
 
       // Émettre les morceaux d'audio au serveur en temps réel toutes les 250ms
       recorder.ondataavailable = async (event) => {
         if (event.data.size > 0 && socket) {
-          const arrayBuffer = await event.data.arrayBuffer()
-          socket.emit('voice-chunk', arrayBuffer)
+          const arrayBuffer = await event.data.arrayBuffer();
+          socket.emit('voice-chunk', arrayBuffer);
         }
-      }
+      };
 
       recorder.onstop = async () => {
-        stream.getTracks().forEach((track) => track.stop())
-        
+        stream.getTracks().forEach((track) => track.stop());
+
         if (socket) {
-          setIsLoading(true)
-          const workspaceId = workspaces[0]?.id || ''
-          const projectId = projects[0]?.id || null
+          setIsLoading(true);
+          const workspaceId = workspaces[0]?.id || '';
+          const projectId = projects[0]?.id || null;
 
           socket.emit('voice-end', {
             workspaceId,
             projectId,
             mimeType: recorder.mimeType,
-            isMock: true // Bypass / Mock pour les tests
-          })
+            isMock: true, // Bypass / Mock pour les tests
+          });
         }
-      }
+      };
 
-      recorder.start(250) // Déclencher ondataavailable toutes les 250ms
-      setIsRecording(true)
+      recorder.start(250); // Déclencher ondataavailable toutes les 250ms
+      setIsRecording(true);
     } catch (err: any) {
-      console.error("Erreur microphone:", err)
-      setErrorMessage("Impossible d'accéder au microphone. Veuillez vérifier vos permissions.")
+      console.error('Erreur microphone:', err);
+      setErrorMessage("Impossible d'accéder au microphone. Veuillez vérifier vos permissions.");
     }
-  }
+  };
 
   const stopRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop()
-      setIsRecording(false)
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
     }
-  }
+  };
 
   const handleImageChange = (file: File) => {
     if (!file.type.startsWith('image/')) {
-      setErrorMessage("Le fichier sélectionné doit être une image.")
-      return
+      setErrorMessage('Le fichier sélectionné doit être une image.');
+      return;
     }
-    setSelectedImage(file)
-    const reader = new FileReader()
+    setSelectedImage(file);
+    const reader = new FileReader();
     reader.onloadend = () => {
-      setImagePreview(reader.result as string)
-    }
-    reader.readAsDataURL(file)
-    setErrorMessage(null)
-  }
+      setImagePreview(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+    setErrorMessage(null);
+  };
 
   const handleClearImage = () => {
-    setSelectedImage(null)
-    setImagePreview(null)
+    setSelectedImage(null);
+    setImagePreview(null);
     if (fileInputRef.current) {
-      fileInputRef.current.value = ''
+      fileInputRef.current.value = '';
     }
-  }
+  };
 
   const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault()
+    e.preventDefault();
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      handleImageChange(e.dataTransfer.files[0])
+      handleImageChange(e.dataTransfer.files[0]);
     }
-  }
+  };
 
   // Lancer l'analyse NLP ou Vision par Gemini
   const handleAnalyze = async () => {
-    if (!commandText.trim() && !selectedImage) return
+    if (!commandText.trim() && !selectedImage) return;
 
-    setIsLoading(true)
-    setErrorMessage(null)
-    setActions([])
-    setExecutionSuccess(false)
+    setIsLoading(true);
+    setErrorMessage(null);
+    setActions([]);
+    setExecutionSuccess(false);
 
     try {
-      const workspaceId = workspaces[0]?.id || ''
-      const projectId = projects[0]?.id || null
+      const workspaceId = workspaces[0]?.id || '';
+      const projectId = projects[0]?.id || null;
 
       if (!workspaceId) {
-        throw new Error("Aucun espace de travail (workspace) trouvé. Veuillez d'abord créer un espace.")
+        throw new Error(
+          "Aucun espace de travail (workspace) trouvé. Veuillez d'abord créer un espace.",
+        );
       }
 
-      let resolved = []
+      let resolved = [];
       if (selectedImage) {
-        resolved = await parseAiImageCommand(workspaceId, projectId, selectedImage)
+        resolved = await parseAiImageCommand(workspaceId, projectId, selectedImage);
       } else {
-        resolved = await parseAiCommand(workspaceId, projectId, commandText.trim())
+        resolved = await parseAiCommand(workspaceId, projectId, commandText.trim());
       }
-      
-      setActions(resolved)
-      
+
+      setActions(resolved);
+
       if (resolved.length === 0) {
-        setErrorMessage("Aucune action n'a pu être interprétée. Essayez d'être plus spécifique.")
+        setErrorMessage("Aucune action n'a pu être interprétée. Essayez d'être plus spécifique.");
       }
     } catch (err: any) {
-      console.error(err)
-      setErrorMessage(err.message || "Une erreur est survenue lors de l'analyse.")
+      console.error(err);
+      setErrorMessage(err.message || "Une erreur est survenue lors de l'analyse.");
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
   // Mettre à jour une action spécifique localement
   const handleUpdateActionField = (actionId: string, field: string, value: any) => {
-    setActions((prev) => 
+    setActions((prev) =>
       prev.map((act) => {
-        if (act.id !== actionId) return act
-        
-        const updated = { ...act, [field]: value }
-        
+        if (act.id !== actionId) return act;
+
+        const updated = { ...act, [field]: value };
+
         // Mettre à jour la description de manière lisible
         if (field === 'taskTitle') {
-          updated.description = `Créer la tâche "${value}"`
+          updated.description = `Créer la tâche "${value}"`;
         } else if (field === 'assigneeId') {
-          const member = workspaceMembers.find(m => m.user.id === value)
-          updated.assigneeName = member ? (member.user.name || member.user.email) : undefined
-          updated.resolved = true // Si l'id est valide, l'action devient résolue
+          const member = workspaceMembers.find((m) => m.user.id === value);
+          updated.assigneeName = member ? member.user.name || member.user.email : undefined;
+          updated.resolved = true; // Si l'id est valide, l'action devient résolue
         }
-        
-        return updated
-      })
-    )
-  }
+
+        return updated;
+      }),
+    );
+  };
 
   // Supprimer une action de la liste de validation
   const handleDeleteAction = (actionId: string) => {
-    setActions((prev) => prev.filter((a) => a.id !== actionId))
-  }
+    setActions((prev) => prev.filter((a) => a.id !== actionId));
+  };
 
   // Exécuter la liste des actions
   const handleExecute = async () => {
-    if (actions.length === 0) return
+    if (actions.length === 0) return;
 
-    setIsLoading(true)
-    setErrorMessage(null)
+    setIsLoading(true);
+    setErrorMessage(null);
 
     try {
-      const workspaceId = workspaces[0]?.id || ''
-      const projectId = projects[0]?.id || null
+      const workspaceId = workspaces[0]?.id || '';
+      const projectId = projects[0]?.id || null;
 
-      const result = await executeAiActions(workspaceId, projectId, actions)
-      
+      const result = await executeAiActions(workspaceId, projectId, actions);
+
       if (result.success) {
-        setExecutionSuccess(true)
-        setActions([])
-        setCommandText('')
-        await refreshData()
-        
+        setExecutionSuccess(true);
+        setActions([]);
+        setCommandText('');
+        await refreshData();
+
         setTimeout(() => {
-          setIsOpen(false)
-        }, 1500)
+          setIsOpen(false);
+        }, 1500);
       } else {
-        throw new Error("L'exécution n'a pas renvoyé un résultat positif.")
+        throw new Error("L'exécution n'a pas renvoyé un résultat positif.");
       }
     } catch (err: any) {
-      console.error(err)
-      setErrorMessage(err.message || "Une erreur est survenue lors de l'exécution.")
+      console.error(err);
+      setErrorMessage(err.message || "Une erreur est survenue lors de l'exécution.");
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
   const handleApplyExample = (text: string) => {
-    setCommandText(text)
+    setCommandText(text);
     setTimeout(() => {
-      inputRef.current?.focus()
-    }, 50)
-  }
+      inputRef.current?.focus();
+    }, 50);
+  };
 
   const handleOverlayClick = (e: React.MouseEvent) => {
     if (e.target === overlayRef.current) {
-      setIsOpen(false)
+      setIsOpen(false);
     }
-  }
+  };
 
-  if (!isOpen) return null
+  if (!isOpen) return null;
 
   // Helper pour afficher une icône selon le type d'action
   const getActionIcon = (type: string) => {
     switch (type) {
       case 'CREATE_TASK':
-        return <Plus className="action-icon text-emerald" size={16} />
+        return <Plus className="action-icon text-emerald" size={16} />;
       case 'ASSIGN_TASK':
-        return <UserIcon className="action-icon text-blue" size={16} />
+        return <UserIcon className="action-icon text-blue" size={16} />;
       case 'CREATE_DEPENDENCY':
-        return <Link2 className="action-icon text-purple" size={16} />
+        return <Link2 className="action-icon text-purple" size={16} />;
       case 'CREATE_TIMEBLOCK':
-        return <Clock className="action-icon text-orange" size={16} />
+        return <Clock className="action-icon text-orange" size={16} />;
       case 'UPDATE_TASK_STATUS':
-        return <CheckSquare className="action-icon text-pink" size={16} />
+        return <CheckSquare className="action-icon text-pink" size={16} />;
       default:
-        return <Sparkles className="action-icon text-violet" size={16} />
+        return <Sparkles className="action-icon text-violet" size={16} />;
     }
-  }
+  };
 
   // Helper pour formater le type d'action en français
   const formatActionType = (type: string) => {
     switch (type) {
       case 'CREATE_TASK':
-        return 'Créer tâche'
+        return 'Créer tâche';
       case 'ASSIGN_TASK':
-        return 'Assigner tâche'
+        return 'Assigner tâche';
       case 'CREATE_DEPENDENCY':
-        return 'Créer dépendance'
+        return 'Créer dépendance';
       case 'CREATE_TIMEBLOCK':
-        return 'Planifier créneau'
+        return 'Planifier créneau';
       case 'UPDATE_TASK_STATUS':
-        return 'Mettre à jour statut'
+        return 'Mettre à jour statut';
       default:
-        return type
+        return type;
     }
-  }
+  };
 
   const examples = [
-    { label: "Créer tâche Secu pour Alice", cmd: "MOCK: créer tâche Configurer sécurité globale pour Alice" },
-    { label: "Assigner Alice sur sécurité", cmd: "MOCK: assigner Alice sur Secu" },
-    { label: "Planifier bloc sécurité", cmd: "MOCK: planifier Configurer la sécurité globale" },
-  ]
+    {
+      label: 'Créer tâche Secu pour Alice',
+      cmd: 'MOCK: créer tâche Configurer sécurité globale pour Alice',
+    },
+    { label: 'Assigner Alice sur sécurité', cmd: 'MOCK: assigner Alice sur Secu' },
+    { label: 'Planifier bloc sécurité', cmd: 'MOCK: planifier Configurer la sécurité globale' },
+  ];
 
-  const hasWarnings = actions.some((a) => !a.resolved)
-  const canExecute = actions.length > 0 && !isLoading && !executionSuccess
+  const hasWarnings = actions.some((a) => !a.resolved);
+  const canExecute = actions.length > 0 && !isLoading && !executionSuccess;
 
   return (
-    <div 
-      className="ai-command-bar-overlay" 
-      ref={overlayRef} 
+    <div
+      className="ai-command-bar-overlay"
+      ref={overlayRef}
       onClick={handleOverlayClick}
       onDragOver={(e) => e.preventDefault()}
       onDrop={handleDrop}
     >
-      <div 
+      <div
         className="glass-panel ai-command-bar-modal"
         onDragOver={(e) => e.preventDefault()}
         onDrop={handleDrop}
       >
-        
         {/* Header de la Command Bar */}
         <div className="ai-command-bar-header">
           <div className="ai-title-wrapper">
@@ -375,11 +382,13 @@ export const AiCommandBar: React.FC = () => {
         {/* Formulaire de commande ou Onde Sonore de Capture */}
         <div className="ai-input-wrapper">
           {imagePreview && (
-            <div className={`ai-image-preview-thumbnail glass-panel ${isLoading ? 'scanning' : ''}`}>
+            <div
+              className={`ai-image-preview-thumbnail glass-panel ${isLoading ? 'scanning' : ''}`}
+            >
               <img src={imagePreview} alt="Aperçu du tableau blanc" className="ai-preview-img" />
               {isLoading && <div className="laser-scanner"></div>}
-              <button 
-                className="ai-remove-image-btn" 
+              <button
+                className="ai-remove-image-btn"
                 onClick={handleClearImage}
                 disabled={isLoading}
                 title="Supprimer l'image"
@@ -408,29 +417,35 @@ export const AiCommandBar: React.FC = () => {
               ref={inputRef}
               type="text"
               className="ai-command-input"
-              placeholder={selectedImage ? "Ajouter des instructions textuelles (optionnel)..." : "Ex: créer une tâche 'Design review' pour Alice, ou déposez une image..."}
+              placeholder={
+                selectedImage
+                  ? 'Ajouter des instructions textuelles (optionnel)...'
+                  : "Ex: créer une tâche 'Design review' pour Alice, ou déposez une image..."
+              }
               value={commandText}
               onChange={(e) => setCommandText(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !isLoading) {
-                  handleAnalyze()
+                  handleAnalyze();
                 }
               }}
               disabled={isLoading || executionSuccess}
             />
           )}
 
-          <input 
-            type="file" 
-            ref={fileInputRef} 
-            style={{ display: 'none' }} 
-            accept="image/*" 
-            onChange={(e) => e.target.files && e.target.files[0] && handleImageChange(e.target.files[0])}
+          <input
+            type="file"
+            ref={fileInputRef}
+            style={{ display: 'none' }}
+            accept="image/*"
+            onChange={(e) =>
+              e.target.files && e.target.files[0] && handleImageChange(e.target.files[0])
+            }
             disabled={isLoading || executionSuccess}
           />
 
           {!isRecording && (
-            <button 
+            <button
               className={`ai-image-import-btn ${selectedImage ? 'active' : ''}`}
               onClick={() => fileInputRef.current?.click()}
               disabled={isLoading || executionSuccess}
@@ -440,18 +455,22 @@ export const AiCommandBar: React.FC = () => {
             </button>
           )}
 
-          <button 
+          <button
             className={`ai-voice-btn ${isRecording ? 'recording' : ''}`}
             onClick={isRecording ? stopRecording : startRecording}
             disabled={isLoading || executionSuccess || !!selectedImage}
-            title={isRecording ? "Arrêter l'enregistrement" : "Démarrer l'enregistrement vocal en streaming"}
+            title={
+              isRecording
+                ? "Arrêter l'enregistrement"
+                : "Démarrer l'enregistrement vocal en streaming"
+            }
           >
             {isRecording ? <MicOff size={16} /> : <Mic size={16} />}
           </button>
 
           {!isRecording && (
-            <button 
-              className={`ai-analyze-btn ${((commandText.trim() || selectedImage) && !isLoading && !executionSuccess) ? 'active' : ''}`}
+            <button
+              className={`ai-analyze-btn ${(commandText.trim() || selectedImage) && !isLoading && !executionSuccess ? 'active' : ''}`}
               onClick={handleAnalyze}
               disabled={(!commandText.trim() && !selectedImage) || isLoading || executionSuccess}
             >
@@ -469,7 +488,6 @@ export const AiCommandBar: React.FC = () => {
 
         {/* Zone de contenu dynamique */}
         <div className="ai-content-area">
-          
           {/* Écran de chargement */}
           {isLoading && actions.length === 0 && (
             <div className="ai-loading-screen">
@@ -506,17 +524,22 @@ export const AiCommandBar: React.FC = () => {
                 <h3>Actions détectées ({actions.length})</h3>
                 <span className="preview-badge">À valider</span>
               </div>
-              <p className="preview-intro">Revoyez et affinez les détails des actions ci-dessous :</p>
-              
+              <p className="preview-intro">
+                Revoyez et affinez les détails des actions ci-dessous :
+              </p>
+
               <div className="actions-list">
                 {actions.map((action) => (
-                  <div key={action.id} className={`action-card ${!action.resolved ? 'has-warning' : ''}`}>
+                  <div
+                    key={action.id}
+                    className={`action-card ${!action.resolved ? 'has-warning' : ''}`}
+                  >
                     <div className="action-card-left">
                       <div className="action-type-badge">
                         {getActionIcon(action.type)}
                         <span>{formatActionType(action.type)}</span>
                       </div>
-                      
+
                       <div className="action-card-details">
                         {/* Rendu interactif d'édition des champs */}
                         {action.type === 'CREATE_TASK' ? (
@@ -525,14 +548,18 @@ export const AiCommandBar: React.FC = () => {
                               type="text"
                               className="action-editable-input task-title-edit"
                               value={action.taskTitle || ''}
-                              onChange={(e) => handleUpdateActionField(action.id, 'taskTitle', e.target.value)}
+                              onChange={(e) =>
+                                handleUpdateActionField(action.id, 'taskTitle', e.target.value)
+                              }
                               placeholder="Titre de la tâche"
                             />
                             <div className="action-form-row">
                               <select
                                 className="action-editable-select"
                                 value={action.assigneeId || ''}
-                                onChange={(e) => handleUpdateActionField(action.id, 'assigneeId', e.target.value)}
+                                onChange={(e) =>
+                                  handleUpdateActionField(action.id, 'assigneeId', e.target.value)
+                                }
                               >
                                 <option value="">Assigner à...</option>
                                 {workspaceMembers.map((m) => (
@@ -545,17 +572,23 @@ export const AiCommandBar: React.FC = () => {
                                 type="date"
                                 className="action-editable-input date-edit"
                                 value={action.dueDate ? action.dueDate.split('T')[0] : ''}
-                                onChange={(e) => handleUpdateActionField(action.id, 'dueDate', e.target.value)}
+                                onChange={(e) =>
+                                  handleUpdateActionField(action.id, 'dueDate', e.target.value)
+                                }
                               />
                             </div>
                           </div>
                         ) : action.type === 'ASSIGN_TASK' ? (
                           <div className="action-interactive-form">
-                            <p className="action-desc-text">Affectation de la tâche <strong>{action.taskTitle}</strong></p>
+                            <p className="action-desc-text">
+                              Affectation de la tâche <strong>{action.taskTitle}</strong>
+                            </p>
                             <select
                               className="action-editable-select"
                               value={action.assigneeId || ''}
-                              onChange={(e) => handleUpdateActionField(action.id, 'assigneeId', e.target.value)}
+                              onChange={(e) =>
+                                handleUpdateActionField(action.id, 'assigneeId', e.target.value)
+                              }
                             >
                               <option value="">Sélectionner un assigné...</option>
                               {workspaceMembers.map((m) => (
@@ -577,8 +610,8 @@ export const AiCommandBar: React.FC = () => {
                         )}
                       </div>
                     </div>
-                    <button 
-                      className="action-delete-btn" 
+                    <button
+                      className="action-delete-btn"
                       onClick={() => handleDeleteAction(action.id)}
                       title="Ignorer cette action"
                     >
@@ -591,7 +624,10 @@ export const AiCommandBar: React.FC = () => {
               {hasWarnings && (
                 <div className="warning-notice">
                   <AlertCircle size={16} className="notice-icon" />
-                  <p>Certaines actions ne sont pas résolues (icône corail). Veuillez sélectionner un collaborateur ou modifier le titre pour pouvoir les exécuter.</p>
+                  <p>
+                    Certaines actions ne sont pas résolues (icône corail). Veuillez sélectionner un
+                    collaborateur ou modifier le titre pour pouvoir les exécuter.
+                  </p>
                 </div>
               )}
             </div>
@@ -603,8 +639,8 @@ export const AiCommandBar: React.FC = () => {
               <h4 className="suggestions-title">Suggestions d'exemples</h4>
               <div className="suggestions-list">
                 {examples.map((ex, i) => (
-                  <button 
-                    key={i} 
+                  <button
+                    key={i}
                     className="suggestion-badge-btn"
                     onClick={() => handleApplyExample(ex.cmd)}
                   >
@@ -615,20 +651,19 @@ export const AiCommandBar: React.FC = () => {
               </div>
             </div>
           )}
-
         </div>
 
         {/* Footer avec boutons d'actions */}
         {actions.length > 0 && !executionSuccess && (
           <div className="ai-command-bar-footer">
-            <button 
-              className="footer-cancel-btn" 
+            <button
+              className="footer-cancel-btn"
               onClick={() => setActions([])}
               disabled={isLoading}
             >
               Réinitialiser
             </button>
-            <button 
+            <button
               className={`footer-execute-btn ${canExecute ? 'glow-btn' : ''}`}
               onClick={handleExecute}
               disabled={!canExecute}
@@ -652,9 +687,7 @@ export const AiCommandBar: React.FC = () => {
             <kbd>Entrée</kbd> pour analyser • <kbd>Esc</kbd> pour fermer
           </div>
         )}
-
       </div>
     </div>
-  )
-}
-
+  );
+};

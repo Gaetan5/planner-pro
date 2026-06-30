@@ -42,5 +42,10 @@ export const NumberTicker: React.FC<NumberTickerProps> = ({
     return () => clearInterval(timer);
   }, [value, duration]);
 
-  return <span className={className}>{count}{suffix}</span>;
+  return (
+    <span className={className}>
+      {count}
+      {suffix}
+    </span>
+  );
 };

@@ -36,10 +36,7 @@ describe('CalendarSyncService', () => {
     process.env.ENCRYPTION_KEY = 'a'.repeat(32); // Clé de chiffrement de 32 octets requise par l'utilitaire
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        CalendarSyncService,
-        { provide: PrismaService, useValue: mockPrisma },
-      ],
+      providers: [CalendarSyncService, { provide: PrismaService, useValue: mockPrisma }],
     }).compile();
 
     service = module.get<CalendarSyncService>(CalendarSyncService);
@@ -49,23 +46,23 @@ describe('CalendarSyncService', () => {
   });
 
   describe('exportToCalendar', () => {
-    it('devrait rejeter si l\'intégration est introuvable', async () => {
+    it("devrait rejeter si l'intégration est introuvable", async () => {
       mockPrisma.integration.findUnique.mockResolvedValue(null);
 
-      await expect(
-        service.exportToCalendar('workspace-123', 'int-not-found'),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.exportToCalendar('workspace-123', 'int-not-found')).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
-    it('devrait rejeter si le type d\'intégration n\'est pas un calendrier', async () => {
+    it("devrait rejeter si le type d'intégration n'est pas un calendrier", async () => {
       mockPrisma.integration.findUnique.mockResolvedValue({
         id: 'int-123',
         type: 'SLACK',
       });
 
-      await expect(
-        service.exportToCalendar('workspace-123', 'int-123'),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.exportToCalendar('workspace-123', 'int-123')).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('devrait retourner le nombre de créneaux exportés si valide', async () => {
@@ -87,7 +84,7 @@ describe('CalendarSyncService', () => {
   });
 
   describe('detectCalendarConflicts', () => {
-    it('devrait retourner un tableau vide si aucun calendrier externe n\'est connecté', async () => {
+    it("devrait retourner un tableau vide si aucun calendrier externe n'est connecté", async () => {
       mockPrisma.integration.findMany.mockResolvedValue([]);
 
       const result = await service.detectCalendarConflicts('workspace-123');
@@ -102,7 +99,7 @@ describe('CalendarSyncService', () => {
       expect(result).toEqual([]);
     });
 
-    it('devrait détecter un conflit si le créneau local d\'Alice chevauche son rendez-vous dentiste simulé', async () => {
+    it("devrait détecter un conflit si le créneau local d'Alice chevauche son rendez-vous dentiste simulé", async () => {
       // 1. Calendrier externe Google connecté
       mockPrisma.integration.findMany.mockResolvedValue([
         { id: 'int-gcal', type: 'GOOGLE_CALENDAR', active: true },
@@ -136,7 +133,7 @@ describe('CalendarSyncService', () => {
       expect(conflicts.length).toBe(1);
       expect(conflicts[0].localTaskTitle).toBe('Tâche urgente de dev');
       expect(conflicts[0].externalEventTitle).toBe('Rendez-vous dentiste (Google Calendar)');
-      expect(conflicts[0].message).toContain('Conflit d\'agenda pour Alice');
+      expect(conflicts[0].message).toContain("Conflit d'agenda pour Alice");
     });
 
     it('devrait ne détecter aucun conflit si les créneaux locaux ne chevauchent pas les événements externes', async () => {
@@ -186,14 +183,18 @@ describe('CalendarSyncService', () => {
   });
 
   describe('handleOAuthCallback', () => {
-    it('devrait stocker et chiffrer les tokens d\'accès et de rafraîchissement', async () => {
+    it("devrait stocker et chiffrer les tokens d'accès et de rafraîchissement", async () => {
       mockPrisma.integration.findFirst.mockResolvedValue(null);
       mockPrisma.integration.upsert.mockResolvedValue({
         id: 'new-int-123',
         type: 'GOOGLE_CALENDAR',
       });
 
-      const result = await service.handleOAuthCallback('ws-123', 'GOOGLE_CALENDAR', 'auth-code-123');
+      const result = await service.handleOAuthCallback(
+        'ws-123',
+        'GOOGLE_CALENDAR',
+        'auth-code-123',
+      );
 
       expect(result.success).toBe(true);
       expect(mockPrisma.integration.upsert).toHaveBeenCalledWith(
@@ -210,15 +211,13 @@ describe('CalendarSyncService', () => {
   });
 
   describe('refreshAccessToken', () => {
-    it('devrait lever NotFoundException si l\'intégration n\'a pas de refresh token', async () => {
+    it("devrait lever NotFoundException si l'intégration n'a pas de refresh token", async () => {
       mockPrisma.integration.findUnique.mockResolvedValue({
         id: 'int-123',
         refreshToken: null,
       });
 
-      await expect(
-        service.refreshAccessToken('int-123'),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.refreshAccessToken('int-123')).rejects.toThrow(NotFoundException);
     });
   });
 });

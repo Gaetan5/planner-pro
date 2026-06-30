@@ -6,7 +6,11 @@ import { DependencyType } from '@prisma/client';
 export class DependenciesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private async hasPath(startTaskId: string, targetTaskId: string, visited: Set<string>): Promise<boolean> {
+  private async hasPath(
+    startTaskId: string,
+    targetTaskId: string,
+    visited: Set<string>,
+  ): Promise<boolean> {
     if (startTaskId === targetTaskId) return true;
     if (visited.has(startTaskId)) return false;
     visited.add(startTaskId);
@@ -29,10 +33,7 @@ export class DependenciesService {
       where: {
         id: taskId,
         deletedAt: null,
-        OR: [
-          { userId },
-          { project: { workspace: { memberships: { some: { userId } } } } },
-        ],
+        OR: [{ userId }, { project: { workspace: { memberships: { some: { userId } } } } }],
       },
     });
     if (!task) {
@@ -41,7 +42,12 @@ export class DependenciesService {
     return task;
   }
 
-  async addTaskDependency(taskId: string, userId: string, dependsOnTaskId: string, type: DependencyType = DependencyType.FINISH_TO_START) {
+  async addTaskDependency(
+    taskId: string,
+    userId: string,
+    dependsOnTaskId: string,
+    type: DependencyType = DependencyType.FINISH_TO_START,
+  ) {
     if (taskId === dependsOnTaskId) {
       throw new BadRequestException('A task cannot depend on itself');
     }
@@ -51,32 +57,30 @@ export class DependenciesService {
         where: {
           id: taskId,
           deletedAt: null,
-          OR: [
-            { userId },
-            { project: { workspace: { memberships: { some: { userId } } } } },
-          ],
+          OR: [{ userId }, { project: { workspace: { memberships: { some: { userId } } } } }],
         },
       }),
       this.prisma.task.findFirst({
         where: {
           id: dependsOnTaskId,
           deletedAt: null,
-          OR: [
-            { userId },
-            { project: { workspace: { memberships: { some: { userId } } } } },
-          ],
+          OR: [{ userId }, { project: { workspace: { memberships: { some: { userId } } } } }],
         },
       }),
     ]);
 
     if (!task || !dependsOnTask || task.projectId !== dependsOnTask.projectId) {
-      throw new BadRequestException('Dependency tasks not found, unauthorized, or not in the same project');
+      throw new BadRequestException(
+        'Dependency tasks not found, unauthorized, or not in the same project',
+      );
     }
 
     // Vérifier si dependsOnTaskId dépend déjà de taskId (ce qui créerait un cycle)
     const isCyclic = await this.hasPath(dependsOnTaskId, taskId, new Set<string>());
     if (isCyclic) {
-      throw new BadRequestException('Creating this dependency would create a cycle (circular dependency detected)');
+      throw new BadRequestException(
+        'Creating this dependency would create a cycle (circular dependency detected)',
+      );
     }
 
     return this.prisma.taskDependency.create({
@@ -91,10 +95,7 @@ export class DependenciesService {
         dependsOnTaskId,
         task: {
           deletedAt: null,
-          OR: [
-            { userId },
-            { project: { workspace: { memberships: { some: { userId } } } } },
-          ],
+          OR: [{ userId }, { project: { workspace: { memberships: { some: { userId } } } } }],
         },
       },
     });

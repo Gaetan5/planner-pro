@@ -6,7 +6,11 @@ import { WorkspaceRole, DeliverableStatus, DeliveryStatus, ProjectStatus } from 
 export class MilestonesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private async assertWorkspaceRole(workspaceId: string, userId: string, allowedRoles: WorkspaceRole[]) {
+  private async assertWorkspaceRole(
+    workspaceId: string,
+    userId: string,
+    allowedRoles: WorkspaceRole[],
+  ) {
     const membership = await this.prisma.membership.findFirst({
       where: {
         workspaceId,
@@ -28,10 +32,7 @@ export class MilestonesService {
       where: {
         id: projectId,
         deletedAt: null,
-        OR: [
-          { userId },
-          { workspace: { memberships: { some: { userId } } } },
-        ],
+        OR: [{ userId }, { workspace: { memberships: { some: { userId } } } }],
       },
     });
     if (!project) {
@@ -42,12 +43,21 @@ export class MilestonesService {
 
   // ─── Milestones ───────────────────────────────────────────────────
 
-  async createMilestone(projectId: string, userId: string, name: string, description?: string, dueDate?: string) {
+  async createMilestone(
+    projectId: string,
+    userId: string,
+    name: string,
+    description?: string,
+    dueDate?: string,
+  ) {
     const project = await this.assertProjectAccess(projectId, userId);
     if (!project.workspaceId) {
       throw new BadRequestException('Workspace not found for this project');
     }
-    await this.assertWorkspaceRole(project.workspaceId, userId, [WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
+    await this.assertWorkspaceRole(project.workspaceId, userId, [
+      WorkspaceRole.OWNER,
+      WorkspaceRole.ADMIN,
+    ]);
 
     return this.prisma.milestone.create({
       data: {
@@ -70,7 +80,10 @@ export class MilestonesService {
     if (!milestone || !milestone.project || !milestone.project.workspaceId) {
       throw new BadRequestException('Milestone or workspace not found');
     }
-    await this.assertWorkspaceRole(milestone.project.workspaceId, userId, [WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
+    await this.assertWorkspaceRole(milestone.project.workspaceId, userId, [
+      WorkspaceRole.OWNER,
+      WorkspaceRole.ADMIN,
+    ]);
 
     return this.prisma.milestone.update({
       where: { id: milestoneId },
@@ -92,7 +105,10 @@ export class MilestonesService {
     if (!project.workspaceId) {
       throw new BadRequestException('Workspace not found for this project');
     }
-    await this.assertWorkspaceRole(project.workspaceId, userId, [WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
+    await this.assertWorkspaceRole(project.workspaceId, userId, [
+      WorkspaceRole.OWNER,
+      WorkspaceRole.ADMIN,
+    ]);
 
     return this.prisma.deliverable.create({
       data: {
@@ -116,7 +132,10 @@ export class MilestonesService {
     if (!deliverable || !deliverable.project || !deliverable.project.workspaceId) {
       throw new BadRequestException('Deliverable or workspace not found');
     }
-    await this.assertWorkspaceRole(deliverable.project.workspaceId, userId, [WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
+    await this.assertWorkspaceRole(deliverable.project.workspaceId, userId, [
+      WorkspaceRole.OWNER,
+      WorkspaceRole.ADMIN,
+    ]);
 
     return this.prisma.deliverable.update({
       where: { id: deliverableId },
@@ -129,12 +148,20 @@ export class MilestonesService {
 
   // ─── Delivery Records ─────────────────────────────────────────────
 
-  async createDelivery(projectId: string, userId: string, summary?: string, checklist: string[] = []) {
+  async createDelivery(
+    projectId: string,
+    userId: string,
+    summary?: string,
+    checklist: string[] = [],
+  ) {
     const project = await this.assertProjectAccess(projectId, userId);
     if (!project.workspaceId) {
       throw new BadRequestException('Workspace not found for this project');
     }
-    await this.assertWorkspaceRole(project.workspaceId, userId, [WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
+    await this.assertWorkspaceRole(project.workspaceId, userId, [
+      WorkspaceRole.OWNER,
+      WorkspaceRole.ADMIN,
+    ]);
 
     return this.prisma.deliveryRecord.create({
       data: {
@@ -159,7 +186,10 @@ export class MilestonesService {
     if (!delivery || !delivery.project || !delivery.project.workspaceId) {
       throw new BadRequestException('Delivery or workspace not found');
     }
-    await this.assertWorkspaceRole(delivery.project.workspaceId, userId, [WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
+    await this.assertWorkspaceRole(delivery.project.workspaceId, userId, [
+      WorkspaceRole.OWNER,
+      WorkspaceRole.ADMIN,
+    ]);
 
     const now = new Date();
     const updated = await this.prisma.deliveryRecord.update({
@@ -195,7 +225,11 @@ export class MilestonesService {
     if (!item || !item.delivery || !item.delivery.project || !item.delivery.project.workspaceId) {
       throw new BadRequestException('Checklist item or workspace not found');
     }
-    await this.assertWorkspaceRole(item.delivery.project.workspaceId, userId, [WorkspaceRole.OWNER, WorkspaceRole.ADMIN, WorkspaceRole.MEMBER]);
+    await this.assertWorkspaceRole(item.delivery.project.workspaceId, userId, [
+      WorkspaceRole.OWNER,
+      WorkspaceRole.ADMIN,
+      WorkspaceRole.MEMBER,
+    ]);
 
     return this.prisma.deliveryChecklistItem.update({
       where: { id: itemId },
@@ -210,10 +244,7 @@ export class MilestonesService {
       where: {
         id: projectId,
         deletedAt: null,
-        OR: [
-          { userId },
-          { workspace: { memberships: { some: { userId } } } },
-        ],
+        OR: [{ userId }, { workspace: { memberships: { some: { userId } } } }],
       },
       include: {
         tasks: { where: { deletedAt: null }, include: { timeLogs: true } },
@@ -232,7 +263,9 @@ export class MilestonesService {
       (total, task) => total + task.timeLogs.reduce((sum, log) => sum + (log.duration ?? 0), 0),
       0,
     );
-    const acceptedDeliverables = project.deliverables.filter((item) => item.status === 'ACCEPTED' || item.status === 'DELIVERED').length;
+    const acceptedDeliverables = project.deliverables.filter(
+      (item) => item.status === 'ACCEPTED' || item.status === 'DELIVERED',
+    ).length;
     const completedMilestones = project.milestones.filter((item) => item.completedAt).length;
 
     return {
@@ -261,7 +294,8 @@ export class MilestonesService {
         trackedHours: Math.round((totalTrackedSeconds / 3600) * 100) / 100,
       },
       deliveries: project.deliveries,
-      readyForClosure: totalTasks === completedTasks && project.deliverables.length === acceptedDeliverables,
+      readyForClosure:
+        totalTasks === completedTasks && project.deliverables.length === acceptedDeliverables,
     };
   }
 }

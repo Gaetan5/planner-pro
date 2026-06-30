@@ -54,7 +54,11 @@ export class CopilotService {
     today.setHours(0, 0, 0, 0);
 
     const formatLocalDate = (date: Date) => {
-      return date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      return date.toLocaleDateString('fr-FR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      });
     };
 
     // Indexer les tâches par ID pour faciliter les liaisons
@@ -141,7 +145,10 @@ export class CopilotService {
     const userMinutesMap = new Map<string, { minutes: number; name: string }>();
 
     for (const member of memberships) {
-      userMinutesMap.set(member.userId, { minutes: 0, name: member.user.name || member.user.email });
+      userMinutesMap.set(member.userId, {
+        minutes: 0,
+        name: member.user.name || member.user.email,
+      });
     }
 
     for (const task of activeTasks) {
@@ -180,7 +187,11 @@ export class CopilotService {
   /**
    * Génère un briefing matinal dynamique en français basé sur l'IA (Gemini) ou un mock premium.
    */
-  async generateBriefing(userId: string, workspaceId: string, isMock: boolean = false): Promise<string> {
+  async generateBriefing(
+    userId: string,
+    workspaceId: string,
+    isMock: boolean = false,
+  ): Promise<string> {
     this.logger.log(`Génération du briefing matinal pour l'utilisateur ${userId}`);
 
     // 1. Récupérer les données de l'utilisateur et de sa charge
@@ -203,10 +214,7 @@ export class CopilotService {
       include: {
         project: true,
       },
-      orderBy: [
-        { priority: 'desc' },
-        { dueDate: 'asc' },
-      ],
+      orderBy: [{ priority: 'desc' }, { dueDate: 'asc' }],
     });
 
     // 3. Charger les jalons du projet proches (échéance sous 7 jours)
@@ -242,9 +250,16 @@ export class CopilotService {
     // 5. Générer le briefing (Bypass si mock ou pas de clé API)
     if (isMock || !this.geminiService.isAvailable()) {
       this.logger.log('Utilisation du briefing matinal mocké.');
-      const listTasksStr = assignedTasks.length > 0
-        ? assignedTasks.slice(0, 3).map((t) => `   - **${t.title}** (${t.project?.name || 'Inbox'}) - Priorité : ${t.priority}`).join('\n')
-        : '   - Aucun tâche prioritaire assignée.';
+      const listTasksStr =
+        assignedTasks.length > 0
+          ? assignedTasks
+              .slice(0, 3)
+              .map(
+                (t) =>
+                  `   - **${t.title}** (${t.project?.name || 'Inbox'}) - Priorité : ${t.priority}`,
+              )
+              .join('\n')
+          : '   - Aucun tâche prioritaire assignée.';
 
       return `Bonjour ${userName} ! Voici votre briefing matinal de productivité.
 
@@ -267,9 +282,22 @@ Passez une excellente journée productive ! ✨`;
       this.logger.log('Appel à Gemini 1.5 Flash pour générer le briefing matinal...');
       const model = this.geminiService.getGenerativeModel();
 
-      const tasksText = assignedTasks.map((t) => `- Tâche: "${t.title}" | Projet: "${t.project?.name}" | Priorité: ${t.priority} | Échéance: ${t.dueDate ? t.dueDate.toISOString().split('T')[0] : 'Non spécifiée'}`).join('\n');
-      const milestonesText = upcomingMilestones.map((m) => `- Jalon: "${m.name}" | Projet: "${m.project?.name}" | Échéance: ${m.dueDate ? m.dueDate.toISOString().split('T')[0] : 'Non spécifiée'}`).join('\n');
-      const alertsText = alerts.slice(0, 5).map((a) => `- Alerte [${a.type} | ${a.severity}]: ${a.message}`).join('\n');
+      const tasksText = assignedTasks
+        .map(
+          (t) =>
+            `- Tâche: "${t.title}" | Projet: "${t.project?.name}" | Priorité: ${t.priority} | Échéance: ${t.dueDate ? t.dueDate.toISOString().split('T')[0] : 'Non spécifiée'}`,
+        )
+        .join('\n');
+      const milestonesText = upcomingMilestones
+        .map(
+          (m) =>
+            `- Jalon: "${m.name}" | Projet: "${m.project?.name}" | Échéance: ${m.dueDate ? m.dueDate.toISOString().split('T')[0] : 'Non spécifiée'}`,
+        )
+        .join('\n');
+      const alertsText = alerts
+        .slice(0, 5)
+        .map((a) => `- Alerte [${a.type} | ${a.severity}]: ${a.message}`)
+        .join('\n');
 
       const prompt = `
 Tu es l'assistant de productivité IA "Copilote Proactif" intégré à l'application Planner Pro.
@@ -278,11 +306,11 @@ Rédige un briefing matinal personnalisé, chaleureux, concis (maximum 250 mots)
 Voici les données actuelles de sa journée et du workspace :
 - Nombre de ses tâches assignées actives : ${assignedTasks.length}
 - Ses tâches prioritaires :
-${tasksText || "Aucune tâche spécifique assignée."}
+${tasksText || 'Aucune tâche spécifique assignée.'}
 - Jalons clés à venir dans les 7 jours pour l'équipe :
 ${milestonesText || "Aucun jalon d'importance cette semaine."}
 - Alertes de risques et surcharges du workspace :
-${alertsText || "Aucune alerte à signaler, tout est au vert !"}
+${alertsText || 'Aucune alerte à signaler, tout est au vert !'}
 
 Consignes d'écriture :
 1. Salue l'utilisateur par son prénom de façon sympathique.
@@ -294,7 +322,10 @@ Consignes d'écriture :
       const response = await model.generateContent(prompt);
       return response.response.text().trim();
     } catch (error: unknown) {
-      this.logger.error(`Erreur lors de la génération du briefing matinal via Gemini: ${error instanceof Error ? error.message : String(error)}`, error instanceof Error ? error.stack : undefined);
+      this.logger.error(
+        `Erreur lors de la génération du briefing matinal via Gemini: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
       // Fallback sur le texte de démo en cas d'erreur de clé d'API
       return `Bonjour ${userName} ! Vos tâches prioritaires du jour incluent ${assignedTasks.length > 0 ? `"${assignedTasks[0].title}"` : 'des revues de projets'}. Pensez à consulter votre tableau Kanban. Bon travail !`;
     }

@@ -127,7 +127,7 @@ describe('CopilotService', () => {
           tasks: [
             {
               id: 'task-blocking',
-              title: 'Rédiger l\'audit',
+              title: "Rédiger l'audit",
               status: 'IN_PROGRESS',
               dueDate: yesterday,
               assignees: [],
@@ -142,7 +142,7 @@ describe('CopilotService', () => {
               dependencies: [
                 {
                   dependsOnTaskId: 'task-blocking',
-                  dependsOnTask: { id: 'task-blocking', title: 'Rédiger l\'audit' },
+                  dependsOnTask: { id: 'task-blocking', title: "Rédiger l'audit" },
                 },
               ],
             },
@@ -159,8 +159,8 @@ describe('CopilotService', () => {
       // 1. Tâche blocking en retard (OVERDUE)
       // 2. Tâche blocked bloquée par blocking (BOTTLENECK)
       expect(result.length).toBeGreaterThanOrEqual(2);
-      
-      const bottleneckAlert = result.find(a => a.type === 'BOTTLENECK');
+
+      const bottleneckAlert = result.find((a) => a.type === 'BOTTLENECK');
       expect(bottleneckAlert).toBeDefined();
       expect(bottleneckAlert?.severity).toBe('HIGH');
       expect(bottleneckAlert?.taskId).toBe('task-blocked');
@@ -201,7 +201,7 @@ describe('CopilotService', () => {
 
       const result = await service.calculatePredictiveAlerts(workspaceId);
 
-      const overloadAlert = result.find(a => a.type === 'OVERLOADED');
+      const overloadAlert = result.find((a) => a.type === 'OVERLOADED');
       expect(overloadAlert).toBeDefined();
       expect(overloadAlert?.severity).toBe('MEDIUM');
       expect(overloadAlert?.userId).toBe('alice-id');
@@ -238,7 +238,7 @@ describe('CopilotService', () => {
       mockPrisma.membership.findMany.mockResolvedValue([]);
 
       mockGeminiService.isAvailable.mockReturnValue(true);
-      
+
       const mockGenerateContent = jest.fn().mockResolvedValue({
         response: {
           text: () => 'Voici le briefing généré par Gemini pour Gaëtan.',

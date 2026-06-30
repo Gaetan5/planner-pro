@@ -27,7 +27,7 @@ function checkConnection() {
     client.destroy();
     retries--;
     if (retries === 0) {
-      console.error('MySQL n\'a pas démarré à temps. Abandon.');
+      console.error("MySQL n'a pas démarré à temps. Abandon.");
       process.exit(1);
     }
     console.log(`En attente du démarrage de MySQL... (${retries} tentatives restantes)`);

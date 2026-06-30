@@ -1,4 +1,16 @@
-import { Controller, Get, Post, Delete, Body, Param, UseGuards, Req, HttpCode, HttpStatus, NotFoundException } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Delete,
+  Body,
+  Param,
+  UseGuards,
+  Req,
+  HttpCode,
+  HttpStatus,
+  NotFoundException,
+} from '@nestjs/common';
 import { InvitationsService } from './invitations.service';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { Public } from '../auth/public.decorator';
@@ -53,7 +65,7 @@ export class InvitationsController {
     // Utiliser la validation interne sans appliquer l'adhésion
     // pour extraire les informations publiques d'affichage
     const tokenHash = require('crypto').createHash('sha256').update(token).digest('hex');
-    
+
     // Récupérer l'invitation
     const invitation = await (this.invitationsService as any).prisma.invitation.findUnique({
       where: { tokenHash },

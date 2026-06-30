@@ -429,9 +429,15 @@
   border-radius: 50%;
 }
 
-.status-dot--todo { background: #94a3b8; }
-.status-dot--in_progress { background: #3b82f6; }
-.status-dot--done { background: #10b981; }
+.status-dot--todo {
+  background: #94a3b8;
+}
+.status-dot--in_progress {
+  background: #3b82f6;
+}
+.status-dot--done {
+  background: #10b981;
+}
 
 .task-item-title {
   color: var(--text-primary);
@@ -705,8 +711,14 @@
 }
 
 @keyframes svg-pulse {
-  0% { transform: scale(1); opacity: 1; }
-  100% { transform: scale(1.6); opacity: 0; }
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
 }
 
 .chart-legend {

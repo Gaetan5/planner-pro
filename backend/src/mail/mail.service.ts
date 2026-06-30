@@ -27,11 +27,16 @@ export class MailService {
           auth: user && pass ? { user, pass } : undefined,
         });
       } catch (error: unknown) {
-        this.logger.error("Échec de création du transporteur SMTP réel, repli sur le mode simulé.", error);
+        this.logger.error(
+          'Échec de création du transporteur SMTP réel, repli sur le mode simulé.',
+          error,
+        );
         this.transporter = null;
       }
     } else {
-      this.logger.log("Aucune configuration SMTP détectée dans l'environnement. Mode d'envoi d'emails simulé activé.");
+      this.logger.log(
+        "Aucune configuration SMTP détectée dans l'environnement. Mode d'envoi d'emails simulé activé.",
+      );
     }
   }
 
@@ -336,7 +341,10 @@ export class MailService {
 ├────────────────────────────────────────────────────────────────────────┤
 │ Message :                                                              
 │                                                                        
-${text.split('\n').map(line => `│ ${line}`).join('\n')}
+${text
+  .split('\n')
+  .map((line) => `│ ${line}`)
+  .join('\n')}
 │                                                                        
 └────────────────────────────────────────────────────────────────────────┘
 `);

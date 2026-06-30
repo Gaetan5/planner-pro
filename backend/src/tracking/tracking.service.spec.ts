@@ -22,10 +22,7 @@ describe('TrackingService', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        TrackingService,
-        { provide: PrismaService, useValue: mockPrisma },
-      ],
+      providers: [TrackingService, { provide: PrismaService, useValue: mockPrisma }],
     }).compile();
 
     service = module.get<TrackingService>(TrackingService);
@@ -35,7 +32,7 @@ describe('TrackingService', () => {
   });
 
   describe('startTracking', () => {
-    it('devrait lever une BadRequestException si la tâche n\'existe pas ou si l\'utilisateur n\'y a pas accès', async () => {
+    it("devrait lever une BadRequestException si la tâche n'existe pas ou si l'utilisateur n'y a pas accès", async () => {
       mockPrisma.task.findFirst.mockResolvedValue(null);
 
       await expect(service.startTracking('user-123', 'task-456')).rejects.toThrow(
@@ -66,7 +63,7 @@ describe('TrackingService', () => {
   });
 
   describe('getTimeLogsForTask', () => {
-    it('devrait lever une BadRequestException si l\'accès à la tâche n\'est pas autorisé pour l\'utilisateur', async () => {
+    it("devrait lever une BadRequestException si l'accès à la tâche n'est pas autorisé pour l'utilisateur", async () => {
       mockPrisma.task.findFirst.mockResolvedValue(null);
 
       await expect(service.getTimeLogsForTask('user-123', 'task-456')).rejects.toThrow(
@@ -74,7 +71,7 @@ describe('TrackingService', () => {
       );
     });
 
-    it('devrait renvoyer les logs de la tâche si l\'utilisateur y a accès', async () => {
+    it("devrait renvoyer les logs de la tâche si l'utilisateur y a accès", async () => {
       mockPrisma.task.findFirst.mockResolvedValue({ id: 'task-456', userId: 'user-123' });
       mockPrisma.timeLog.findMany.mockResolvedValue([{ id: 'log-789', duration: 120 }]);
 

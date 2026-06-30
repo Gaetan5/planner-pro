@@ -57,7 +57,7 @@ export class IntegrationService {
       where: { id: integrationId },
     });
     if (!integration) {
-      throw new NotFoundException("Intégration introuvable.");
+      throw new NotFoundException('Intégration introuvable.');
     }
     return this.prisma.integration.update({
       where: { id: integrationId },
@@ -73,7 +73,7 @@ export class IntegrationService {
       where: { id: integrationId },
     });
     if (!integration) {
-      throw new NotFoundException("Intégration introuvable.");
+      throw new NotFoundException('Intégration introuvable.');
     }
     await this.prisma.integration.delete({
       where: { id: integrationId },
@@ -85,7 +85,9 @@ export class IntegrationService {
    * Envoie une notification asynchrone aux webhooks Slack/Teams configurés et actifs.
    */
   async sendNotification(workspaceId: string, eventName: string, text: string) {
-    this.logger.log(`Envoi de notification de l'événement "${eventName}" pour le workspace ${workspaceId}`);
+    this.logger.log(
+      `Envoi de notification de l'événement "${eventName}" pour le workspace ${workspaceId}`,
+    );
 
     // Charger les intégrations actives
     const integrations = await this.prisma.integration.findMany({
@@ -108,7 +110,9 @@ export class IntegrationService {
       // On lance sans "await" global pour que cela ne bloque pas l'exécution principale (fire and forget)
       // mais on capture les erreurs localement.
       this.postToWebhook(integration.url, integration.type, eventName, text).catch((err) => {
-        this.logger.error(`Échec d'envoi du webhook ${integration.type} (${integration.name}) : ${err instanceof Error ? err.message : String(err)}`);
+        this.logger.error(
+          `Échec d'envoi du webhook ${integration.type} (${integration.name}) : ${err instanceof Error ? err.message : String(err)}`,
+        );
       });
     }
   }

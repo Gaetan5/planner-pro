@@ -56,21 +56,21 @@ describe('InvitationsService', () => {
     const workspaceId = 'workspace-123';
     const invitedById = 'user-admin';
 
-    it('devrait rejeter si l\'invitant n\'est pas membre admin ou owner du workspace', async () => {
+    it("devrait rejeter si l'invitant n'est pas membre admin ou owner du workspace", async () => {
       mockPrisma.membership.findFirst.mockResolvedValue(null);
 
       await expect(
-        service.createInvitation(workspaceId, invitedById, 'test@test.com', WorkspaceRole.MEMBER)
+        service.createInvitation(workspaceId, invitedById, 'test@test.com', WorkspaceRole.MEMBER),
       ).rejects.toThrow(/Vous n'êtes pas membre/);
     });
 
-    it('devrait rejeter si l\'invitant a un rôle inférieur à ADMIN (ex: MEMBER)', async () => {
+    it("devrait rejeter si l'invitant a un rôle inférieur à ADMIN (ex: MEMBER)", async () => {
       mockPrisma.membership.findFirst.mockResolvedValue({
         role: WorkspaceRole.MEMBER,
       });
 
       await expect(
-        service.createInvitation(workspaceId, invitedById, 'test@test.com', WorkspaceRole.MEMBER)
+        service.createInvitation(workspaceId, invitedById, 'test@test.com', WorkspaceRole.MEMBER),
       ).rejects.toThrow(/Droits insuffisants/);
     });
 
@@ -89,7 +89,7 @@ describe('InvitationsService', () => {
         workspaceId,
         invitedById,
         'guest@guest.com',
-        WorkspaceRole.MEMBER
+        WorkspaceRole.MEMBER,
       );
 
       expect(result.rawToken).toBeDefined();
@@ -109,15 +109,15 @@ describe('InvitationsService', () => {
     const invitationId = 'invite-123';
     const userId = 'user-owner';
 
-    it('devrait rejeter si l\'invitation n\'existe pas', async () => {
+    it("devrait rejeter si l'invitation n'existe pas", async () => {
       mockPrisma.invitation.findUnique.mockResolvedValue(null);
 
-      await expect(
-        service.revokeInvitation(invitationId, userId)
-      ).rejects.toThrow(/Invitation introuvable/);
+      await expect(service.revokeInvitation(invitationId, userId)).rejects.toThrow(
+        /Invitation introuvable/,
+      );
     });
 
-    it('devrait changer le statut de l\'invitation à REVOKED si l\'utilisateur a les droits', async () => {
+    it("devrait changer le statut de l'invitation à REVOKED si l'utilisateur a les droits", async () => {
       mockPrisma.invitation.findUnique.mockResolvedValue({
         id: invitationId,
         workspaceId: 'workspace-123',
@@ -146,15 +146,15 @@ describe('InvitationsService', () => {
     const rawToken = 'my-secret-invitation-token';
     const loggedUser = { id: 'new-user-456', email: 'guest@guest.com' };
 
-    it('devrait rejeter si le token n\'est pas trouvé en base', async () => {
+    it("devrait rejeter si le token n'est pas trouvé en base", async () => {
       mockPrisma.invitation.findUnique.mockResolvedValue(null);
 
-      await expect(
-        service.validateAndAcceptInvitation(rawToken, loggedUser)
-      ).rejects.toThrow(/Lien d'invitation invalide/);
+      await expect(service.validateAndAcceptInvitation(rawToken, loggedUser)).rejects.toThrow(
+        /Lien d'invitation invalide/,
+      );
     });
 
-    it('devrait rejeter si l\'invitation est expirée', async () => {
+    it("devrait rejeter si l'invitation est expirée", async () => {
       const pastDate = new Date();
       pastDate.setDate(pastDate.getDate() - 1);
 
@@ -164,9 +164,9 @@ describe('InvitationsService', () => {
         expiresAt: pastDate,
       });
 
-      await expect(
-        service.validateAndAcceptInvitation(rawToken, loggedUser)
-      ).rejects.toThrow(/Ce lien d'invitation a expiré/);
+      await expect(service.validateAndAcceptInvitation(rawToken, loggedUser)).rejects.toThrow(
+        /Ce lien d'invitation a expiré/,
+      );
 
       expect(mockPrisma.invitation.update).toHaveBeenCalledWith({
         where: { id: 'invite-id' },
@@ -174,7 +174,7 @@ describe('InvitationsService', () => {
       });
     });
 
-    it('devrait accepter l\'invitation et créer un membership en BDD', async () => {
+    it("devrait accepter l'invitation et créer un membership en BDD", async () => {
       const futureDate = new Date();
       futureDate.setDate(futureDate.getDate() + 5);
 
@@ -190,7 +190,7 @@ describe('InvitationsService', () => {
 
       const result = await service.validateAndAcceptInvitation(rawToken, loggedUser);
 
-      expect(result.message).toContain("Félicitations");
+      expect(result.message).toContain('Félicitations');
       expect(mockPrisma.membership.create).toHaveBeenCalledWith({
         data: {
           workspaceId: 'workspace-123',

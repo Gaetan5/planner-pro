@@ -28,10 +28,7 @@ describe('SprintService', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        SprintService,
-        { provide: PrismaService, useValue: mockPrisma },
-      ],
+      providers: [SprintService, { provide: PrismaService, useValue: mockPrisma }],
     }).compile();
 
     service = module.get<SprintService>(SprintService);
@@ -51,7 +48,12 @@ describe('SprintService', () => {
         startDate: '2026-06-01T00:00:00.000Z',
         endDate: '2026-06-14T23:59:59.000Z',
       };
-      const createdSprint = { id: 'sprint-1', ...sprintData, status: SprintStatus.PLANNED, workspaceId };
+      const createdSprint = {
+        id: 'sprint-1',
+        ...sprintData,
+        status: SprintStatus.PLANNED,
+        workspaceId,
+      };
       mockPrisma.sprint.create.mockResolvedValue(createdSprint);
 
       const result = await service.createSprint(workspaceId, userId, sprintData);
@@ -63,7 +65,7 @@ describe('SprintService', () => {
       expect(mockPrisma.sprint.create).toHaveBeenCalled();
     });
 
-    it('devrait rejeter si l\'utilisateur n\'est pas membre', async () => {
+    it("devrait rejeter si l'utilisateur n'est pas membre", async () => {
       mockPrisma.membership.findFirst.mockResolvedValue(null);
 
       await expect(
@@ -71,7 +73,7 @@ describe('SprintService', () => {
           name: 'Sprint 1',
           startDate: '2026-06-01T00:00:00.000Z',
           endDate: '2026-06-14T23:59:59.000Z',
-        })
+        }),
       ).rejects.toThrow(ForbiddenException);
     });
 
@@ -83,7 +85,7 @@ describe('SprintService', () => {
           name: 'Sprint 1',
           startDate: '2026-06-15T00:00:00.000Z',
           endDate: '2026-06-14T23:59:59.000Z',
-        })
+        }),
       ).rejects.toThrow(BadRequestException);
     });
   });
@@ -103,9 +105,14 @@ describe('SprintService', () => {
       };
       mockPrisma.sprint.findUnique.mockResolvedValue(existingSprint);
       mockPrisma.membership.findFirst.mockResolvedValue({ id: 'mem-1' });
-      mockPrisma.sprint.update.mockResolvedValue({ ...existingSprint, status: SprintStatus.COMPLETED });
+      mockPrisma.sprint.update.mockResolvedValue({
+        ...existingSprint,
+        status: SprintStatus.COMPLETED,
+      });
 
-      const result = await service.updateSprint(sprintId, userId, { status: SprintStatus.COMPLETED });
+      const result = await service.updateSprint(sprintId, userId, {
+        status: SprintStatus.COMPLETED,
+      });
 
       expect(result.status).toEqual(SprintStatus.COMPLETED);
       // Devrait appeler updateMany pour réinitialiser sprintId = null pour les tâches non terminées
@@ -170,7 +177,7 @@ describe('SprintService', () => {
       expect(velocity).toEqual(10.5);
     });
 
-    it('devrait retourner 0 s\'il n\'y a pas de sprints complétés', async () => {
+    it("devrait retourner 0 s'il n'y a pas de sprints complétés", async () => {
       mockPrisma.membership.findFirst.mockResolvedValue({ id: 'mem-1' });
       mockPrisma.sprint.findMany.mockResolvedValue([]);
 
@@ -196,8 +203,18 @@ describe('SprintService', () => {
       mockPrisma.membership.findFirst.mockResolvedValue({ id: 'mem-1' });
 
       const tasks = [
-        { id: 'task-1', storyPoints: 5, status: 'DONE', completedAt: new Date('2026-06-02T12:00:00.000Z') },
-        { id: 'task-2', storyPoints: 8, status: 'DONE', completedAt: new Date('2026-06-03T15:00:00.000Z') },
+        {
+          id: 'task-1',
+          storyPoints: 5,
+          status: 'DONE',
+          completedAt: new Date('2026-06-02T12:00:00.000Z'),
+        },
+        {
+          id: 'task-2',
+          storyPoints: 8,
+          status: 'DONE',
+          completedAt: new Date('2026-06-03T15:00:00.000Z'),
+        },
         { id: 'task-3', storyPoints: 3, status: 'TODO', completedAt: null },
       ];
       mockPrisma.task.findMany.mockResolvedValue(tasks);

@@ -19,10 +19,7 @@ describe('IntegrationService', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        IntegrationService,
-        { provide: PrismaService, useValue: mockPrisma },
-      ],
+      providers: [IntegrationService, { provide: PrismaService, useValue: mockPrisma }],
     }).compile();
 
     service = module.get<IntegrationService>(IntegrationService);
@@ -64,7 +61,7 @@ describe('IntegrationService', () => {
   });
 
   describe('listIntegrations', () => {
-    it('devrait retourner les intégrations avec l\'URL masquée', async () => {
+    it("devrait retourner les intégrations avec l'URL masquée", async () => {
       const workspaceId = 'workspace-123';
       const mockList = [
         {
@@ -98,7 +95,7 @@ describe('IntegrationService', () => {
   });
 
   describe('toggleIntegration', () => {
-    it('devrait inverser l\'état actif de l\'intégration', async () => {
+    it("devrait inverser l'état actif de l'intégration", async () => {
       const integrationId = 'int-123';
       mockPrisma.integration.findUnique.mockResolvedValue({
         id: integrationId,
@@ -121,17 +118,15 @@ describe('IntegrationService', () => {
       expect(result.active).toBe(false);
     });
 
-    it('devrait rejeter si l\'intégration est introuvable', async () => {
+    it("devrait rejeter si l'intégration est introuvable", async () => {
       mockPrisma.integration.findUnique.mockResolvedValue(null);
 
-      await expect(service.toggleIntegration('int-not-found')).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(service.toggleIntegration('int-not-found')).rejects.toThrow(NotFoundException);
     });
   });
 
   describe('deleteIntegration', () => {
-    it('devrait supprimer l\'intégration', async () => {
+    it("devrait supprimer l'intégration", async () => {
       const integrationId = 'int-123';
       mockPrisma.integration.findUnique.mockResolvedValue({ id: integrationId });
       mockPrisma.integration.delete.mockResolvedValue({ id: integrationId });

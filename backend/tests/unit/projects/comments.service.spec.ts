@@ -62,24 +62,24 @@ describe('CommentsService', () => {
     const userId = 'user-auth';
     const workspaceId = 'workspace-123';
 
-    it('devrait rejeter si la tâche n\'existe pas', async () => {
+    it("devrait rejeter si la tâche n'existe pas", async () => {
       mockPrisma.task.findFirst.mockResolvedValue(null);
 
-      await expect(
-        service.createComment(taskId, userId, 'Nouveau commentaire')
-      ).rejects.toThrow(/Tâche introuvable/);
+      await expect(service.createComment(taskId, userId, 'Nouveau commentaire')).rejects.toThrow(
+        /Tâche introuvable/,
+      );
     });
 
-    it('devrait rejeter si l\'utilisateur n\'a pas accès au workspace', async () => {
+    it("devrait rejeter si l'utilisateur n'a pas accès au workspace", async () => {
       mockPrisma.task.findFirst.mockResolvedValue({
         id: taskId,
         project: { workspaceId },
       });
       mockPrisma.membership.findFirst.mockResolvedValue(null);
 
-      await expect(
-        service.createComment(taskId, userId, 'Nouveau commentaire')
-      ).rejects.toThrow(/Vous n'êtes pas membre/);
+      await expect(service.createComment(taskId, userId, 'Nouveau commentaire')).rejects.toThrow(
+        /Vous n'êtes pas membre/,
+      );
     });
 
     it('devrait créer le commentaire et parser les mentions avec succès', async () => {
@@ -90,7 +90,7 @@ describe('CommentsService', () => {
       mockPrisma.membership.findFirst.mockResolvedValue({
         role: WorkspaceRole.MEMBER,
       });
-      
+
       const mockCreatedComment = {
         id: 'comment-123',
         content: 'Hello @alice, regarde ça.',
@@ -102,7 +102,10 @@ describe('CommentsService', () => {
 
       // Pour le parseMentions
       mockPrisma.membership.findMany.mockResolvedValue([
-        { userId: 'alice-id', user: { id: 'alice-id', name: 'Alice Smith', email: 'alice@test.com' } },
+        {
+          userId: 'alice-id',
+          user: { id: 'alice-id', name: 'Alice Smith', email: 'alice@test.com' },
+        },
         { userId: 'bob-id', user: { id: 'bob-id', name: 'Bob Jones', email: 'bob@test.com' } },
       ]);
 
@@ -134,7 +137,7 @@ describe('CommentsService', () => {
     const userId = 'user-auth';
     const workspaceId = 'workspace-123';
 
-    it('devrait autoriser la suppression si l\'utilisateur est l\'auteur', async () => {
+    it("devrait autoriser la suppression si l'utilisateur est l'auteur", async () => {
       mockPrisma.comment.findUnique.mockResolvedValue({
         id: commentId,
         userId: userId, // L'auteur
@@ -152,7 +155,7 @@ describe('CommentsService', () => {
       });
     });
 
-    it('devrait rejeter si l\'utilisateur n\'est pas l\'auteur et est un membre normal', async () => {
+    it("devrait rejeter si l'utilisateur n'est pas l'auteur et est un membre normal", async () => {
       mockPrisma.comment.findUnique.mockResolvedValue({
         id: commentId,
         userId: 'autre-auteur',
@@ -165,12 +168,12 @@ describe('CommentsService', () => {
         role: WorkspaceRole.MEMBER, // Pas admin/owner
       });
 
-      await expect(
-        service.deleteComment(commentId, userId)
-      ).rejects.toThrow(/Vous n'êtes pas autorisé/);
+      await expect(service.deleteComment(commentId, userId)).rejects.toThrow(
+        /Vous n'êtes pas autorisé/,
+      );
     });
 
-    it('devrait autoriser la suppression si l\'utilisateur n\'est pas l\'auteur mais est admin ou owner', async () => {
+    it("devrait autoriser la suppression si l'utilisateur n'est pas l'auteur mais est admin ou owner", async () => {
       mockPrisma.comment.findUnique.mockResolvedValue({
         id: commentId,
         userId: 'autre-auteur',
@@ -198,15 +201,15 @@ describe('CommentsService', () => {
     const userId = 'user-auth';
     const workspaceId = 'workspace-123';
 
-    it('devrait rejeter si le commentaire n\'existe pas', async () => {
+    it("devrait rejeter si le commentaire n'existe pas", async () => {
       mockPrisma.comment.findUnique.mockResolvedValue(null);
 
-      await expect(
-        service.updateComment(commentId, userId, 'Contenu modifié')
-      ).rejects.toThrow(/Commentaire introuvable/);
+      await expect(service.updateComment(commentId, userId, 'Contenu modifié')).rejects.toThrow(
+        /Commentaire introuvable/,
+      );
     });
 
-    it('devrait rejeter si l\'utilisateur n\'est pas l\'auteur', async () => {
+    it("devrait rejeter si l'utilisateur n'est pas l'auteur", async () => {
       mockPrisma.comment.findUnique.mockResolvedValue({
         id: commentId,
         userId: 'autre-auteur',
@@ -215,9 +218,9 @@ describe('CommentsService', () => {
         },
       });
 
-      await expect(
-        service.updateComment(commentId, userId, 'Contenu modifié')
-      ).rejects.toThrow(/Vous n'êtes pas autorisé/);
+      await expect(service.updateComment(commentId, userId, 'Contenu modifié')).rejects.toThrow(
+        /Vous n'êtes pas autorisé/,
+      );
     });
 
     it('devrait modifier le commentaire et parser les mentions', async () => {
@@ -239,7 +242,10 @@ describe('CommentsService', () => {
       mockPrisma.comment.update.mockResolvedValue(mockUpdatedComment);
 
       mockPrisma.membership.findMany.mockResolvedValue([
-        { userId: 'alice-id', user: { id: 'alice-id', name: 'Alice Smith', email: 'alice@test.com' } },
+        {
+          userId: 'alice-id',
+          user: { id: 'alice-id', name: 'Alice Smith', email: 'alice@test.com' },
+        },
       ]);
 
       const result = await service.updateComment(commentId, userId, 'Nouveau @alice');
@@ -262,8 +268,14 @@ describe('CommentsService', () => {
     it('devrait extraire les ID utilisateurs mentionnés par leur e-mail ou prénom', async () => {
       const workspaceId = 'workspace-123';
       mockPrisma.membership.findMany.mockResolvedValue([
-        { userId: 'alice-id', user: { id: 'alice-id', name: 'Alice Smith', email: 'alice@planner.pro' } },
-        { userId: 'bob-id', user: { id: 'bob-id', name: 'Bob Le Bricoleur', email: 'bob@test.com' } },
+        {
+          userId: 'alice-id',
+          user: { id: 'alice-id', name: 'Alice Smith', email: 'alice@planner.pro' },
+        },
+        {
+          userId: 'bob-id',
+          user: { id: 'bob-id', name: 'Bob Le Bricoleur', email: 'bob@test.com' },
+        },
       ]);
 
       const mentions1 = await service.parseMentions('Hello @alice, comment ça va ?', workspaceId);
@@ -287,7 +299,7 @@ describe('CommentsService', () => {
       mockPrisma.task.findFirst.mockResolvedValue({ id: taskId, project: { workspaceId } });
       mockPrisma.membership.findFirst.mockResolvedValue({ userId, role: WorkspaceRole.MEMBER });
       mockPrisma.comment.findFirst.mockResolvedValue({ id: 'parent-123', taskId });
-      
+
       const mockCommentCreated = {
         id: 'child-123',
         content: 'Réponse',
@@ -302,11 +314,13 @@ describe('CommentsService', () => {
       const result = await service.createComment(taskId, userId, 'Réponse', 'parent-123');
 
       expect(result.comment.parentId).toBe('parent-123');
-      expect(mockPrisma.comment.create).toHaveBeenCalledWith(expect.objectContaining({
-        data: expect.objectContaining({
-          parentId: 'parent-123',
+      expect(mockPrisma.comment.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            parentId: 'parent-123',
+          }),
         }),
-      }));
+      );
     });
 
     it('devrait structurer la liste des commentaires en arborescence hiérarchique', async () => {
@@ -330,7 +344,7 @@ describe('CommentsService', () => {
     it('devrait créer un attachment pour une tâche', async () => {
       mockPrisma.task.findFirst.mockResolvedValue({ id: taskId, project: { workspaceId } });
       mockPrisma.membership.findFirst.mockResolvedValue({ userId, role: WorkspaceRole.MEMBER });
-      
+
       const mockAttachment = {
         id: 'att-1',
         fileName: 'doc.pdf',

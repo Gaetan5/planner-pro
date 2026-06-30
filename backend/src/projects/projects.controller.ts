@@ -1,4 +1,16 @@
-import { Controller, Get, Post, Body, Param, Put, Delete, UseGuards, Req, Query, Headers } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Put,
+  Delete,
+  UseGuards,
+  Req,
+  Query,
+  Headers,
+} from '@nestjs/common';
 import { Public } from '../auth/public.decorator';
 import { DeliverableStatus, ProjectRole } from '@prisma/client';
 import { ProjectsService } from './projects.service';
@@ -88,19 +100,11 @@ export class ProjectsController {
     @Param('id') projectId: string,
     @Param('userId') targetUserId: string,
   ) {
-    return this.projectPermissionsService.removeProjectRole(
-      projectId,
-      targetUserId,
-      req.user.id,
-    );
+    return this.projectPermissionsService.removeProjectRole(projectId, targetUserId, req.user.id);
   }
 
   @Get('timeblocks/all')
-  getTimeBlocks(
-    @Req() req: any,
-    @Query('start') start?: string,
-    @Query('end') end?: string,
-  ) {
+  getTimeBlocks(@Req() req: any, @Query('start') start?: string, @Query('end') end?: string) {
     return this.projectsService.getTimeBlocks(
       req.user.id,
       start ? new Date(start) : undefined,
@@ -203,12 +207,13 @@ export class ProjectsController {
   }
 
   @Post(':id/deliveries')
-  createDelivery(
-    @Req() req: any,
-    @Param('id') projectId: string,
-    @Body() body: CreateDeliveryDto,
-  ) {
-    return this.projectsService.createDelivery(projectId, req.user.id, body.summary, body.checklist);
+  createDelivery(@Req() req: any, @Param('id') projectId: string, @Body() body: CreateDeliveryDto) {
+    return this.projectsService.createDelivery(
+      projectId,
+      req.user.id,
+      body.summary,
+      body.checklist,
+    );
   }
 
   @Put('deliveries/:deliveryId/status')
@@ -221,21 +226,21 @@ export class ProjectsController {
   }
 
   @Put('deliveries/items/:itemId/toggle')
-  toggleDeliveryChecklistItem(
-    @Req() req: any,
-    @Param('itemId') itemId: string,
-  ) {
+  toggleDeliveryChecklistItem(@Req() req: any, @Param('itemId') itemId: string) {
     return this.projectsService.toggleDeliveryChecklistItem(itemId, req.user.id);
   }
 
   @Post(':id/tasks')
-  createTask(
-    @Req() req: any,
-    @Param('id') projectId: string,
-    @Body() body: CreateTaskDto,
-  ) {
+  createTask(@Req() req: any, @Param('id') projectId: string, @Body() body: CreateTaskDto) {
     const { title, description, priority, ...options } = body;
-    return this.projectsService.createTask(projectId, req.user.id, title, description, priority, options);
+    return this.projectsService.createTask(
+      projectId,
+      req.user.id,
+      title,
+      description,
+      priority,
+      options,
+    );
   }
 
   @Get(':id/tasks')
@@ -254,7 +259,13 @@ export class ProjectsController {
     @Param('id') projectId: string,
     @Body() body: CreateMilestoneDto,
   ) {
-    return this.projectsService.createMilestone(projectId, req.user.id, body.name, body.description, body.dueDate);
+    return this.projectsService.createMilestone(
+      projectId,
+      req.user.id,
+      body.name,
+      body.description,
+      body.dueDate,
+    );
   }
 
   @Put('milestones/:milestoneId/complete')
@@ -293,7 +304,12 @@ export class ProjectsController {
     @Param('taskId') taskId: string,
     @Body() body: CreateTaskDependencyDto,
   ) {
-    return this.projectsService.addTaskDependency(taskId, req.user.id, body.dependsOnTaskId, body.type);
+    return this.projectsService.addTaskDependency(
+      taskId,
+      req.user.id,
+      body.dependsOnTaskId,
+      body.type,
+    );
   }
 
   @Delete('tasks/:taskId/dependencies/:dependsOnTaskId')
@@ -306,11 +322,7 @@ export class ProjectsController {
   }
 
   @Put('tasks/:taskId')
-  async updateTask(
-    @Req() req: any,
-    @Param('taskId') taskId: string,
-    @Body() body: UpdateTaskDto,
-  ) {
+  async updateTask(@Req() req: any, @Param('taskId') taskId: string, @Body() body: UpdateTaskDto) {
     const updated = await this.projectsService.updateTask(taskId, req.user.id, body);
     if (this.trackingGateway.server) {
       if (body.status) {
@@ -341,7 +353,12 @@ export class ProjectsController {
     @Param('taskId') taskId: string,
     @Body() body: CreateTimeBlockDto,
   ) {
-    return this.projectsService.createTimeBlock(taskId, req.user.id, new Date(body.startTime), new Date(body.endTime));
+    return this.projectsService.createTimeBlock(
+      taskId,
+      req.user.id,
+      new Date(body.startTime),
+      new Date(body.endTime),
+    );
   }
 
   @Put('timeblocks/:timeBlockId')
@@ -350,7 +367,12 @@ export class ProjectsController {
     @Param('timeBlockId') timeBlockId: string,
     @Body() body: CreateTimeBlockDto,
   ) {
-    return this.projectsService.updateTimeBlock(timeBlockId, req.user.id, new Date(body.startTime), new Date(body.endTime));
+    return this.projectsService.updateTimeBlock(
+      timeBlockId,
+      req.user.id,
+      new Date(body.startTime),
+      new Date(body.endTime),
+    );
   }
 
   @Delete('timeblocks/:timeBlockId')
@@ -375,17 +397,14 @@ export class ProjectsController {
 
   @Public()
   @Get('mock-calendar')
-  getMockCalendar(
-    @Query('format') format = 'ics',
-    @Query('email') email = 'alice@test.com'
-  ) {
+  getMockCalendar(@Query('format') format = 'ics', @Query('email') email = 'alice@test.com') {
     const now = new Date();
     const todayStr = now.toISOString().split('T')[0];
-    
+
     // Événement 1 : aujourd'hui, de 10:00 à 12:00 UTC
     const start1 = new Date(`${todayStr}T10:00:00Z`);
     const end1 = new Date(`${todayStr}T12:00:00Z`);
-    
+
     // Événement 2 : demain, de 14:00 à 16:00 UTC
     const tomorrow = new Date(now);
     tomorrow.setDate(now.getDate() + 1);
@@ -406,7 +425,7 @@ export class ProjectsController {
           start: start2.toISOString(),
           end: end2.toISOString(),
           userEmail: email,
-        }
+        },
       ];
     } else {
       const formatIcsDate = (d: Date) => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
@@ -432,10 +451,7 @@ END:VCALENDAR`;
   }
 
   @Post('workspaces/:workspaceId/resources/optimize')
-  async optimizeResources(
-    @Req() req: any,
-    @Param('workspaceId') workspaceId: string,
-  ) {
+  async optimizeResources(@Req() req: any, @Param('workspaceId') workspaceId: string) {
     const result = await this.projectsService.optimizeWorkspaceResources(workspaceId, req.user.id);
     if (result.success && result.reallocatedTaskIds && this.trackingGateway.server) {
       for (const taskId of result.reallocatedTaskIds) {
@@ -451,10 +467,7 @@ END:VCALENDAR`;
   }
 
   @Post('workspaces/:workspaceId/integrations')
-  createIntegration(
-    @Param('workspaceId') workspaceId: string,
-    @Body() body: IntegrationDto,
-  ) {
+  createIntegration(@Param('workspaceId') workspaceId: string, @Body() body: IntegrationDto) {
     return this.integrationService.createIntegration(workspaceId, body);
   }
 
@@ -507,7 +520,6 @@ END:VCALENDAR`;
   syncCalendarEvents(@Param('workspaceId') workspaceId: string) {
     return this.calendarSyncService.syncCalendarEvents(workspaceId);
   }
-
 
   @Post('workspaces/:workspaceId/sprints')
   createSprint(
@@ -565,10 +577,7 @@ END:VCALENDAR`;
   }
 
   @Get('workspaces/:workspaceId/finances')
-  getWorkspaceFinancialSummary(
-    @Req() req: any,
-    @Param('workspaceId') workspaceId: string,
-  ) {
+  getWorkspaceFinancialSummary(@Req() req: any, @Param('workspaceId') workspaceId: string) {
     return this.projectsService.getWorkspaceFinancialSummary(workspaceId, req.user.id);
   }
 }

@@ -6,7 +6,11 @@ import { WorkspaceRole } from '@prisma/client';
 export class FinancesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private async assertWorkspaceRole(workspaceId: string, userId: string, allowedRoles: WorkspaceRole[]) {
+  private async assertWorkspaceRole(
+    workspaceId: string,
+    userId: string,
+    allowedRoles: WorkspaceRole[],
+  ) {
     const membership = await this.prisma.membership.findFirst({
       where: {
         workspaceId,
@@ -98,8 +102,9 @@ export class FinancesService {
     }
 
     const marginCents = actualRevenueCents - actualCostCents;
-    const marginPercent = actualRevenueCents > 0 ? Math.round((marginCents / actualRevenueCents) * 100) : 0;
-    
+    const marginPercent =
+      actualRevenueCents > 0 ? Math.round((marginCents / actualRevenueCents) * 100) : 0;
+
     const budget = project.budgetCents ?? 0;
     const burnPercent = budget > 0 ? Math.round((actualCostCents / budget) * 100) : 0;
     const hasBudgetAlert = budget > 0 && actualCostCents > budget;
@@ -144,7 +149,8 @@ export class FinancesService {
     const totalHours = validSummaries.reduce((sum, s) => sum + (s?.totalHours ?? 0), 0);
 
     const totalMargin = totalRevenue - totalCost;
-    const totalMarginPercent = totalRevenue > 0 ? Math.round((totalMargin / totalRevenue) * 100) : 0;
+    const totalMarginPercent =
+      totalRevenue > 0 ? Math.round((totalMargin / totalRevenue) * 100) : 0;
 
     return {
       workspaceId,

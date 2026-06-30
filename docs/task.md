@@ -7,3 +7,4 @@
 - `[x]` Intégrer les dépendances de tâches dans KanbanBoard.tsx
 - `[x]` Mettre à jour l'intégration dans App.tsx
 - `[x]` Lancer les tests et valider le build
+- `[x]` Implémenter les règles OODA d'auto-synchronisation Kanban/Gantt réactives et écrire les tests unitaires

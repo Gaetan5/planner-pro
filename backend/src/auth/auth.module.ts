@@ -14,7 +14,9 @@ import { PrismaModule } from '../prisma/prisma.module';
       secret: (() => {
         const secret = process.env.JWT_SECRET;
         if (!secret) {
-          throw new Error('La variable d\'environnement JWT_SECRET est obligatoire mais absente (Fail-Fast).');
+          throw new Error(
+            "La variable d'environnement JWT_SECRET est obligatoire mais absente (Fail-Fast).",
+          );
         }
         return secret;
       })(),

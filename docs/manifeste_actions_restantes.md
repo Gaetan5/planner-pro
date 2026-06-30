@@ -10,14 +10,14 @@ Ce manifeste détaille de manière rigoureuse l'ensemble des tâches résiduelle
 
 ## 📈 1. Synthèse des Chantiers & Priorités Stratégiques
 
-| Chantier | Phases Concernées | Priorité | Description | Complexité |
-| :--- | :---: | :---: | :--- | :---: |
-| **Permissions Granulaires & RBAC** | Phase 1 & Phase 13 | **P0** | Rôles par projet, rôle `Commenter`, rôle `Client`, matrice fine de permissions et historique d'audit | Élevée |
-| **Synchronisation Calendar Avancée** | Phase 7 | **P1** | Flux OAuth2 Google/Outlook et synchronisation bidirectionnelle | Élevée |
-| **Auto-Scheduling Proactif & Gantt** | Phase 8 & Phase 10 | **P1** | Drag & drop Gantt, zoom, chemin critique (CPM), recalcul global et calendrier des disponibilités | Élevée |
-| **Communication & Collaboratif Riche** | Phase 2 | **P2** | ✅ **Terminé** - Réponses hiérarchiques (threads), pièces jointes, typing indicator | Moyenne |
-| **IA, Multimodalité & Proactivité** | Phase 3, 4, 5 & 6 | **P2** | ✅ **Terminé** - Historique IA, streaming audio, OCR temps réel et crons proactifs | Élevée |
-| **Finances & Portefeuille Consolidés** | Phase 11 & Phase 12 | **P3** | Graphiques d'évolution (burn rate, tendances de marges) et timeline multi-projets consolidée | Moyenne |
+| Chantier                               |  Phases Concernées  | Priorité | Description                                                                                          | Complexité |
+| :------------------------------------- | :-----------------: | :------: | :--------------------------------------------------------------------------------------------------- | :--------: |
+| **Permissions Granulaires & RBAC**     | Phase 1 & Phase 13  |  **P0**  | Rôles par projet, rôle `Commenter`, rôle `Client`, matrice fine de permissions et historique d'audit |   Élevée   |
+| **Synchronisation Calendar Avancée**   |       Phase 7       |  **P1**  | Flux OAuth2 Google/Outlook et synchronisation bidirectionnelle                                       |   Élevée   |
+| **Auto-Scheduling Proactif & Gantt**   | Phase 8 & Phase 10  |  **P1**  | Drag & drop Gantt, zoom, chemin critique (CPM), recalcul global et calendrier des disponibilités     |   Élevée   |
+| **Communication & Collaboratif Riche** |       Phase 2       |  **P2**  | ✅ **Terminé** - Réponses hiérarchiques (threads), pièces jointes, typing indicator                  |  Moyenne   |
+| **IA, Multimodalité & Proactivité**    |  Phase 3, 4, 5 & 6  |  **P2**  | ✅ **Terminé** - Historique IA, streaming audio, OCR temps réel et crons proactifs                   |   Élevée   |
+| **Finances & Portefeuille Consolidés** | Phase 11 & Phase 12 |  **P3**  | Graphiques d'évolution (burn rate, tendances de marges) et timeline multi-projets consolidée         |  Moyenne   |
 
 ---
 

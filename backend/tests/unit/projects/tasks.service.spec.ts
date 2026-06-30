@@ -12,17 +12,35 @@ describe('TasksService - Critical Path Method (CPM)', () => {
   let prisma: PrismaService;
   let permissions: ProjectPermissionsService;
 
-  const mockPrisma = {
+  const mockPrisma: any = {
+    $transaction: jest.fn(async (callback) => callback(mockPrisma)),
     task: {
+      findMany: jest.fn(),
+      findFirst: jest.fn(),
+      findUnique: jest.fn(),
+      update: jest.fn(),
+    },
+    taskDependency: {
+      findMany: jest.fn(),
+    },
+    taskAssignee: {
+      deleteMany: jest.fn(),
+    },
+    membership: {
       findMany: jest.fn(),
     },
   };
 
-  const mockNotes = {};
-  const mockIntegration = {};
+  const mockNotes = {
+    syncTaskStatusToNote: jest.fn(),
+  };
+  const mockIntegration = {
+    sendNotification: jest.fn(),
+  };
   const mockNotifications = {};
   const mockPermissions = {
     assertProjectRole: jest.fn(),
+    logAction: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -146,9 +164,81 @@ describe('TasksService - Critical Path Method (CPM)', () => {
       mockPrisma.task.findMany.mockResolvedValue(mockTasks);
       mockPermissions.assertProjectRole.mockResolvedValue(true);
 
-      await expect(
-        service.getCriticalPath('project-1', 'user-1'),
-      ).rejects.toThrow(BadRequestException);
+      await expect(service.getCriticalPath('project-1', 'user-1')).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+  });
+
+  describe('updateTask - Règles de synchronisation OODA', () => {
+    it('Règle 1 : devrait affecter startDate et dueDate par défaut si statut passe à IN_PROGRESS et dates vides', async () => {
+      const mockTask = {
+        id: 'task-1',
+        projectId: 'project-1',
+        title: 'Tâche Test',
+        status: 'TODO',
+        startDate: null,
+        dueDate: null,
+        project: { workspaceId: 'ws-1', name: 'Projet 1' },
+      };
+
+      mockPrisma.task.findFirst = jest.fn().mockResolvedValue(mockTask);
+      mockPermissions.assertProjectRole.mockResolvedValue(true);
+
+      mockPrisma.task.update = jest.fn().mockImplementation(({ data }) => ({
+        ...mockTask,
+        ...data,
+      }));
+      mockPrisma.task.findUnique = jest.fn().mockImplementation(() => ({
+        ...mockTask,
+        status: 'IN_PROGRESS',
+        startDate: new Date(),
+        dueDate: new Date(),
+      }));
+      mockPrisma.taskDependency.findMany = jest.fn().mockResolvedValue([]);
+      mockPrisma.taskAssignee.deleteMany = jest.fn().mockResolvedValue(true);
+      mockPrisma.membership.findMany = jest.fn().mockResolvedValue([]);
+
+      const result = await service.updateTask('task-1', 'user-1', { status: 'IN_PROGRESS' });
+
+      expect(result.startDate).toBeDefined();
+      expect(result.dueDate).toBeDefined();
+    });
+
+    it('Règle 2 : devrait passer le statut à IN_PROGRESS si startDate est configurée dans le passé ou présent et statut est TODO', async () => {
+      const mockTask = {
+        id: 'task-2',
+        projectId: 'project-1',
+        title: 'Tâche Test 2',
+        status: 'TODO',
+        startDate: null,
+        dueDate: null,
+        project: { workspaceId: 'ws-1', name: 'Projet 1' },
+      };
+
+      mockPrisma.task.findFirst = jest.fn().mockResolvedValue(mockTask);
+      mockPermissions.assertProjectRole.mockResolvedValue(true);
+
+      let updatedData: any = {};
+      mockPrisma.task.update = jest.fn().mockImplementation(({ data }) => {
+        updatedData = data;
+        return {
+          ...mockTask,
+          ...data,
+        };
+      });
+      mockPrisma.task.findUnique = jest.fn().mockImplementation(() => ({
+        ...mockTask,
+        ...updatedData,
+      }));
+      mockPrisma.taskDependency.findMany = jest.fn().mockResolvedValue([]);
+      mockPrisma.taskAssignee.deleteMany = jest.fn().mockResolvedValue(true);
+      mockPrisma.membership.findMany = jest.fn().mockResolvedValue([]);
+
+      const todayStr = new Date().toISOString();
+      const result = await service.updateTask('task-2', 'user-1', { startDate: todayStr });
+
+      expect(result.status).toBe('IN_PROGRESS');
     });
   });
 });

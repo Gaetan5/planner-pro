@@ -1,4 +1,17 @@
-import { Controller, Post, Get, Query, Body, UseGuards, Req, HttpCode, HttpStatus, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Get,
+  Query,
+  Body,
+  UseGuards,
+  Req,
+  HttpCode,
+  HttpStatus,
+  UseInterceptors,
+  UploadedFile,
+  BadRequestException,
+} from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { AiService } from './ai.service';
@@ -20,10 +33,7 @@ export class AiController {
    */
   @Post('command')
   @HttpCode(HttpStatus.OK)
-  async analyzeCommand(
-    @Req() req: any,
-    @Body() body: AiCommandDto,
-  ) {
+  async analyzeCommand(@Req() req: any, @Body() body: AiCommandDto) {
     return this.aiService.analyzeCommand(
       req.user.id,
       body.workspaceId,
@@ -46,7 +56,7 @@ export class AiController {
     @Body('isMock') isMock?: string,
   ) {
     if (!file) {
-      throw new Error("Fichier audio manquant.");
+      throw new Error('Fichier audio manquant.');
     }
     const mockBool = isMock === 'true' || isMock === '1';
     return this.aiService.transcribeAndAnalyzeVoice(
@@ -108,7 +118,7 @@ export class AiController {
     @Body('isMock') isMock?: string,
   ) {
     if (!file) {
-      throw new Error("Fichier image manquant.");
+      throw new Error('Fichier image manquant.');
     }
     const mockBool = isMock === 'true' || isMock === '1';
     return this.aiService.analyzeImageAndResolve(
@@ -125,11 +135,9 @@ export class AiController {
    * Retourne les alertes prédictives calculées pour le workspace.
    */
   @Get('copilot/alerts')
-  async getCopilotAlerts(
-    @Query('workspaceId') workspaceId: string,
-  ) {
+  async getCopilotAlerts(@Query('workspaceId') workspaceId: string) {
     if (!workspaceId) {
-      throw new BadRequestException("workspaceId requis.");
+      throw new BadRequestException('workspaceId requis.');
     }
     return this.copilotService.calculatePredictiveAlerts(workspaceId);
   }
@@ -144,7 +152,7 @@ export class AiController {
     @Query('isMock') isMock?: string,
   ) {
     if (!workspaceId) {
-      throw new BadRequestException("workspaceId requis.");
+      throw new BadRequestException('workspaceId requis.');
     }
     const mockBool = isMock === 'true' || isMock === '1';
     const briefingText = await this.copilotService.generateBriefing(

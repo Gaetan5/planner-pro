@@ -156,7 +156,9 @@
   font-weight: 600;
   border-radius: var(--radius-xs);
   cursor: pointer;
-  transition: color var(--transition-fast), background var(--transition-fast);
+  transition:
+    color var(--transition-fast),
+    background var(--transition-fast);
 }
 
 .calendar-view-btn--active {
@@ -284,7 +286,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: opacity var(--transition-fast), background var(--transition-fast);
+  transition:
+    opacity var(--transition-fast),
+    background var(--transition-fast);
 }
 
 .time-block-delete-btn:hover {

@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { IntegrationService } from './integration.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -39,7 +44,7 @@ export class CommentsService {
     });
 
     if (!task) {
-      throw new NotFoundException("Tâche introuvable.");
+      throw new NotFoundException('Tâche introuvable.');
     }
 
     if (!task.project.workspaceId) {
@@ -54,7 +59,7 @@ export class CommentsService {
         where: { id: parentId, taskId },
       });
       if (!parent) {
-        throw new NotFoundException("Commentaire parent introuvable.");
+        throw new NotFoundException('Commentaire parent introuvable.');
       }
     }
 
@@ -65,11 +70,13 @@ export class CommentsService {
         taskId,
         userId,
         parentId,
-        attachments: attachments ? {
-          createMany: {
-            data: attachments,
-          },
-        } : undefined,
+        attachments: attachments
+          ? {
+              createMany: {
+                data: attachments,
+              },
+            }
+          : undefined,
       },
       include: {
         user: {
@@ -118,7 +125,7 @@ export class CommentsService {
     });
 
     if (!task) {
-      throw new NotFoundException("Tâche introuvable.");
+      throw new NotFoundException('Tâche introuvable.');
     }
 
     if (!task.project.workspaceId) {
@@ -175,7 +182,7 @@ export class CommentsService {
     });
 
     if (!comment) {
-      throw new NotFoundException("Commentaire introuvable.");
+      throw new NotFoundException('Commentaire introuvable.');
     }
 
     const workspaceId = comment.task.project.workspaceId;
@@ -214,7 +221,7 @@ export class CommentsService {
     });
 
     if (!comment) {
-      throw new NotFoundException("Commentaire introuvable.");
+      throw new NotFoundException('Commentaire introuvable.');
     }
 
     const workspaceId = comment.task.project.workspaceId;
@@ -276,7 +283,7 @@ export class CommentsService {
     for (const match of matches) {
       const search = match[1].toLowerCase();
       // Trouver un membre dont le nom ou l'e-mail correspond à la mention
-      const foundMember = members.find(m => {
+      const foundMember = members.find((m) => {
         const nameMatch = m.user.name?.toLowerCase().includes(search);
         const emailPrefix = m.user.email.toLowerCase().split('@')[0];
         return nameMatch || emailPrefix === search || m.user.email.toLowerCase() === search;
@@ -305,7 +312,7 @@ export class CommentsService {
       include: { project: true },
     });
     if (!task) {
-      throw new NotFoundException("Tâche introuvable.");
+      throw new NotFoundException('Tâche introuvable.');
     }
     if (!task.project.workspaceId) {
       throw new BadRequestException("Cette tâche n'est pas liée à un workspace.");
@@ -329,7 +336,7 @@ export class CommentsService {
       include: { project: true },
     });
     if (!task) {
-      throw new NotFoundException("Tâche introuvable.");
+      throw new NotFoundException('Tâche introuvable.');
     }
     if (!task.project.workspaceId) {
       throw new BadRequestException("Cette tâche n'est pas liée à un workspace.");
@@ -355,12 +362,14 @@ export class CommentsService {
     });
 
     if (!attachment) {
-      throw new NotFoundException("Pièce jointe introuvable.");
+      throw new NotFoundException('Pièce jointe introuvable.');
     }
 
     const workspaceId = attachment.task?.project.workspaceId;
     if (!workspaceId) {
-      throw new BadRequestException("Cette pièce jointe n'est pas liée à une tâche dans un workspace.");
+      throw new BadRequestException(
+        "Cette pièce jointe n'est pas liée à une tâche dans un workspace.",
+      );
     }
 
     const membership = await this.assertWorkspaceAccess(workspaceId, userId);

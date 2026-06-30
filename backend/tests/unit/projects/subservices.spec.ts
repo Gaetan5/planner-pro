@@ -125,7 +125,7 @@ describe('Projects Modular Subservices', () => {
       expect(result.burnPercent).toBe(2);
     });
 
-    it('devrait lever une ForbiddenException si l\'utilisateur connecté est simple VIEWER', async () => {
+    it("devrait lever une ForbiddenException si l'utilisateur connecté est simple VIEWER", async () => {
       mockPrisma.project.findFirst.mockResolvedValue({
         id: 'proj-1',
         workspaceId: 'workspace-1',
@@ -139,14 +139,14 @@ describe('Projects Modular Subservices', () => {
         role: WorkspaceRole.VIEWER,
       });
 
-      await expect(
-        financesService.getProjectFinances('proj-1', 'user-viewer'),
-      ).rejects.toThrow(ForbiddenException);
+      await expect(financesService.getProjectFinances('proj-1', 'user-viewer')).rejects.toThrow(
+        ForbiddenException,
+      );
     });
   });
 
   describe('MilestonesService', () => {
-    it('devrait créer un jalon avec succès si l\'utilisateur possède les permissions nécessaires', async () => {
+    it("devrait créer un jalon avec succès si l'utilisateur possède les permissions nécessaires", async () => {
       mockPrisma.project.findFirst.mockResolvedValue({
         id: 'proj-1',
         workspaceId: 'workspace-1',

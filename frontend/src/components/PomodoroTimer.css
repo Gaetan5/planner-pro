@@ -58,7 +58,9 @@
   fill: none;
   stroke-width: 8;
   stroke-linecap: round;
-  transition: stroke-dashoffset 1s linear, stroke var(--transition-fast);
+  transition:
+    stroke-dashoffset 1s linear,
+    stroke var(--transition-fast);
 }
 
 .timer-circle-progress.idle {

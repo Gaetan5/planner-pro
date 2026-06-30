@@ -86,7 +86,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  transition: background var(--transition-fast), color var(--transition-fast);
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast);
 }
 
 .kanban-project-item:hover {
@@ -106,7 +108,9 @@
   color: var(--text-muted);
   cursor: pointer;
   opacity: 0.5;
-  transition: opacity var(--transition-fast), color var(--transition-fast);
+  transition:
+    opacity var(--transition-fast),
+    color var(--transition-fast);
 }
 
 .kanban-project-item:hover .kanban-project-delete-btn {
@@ -220,7 +224,10 @@
   flex-direction: column;
   gap: var(--space-sm);
   position: relative;
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    transform var(--transition-fast);
 }
 
 .kanban-card:hover {
@@ -329,7 +336,7 @@
     grid-template-columns: 200px 1fr;
     gap: var(--space-lg);
   }
-  
+
   .kanban-columns {
     gap: var(--space-md);
   }

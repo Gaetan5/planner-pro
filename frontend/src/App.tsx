@@ -1,63 +1,89 @@
-import { useState, useEffect } from 'react'
-import { AppProvider, useApp } from './context/AppContext'
-import { Login } from './components/Login'
-import { InvitationAcceptance } from './components/InvitationAcceptance'
-import { KanbanBoard } from './components/KanbanBoard'
-import { CalendarView } from './components/CalendarView'
-import { Notepad } from './components/Notepad'
-import { DashboardContent } from './components/DashboardContent'
-import { PomodoroTimer } from './components/PomodoroTimer'
-import { AiCommandBar } from './components/AiCommandBar'
-import { GovernanceView } from './components/GovernanceView'
-import { CapacityView } from './components/CapacityView'
-import { AgileView } from './components/AgileView'
-import { GanttView } from './components/GanttView'
-import { NotificationInbox } from './components/NotificationInbox'
-import { FinancesView } from './components/FinancesView'
-import { OnboardingModal } from './components/OnboardingModal'
-import { LogOut, AlertTriangle, LayoutDashboard, Kanban, Calendar, FileText, Timer, Sun, Moon, ShieldCheck, Users, Sparkles, Milestone, CalendarRange, HelpCircle } from 'lucide-react'
-import logo from './logo.png'
-import './App.css'
+import { useState, useEffect } from 'react';
+import { AppProvider, useApp } from './context/AppContext';
+import { Login } from './components/Login';
+import { InvitationAcceptance } from './components/InvitationAcceptance';
+import { KanbanBoard } from './components/KanbanBoard';
+import { CalendarView } from './components/CalendarView';
+import { Notepad } from './components/Notepad';
+import { DashboardContent } from './components/DashboardContent';
+import { PomodoroTimer } from './components/PomodoroTimer';
+import { AiCommandBar } from './components/AiCommandBar';
+import { GovernanceView } from './components/GovernanceView';
+import { CapacityView } from './components/CapacityView';
+import { AgileView } from './components/AgileView';
+import { GanttView } from './components/GanttView';
+import { NotificationInbox } from './components/NotificationInbox';
+import { FinancesView } from './components/FinancesView';
+import { OnboardingModal } from './components/OnboardingModal';
+import {
+  LogOut,
+  AlertTriangle,
+  LayoutDashboard,
+  Kanban,
+  Calendar,
+  FileText,
+  Timer,
+  Sun,
+  Moon,
+  ShieldCheck,
+  Users,
+  Sparkles,
+  Milestone,
+  CalendarRange,
+  HelpCircle,
+} from 'lucide-react';
+import logo from './logo.png';
+import './App.css';
 
 function AppWithSession() {
-  const { user, logout, activeTab, setActiveTab, isConnected, theme, toggleTheme } = useApp()
+  const { user, logout, activeTab, setActiveTab, isConnected, theme, toggleTheme } = useApp();
   const [inviteToken, setInviteToken] = useState<string | null>(() => {
-    const params = new URLSearchParams(window.location.search)
-    return params.get('token')
-  })
-  const [showOnboarding, setShowOnboarding] = useState(false)
+    const params = new URLSearchParams(window.location.search);
+    return params.get('token');
+  });
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   useEffect(() => {
     if (user) {
-      const completed = localStorage.getItem(`planner_onboarding_completed_${user.id}`)
-      setShowOnboarding(completed !== 'true')
+      const completed = localStorage.getItem(`planner_onboarding_completed_${user.id}`);
+      setShowOnboarding(completed !== 'true');
     } else {
-      setShowOnboarding(false)
+      setShowOnboarding(false);
     }
-  }, [user])
+  }, [user]);
 
   if (inviteToken) {
-    return <InvitationAcceptance token={inviteToken} onClose={() => setInviteToken(null)} />
+    return <InvitationAcceptance token={inviteToken} onClose={() => setInviteToken(null)} />;
   }
 
   if (!user) {
-    return <Login />
+    return <Login />;
   }
 
   const renderActiveTab = () => {
     switch (activeTab) {
-      case 'kanban': return <KanbanBoard />
-      case 'calendar': return <CalendarView />
-      case 'notes': return <Notepad />
-      case 'pomodoro': return <PomodoroTimer />
-      case 'governance': return <GovernanceView />
-      case 'resources': return <CapacityView />
-      case 'agile': return <AgileView />
-      case 'gantt': return <GanttView />
-      case 'finances': return <FinancesView />
-      default: return <DashboardContent />
+      case 'kanban':
+        return <KanbanBoard />;
+      case 'calendar':
+        return <CalendarView />;
+      case 'notes':
+        return <Notepad />;
+      case 'pomodoro':
+        return <PomodoroTimer />;
+      case 'governance':
+        return <GovernanceView />;
+      case 'resources':
+        return <CapacityView />;
+      case 'agile':
+        return <AgileView />;
+      case 'gantt':
+        return <GanttView />;
+      case 'finances':
+        return <FinancesView />;
+      default:
+        return <DashboardContent />;
     }
-  }
+  };
 
   return (
     <div className="app-layout">
@@ -145,9 +171,7 @@ function AppWithSession() {
               Serveur Déconnecté
             </div>
           ) : (
-            <div className="connection-badge badge--success">
-              Connecté au Backend
-            </div>
+            <div className="connection-badge badge--success">Connecté au Backend</div>
           )}
 
           {/* Assistant IA Command Button */}
@@ -183,17 +207,12 @@ function AppWithSession() {
             <HelpCircle size={16} />
           </button>
 
-
           <div className="user-info">
             <div className="user-info__details">
               <p className="user-info__name">{user.name}</p>
               <p className="user-info__email">{user.email}</p>
             </div>
-            <button
-              onClick={logout}
-              className="btn-icon btn-icon--danger"
-              title="Se déconnecter"
-            >
+            <button onClick={logout} className="btn-icon btn-icon--danger" title="Se déconnecter">
               <LogOut size={16} />
             </button>
           </div>
@@ -201,9 +220,7 @@ function AppWithSession() {
       </header>
 
       {/* Main Page Area */}
-      <div className="app-main">
-        {renderActiveTab()}
-      </div>
+      <div className="app-main">{renderActiveTab()}</div>
 
       {/* Bottom Navigation for Mobile */}
       <nav className="app-bottom-nav mobile-only">
@@ -275,13 +292,13 @@ function AppWithSession() {
       {showOnboarding && (
         <OnboardingModal
           onClose={() => {
-            localStorage.setItem(`planner_onboarding_completed_${user.id}`, 'true')
-            setShowOnboarding(false)
+            localStorage.setItem(`planner_onboarding_completed_${user.id}`, 'true');
+            setShowOnboarding(false);
           }}
         />
       )}
     </div>
-  )
+  );
 }
 
 export default function App() {
@@ -289,5 +306,5 @@ export default function App() {
     <AppProvider>
       <AppWithSession />
     </AppProvider>
-  )
+  );
 }
