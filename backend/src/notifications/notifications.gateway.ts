@@ -10,6 +10,7 @@ import { JwtService } from '@nestjs/jwt';
 import { SkipThrottle } from '@nestjs/throttler';
 import { createAdapter } from '@socket.io/redis-adapter';
 import { createClient } from 'redis';
+import { PrismaService } from '../prisma/prisma.service';
 
 @SkipThrottle()
 @WebSocketGateway({
@@ -24,7 +25,10 @@ export class NotificationsGateway
   @WebSocketServer()
   server!: Server;
 
-  constructor(private readonly jwtService: JwtService) {}
+  constructor(
+    private readonly jwtService: JwtService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   async afterInit(server: Server) {
     try {
@@ -61,7 +65,19 @@ export class NotificationsGateway
       console.log(
         `Notifications Gateway: Client connecté et authentifié : ${client.data.userId} (Socket: ${client.id})`,
       );
-    } catch (_error: unknown) {
+
+      // Rejoindre les salons de workspace associés
+      const userWorkspaces = await this.prisma.membership.findMany({
+        where: { userId: client.data.userId },
+        select: { workspaceId: true },
+      });
+      for (const membership of userWorkspaces) {
+        client.join(`workspace:${membership.workspaceId}`);
+        console.log(
+          `Notifications Gateway: Socket ${client.id} a rejoint la room workspace:${membership.workspaceId}`,
+        );
+      }
+    } catch {
       client.disconnect(true);
     }
   }
@@ -70,7 +86,7 @@ export class NotificationsGateway
     console.log(`Notifications Gateway: Client déconnecté : ${client.id}`);
   }
 
-  sendNotificationToUser(userId: string, event: string, data: any) {
+  sendNotificationToUser(userId: string, event: string, data: unknown) {
     if (this.server) {
       this.server.to(`user:${userId}`).emit(event, data);
     }

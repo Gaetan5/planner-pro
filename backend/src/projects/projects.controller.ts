@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import {
   Controller,
   Get,
@@ -20,6 +21,8 @@ import { TrackingGateway } from '../tracking/tracking.gateway';
 import { ProjectPermissionsService } from './project-permissions.service';
 import { IntegrationService, IntegrationDto } from './integration.service';
 import { CalendarSyncService } from './calendar-sync.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { TASK_INCLUDE } from './tasks.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { CreateTaskDto } from './dto/create-task.dto';
@@ -35,6 +38,7 @@ import { CreateDeliveryDto } from './dto/create-delivery.dto';
 import { UpdateDeliveryStatusDto } from './dto/update-delivery-status.dto';
 import { CreateSprintDto } from './dto/create-sprint.dto';
 import { UpdateSprintDto } from './dto/update-sprint.dto';
+import { ProactiveSchedulerService } from './proactive-scheduler.service';
 
 @Controller('projects')
 @UseGuards(JwtAuthGuard)
@@ -46,6 +50,8 @@ export class ProjectsController {
     private readonly integrationService: IntegrationService,
     private readonly calendarSyncService: CalendarSyncService,
     private readonly projectPermissionsService: ProjectPermissionsService,
+    private readonly prisma: PrismaService,
+    private readonly proactiveSchedulerService: ProactiveSchedulerService,
   ) {}
 
   @Get('workspaces')
@@ -325,18 +331,40 @@ export class ProjectsController {
   async updateTask(@Req() req: any, @Param('taskId') taskId: string, @Body() body: UpdateTaskDto) {
     const updated = await this.projectsService.updateTask(taskId, req.user.id, body);
     if (this.trackingGateway.server) {
-      if (body.status) {
-        this.trackingGateway.server.emit('task-status-changed', { taskId });
-      }
-      const impactedTaskIds = (updated as any).impactedTaskIds;
-      if (impactedTaskIds && impactedTaskIds.length > 0) {
-        this.trackingGateway.server.emit('task-schedule-propagated', {
-          projectId: (updated as any).projectId,
-          impactedTaskIds,
-        });
-        for (const id of impactedTaskIds) {
-          this.trackingGateway.server.emit('task-status-changed', { taskId: id });
+      const dbTask = await this.prisma.task.findUnique({
+        where: { id: taskId },
+        include: {
+          ...TASK_INCLUDE,
+          project: true,
+        },
+      });
+      const workspaceId = dbTask?.project?.workspaceId;
+      if (workspaceId && dbTask) {
+        const room = `workspace:${workspaceId}`;
+        if (body.status) {
+          this.trackingGateway.server
+            .to(room)
+            .emit('task-status-changed', { taskId, task: dbTask });
         }
+        const impactedTaskIds = (updated as any).impactedTaskIds;
+        if (impactedTaskIds && impactedTaskIds.length > 0) {
+          const impactedTasks = await this.prisma.task.findMany({
+            where: { id: { in: impactedTaskIds } },
+            include: TASK_INCLUDE,
+          });
+          this.trackingGateway.server.to(room).emit('task-schedule-propagated', {
+            projectId: (updated as any).projectId,
+            impactedTaskIds,
+            impactedTasks,
+          });
+          for (const t of impactedTasks) {
+            this.trackingGateway.server
+              .to(room)
+              .emit('task-status-changed', { taskId: t.id, task: t });
+          }
+        }
+        // Lancer la détection proactive de risques en arrière-plan (non bloquante)
+        this.proactiveSchedulerService.runProactiveChecksForWorkspace(workspaceId);
       }
     }
     return updated;
@@ -389,7 +417,19 @@ export class ProjectsController {
     const closedTaskIds = await this.projectsService.handleGitHubWebhook(payload, signature);
     if (this.trackingGateway.server) {
       for (const taskId of closedTaskIds) {
-        this.trackingGateway.server.emit('task-status-changed', { taskId });
+        const dbTask = await this.prisma.task.findUnique({
+          where: { id: taskId },
+          include: {
+            ...TASK_INCLUDE,
+            project: true,
+          },
+        });
+        const workspaceId = dbTask?.project?.workspaceId;
+        if (workspaceId && dbTask) {
+          this.trackingGateway.server
+            .to(`workspace:${workspaceId}`)
+            .emit('task-status-changed', { taskId, task: dbTask });
+        }
       }
     }
     return { closedTaskIds };
@@ -454,8 +494,14 @@ END:VCALENDAR`;
   async optimizeResources(@Req() req: any, @Param('workspaceId') workspaceId: string) {
     const result = await this.projectsService.optimizeWorkspaceResources(workspaceId, req.user.id);
     if (result.success && result.reallocatedTaskIds && this.trackingGateway.server) {
-      for (const taskId of result.reallocatedTaskIds) {
-        this.trackingGateway.server.emit('task-status-changed', { taskId });
+      const reallocatedTasks = await this.prisma.task.findMany({
+        where: { id: { in: result.reallocatedTaskIds } },
+        include: TASK_INCLUDE,
+      });
+      for (const t of reallocatedTasks) {
+        this.trackingGateway.server
+          .to(`workspace:${workspaceId}`)
+          .emit('task-status-changed', { taskId: t.id, task: t });
       }
     }
     return result;
@@ -464,6 +510,11 @@ END:VCALENDAR`;
   @Get('workspaces/:workspaceId/integrations')
   listIntegrations(@Param('workspaceId') workspaceId: string) {
     return this.integrationService.listIntegrations(workspaceId);
+  }
+
+  @Get('workspaces/:workspaceId/integrations/status')
+  getIntegrationsStatus(@Param('workspaceId') workspaceId: string) {
+    return this.integrationService.getIntegrationsStatus(workspaceId);
   }
 
   @Post('workspaces/:workspaceId/integrations')
@@ -521,6 +572,11 @@ END:VCALENDAR`;
     return this.calendarSyncService.syncCalendarEvents(workspaceId);
   }
 
+  @Post('workspaces/:workspaceId/auto-schedule')
+  autoScheduleWorkspace(@Param('workspaceId') workspaceId: string) {
+    return this.proactiveSchedulerService.autoScheduleWorkspace(workspaceId);
+  }
+
   @Post('workspaces/:workspaceId/sprints')
   createSprint(
     @Req() req: any,
@@ -557,9 +613,25 @@ END:VCALENDAR`;
   ) {
     const sId = sprintId === 'backlog' ? null : sprintId;
     await this.sprintService.associateTasksToSprint(sId, body.taskIds, req.user.id);
-    if (this.trackingGateway.server) {
-      for (const id of body.taskIds) {
-        this.trackingGateway.server.emit('task-status-changed', { taskId: id });
+    if (this.trackingGateway.server && body.taskIds && body.taskIds.length > 0) {
+      const tasks = await this.prisma.task.findMany({
+        where: { id: { in: body.taskIds } },
+        include: TASK_INCLUDE,
+      });
+      if (tasks.length > 0) {
+        const sampleTask = await this.prisma.task.findUnique({
+          where: { id: body.taskIds[0] },
+          select: { project: { select: { workspaceId: true } } },
+        });
+        const workspaceId = sampleTask?.project?.workspaceId;
+        if (workspaceId) {
+          const room = `workspace:${workspaceId}`;
+          for (const t of tasks) {
+            this.trackingGateway.server
+              .to(room)
+              .emit('task-status-changed', { taskId: t.id, task: t });
+          }
+        }
       }
     }
     return { success: true };

@@ -2,7 +2,6 @@ import { render, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GanttView } from './GanttView';
 import { AppProvider, useApp } from '../context/AppContext';
-import React from 'react';
 
 // Mock du hook useApp
 vi.mock('../context/AppContext', async (importOriginal) => {
@@ -16,8 +15,8 @@ vi.mock('../context/AppContext', async (importOriginal) => {
 describe('GanttView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (useApp as any).mockReturnValue({
-      workspaces: [{ id: 'w1', name: 'WS1' }],
+    vi.mocked(useApp).mockReturnValue({
+      workspaces: [{ id: 'w1', name: 'WS1', ownerId: 'u1' }],
       projects: [
         {
           id: 'p1',
@@ -31,7 +30,7 @@ describe('GanttView', () => {
       removeTaskDependency: vi.fn(),
       refreshData: vi.fn(),
       getProjectCriticalPath: vi.fn(),
-    });
+    } as unknown as ReturnType<typeof useApp>);
   });
 
   it('doit rendre le titre du diagramme de Gantt', () => {

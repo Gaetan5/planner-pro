@@ -3,12 +3,11 @@ import { ProactiveSchedulerService } from '../../../src/projects/proactive-sched
 import { PrismaService } from '../../../src/prisma/prisma.service';
 import { CopilotService } from '../../../src/projects/copilot.service';
 import { NotificationsService } from '../../../src/notifications/notifications.service';
+import { CalendarSyncService } from '../../../src/projects/calendar-sync.service';
+import { TrackingGateway } from '../../../src/tracking/tracking.gateway';
 
 describe('ProactiveSchedulerService', () => {
   let service: ProactiveSchedulerService;
-  let prisma: PrismaService;
-  let copilotService: CopilotService;
-  let notificationsService: NotificationsService;
 
   const mockPrisma = {
     workspace: {
@@ -20,9 +19,18 @@ describe('ProactiveSchedulerService', () => {
     },
     user: {
       findMany: jest.fn(),
+      findFirst: jest.fn(),
     },
     aiBriefing: {
       upsert: jest.fn(),
+    },
+    task: {
+      findMany: jest.fn(),
+    },
+    timeBlock: {
+      count: jest.fn(),
+      findMany: jest.fn(),
+      create: jest.fn(),
     },
   };
 
@@ -35,6 +43,17 @@ describe('ProactiveSchedulerService', () => {
     createNotification: jest.fn(),
   };
 
+  const mockCalendarSyncService = {
+    detectCalendarConflicts: jest.fn(),
+  };
+
+  const mockTrackingGateway = {
+    server: {
+      to: jest.fn().mockReturnThis(),
+      emit: jest.fn(),
+    },
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -42,13 +61,12 @@ describe('ProactiveSchedulerService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: CopilotService, useValue: mockCopilotService },
         { provide: NotificationsService, useValue: mockNotificationsService },
+        { provide: CalendarSyncService, useValue: mockCalendarSyncService },
+        { provide: TrackingGateway, useValue: mockTrackingGateway },
       ],
     }).compile();
 
     service = module.get<ProactiveSchedulerService>(ProactiveSchedulerService);
-    prisma = module.get<PrismaService>(PrismaService);
-    copilotService = module.get<CopilotService>(CopilotService);
-    notificationsService = module.get<NotificationsService>(NotificationsService);
 
     jest.clearAllMocks();
   });
@@ -148,6 +166,55 @@ describe('ProactiveSchedulerService', () => {
           content: 'Bonjour Alice, voici votre briefing.',
         },
       });
+    });
+  });
+
+  describe('runProactiveChecksForWorkspace', () => {
+    it('devrait notifier les membres lors de risques sur un workspace ciblé', async () => {
+      mockPrisma.membership.findMany.mockResolvedValue([
+        {
+          userId: 'admin-id',
+          role: 'OWNER',
+          user: { id: 'admin-id', name: 'Admin', email: 'admin@test.com' },
+        },
+      ]);
+
+      mockCopilotService.calculatePredictiveAlerts.mockResolvedValue([
+        {
+          id: 'alert-overload',
+          type: 'OVERLOADED',
+          severity: 'HIGH',
+          message: 'User surcharge',
+          userId: 'user-id',
+          userName: 'User',
+        },
+      ]);
+
+      await service.runProactiveChecksForWorkspace('ws-123');
+
+      expect(mockNotificationsService.createNotification).toHaveBeenCalled();
+    });
+  });
+
+  describe('autoScheduleWorkspace', () => {
+    it('devrait planifier des créneaux libres pour les tâches non planifiées', async () => {
+      mockPrisma.task.findMany.mockResolvedValue([
+        {
+          id: 'task-1',
+          title: 'Tâche A',
+          projectId: 'p1',
+          assignees: [{ user: { email: 'alice@test.com' } }],
+        },
+      ]);
+
+      mockPrisma.timeBlock.count.mockResolvedValue(0);
+      mockCalendarSyncService.detectCalendarConflicts.mockResolvedValue([]);
+      mockPrisma.timeBlock.findMany.mockResolvedValue([]);
+
+      const result = await service.autoScheduleWorkspace('ws-123');
+
+      expect(result.success).toBe(true);
+      expect(result.scheduledCount).toBeGreaterThanOrEqual(0);
     });
   });
 });

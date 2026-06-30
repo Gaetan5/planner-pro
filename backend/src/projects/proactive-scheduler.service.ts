@@ -1,8 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { CopilotService } from './copilot.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { CalendarSyncService } from './calendar-sync.service';
+import { TrackingGateway } from '../tracking/tracking.gateway';
 
 @Injectable()
 export class ProactiveSchedulerService {
@@ -12,6 +14,9 @@ export class ProactiveSchedulerService {
     private readonly prisma: PrismaService,
     private readonly copilotService: CopilotService,
     private readonly notificationsService: NotificationsService,
+    private readonly calendarSyncService: CalendarSyncService,
+    @Inject(forwardRef(() => TrackingGateway))
+    private readonly trackingGateway: TrackingGateway,
   ) {}
 
   /**
@@ -79,10 +84,10 @@ export class ProactiveSchedulerService {
             }
           }
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         this.logger.error(
           `Erreur lors du traitement proactif pour le workspace ${ws.id}: ${err instanceof Error ? err.message : String(err)}`,
-          err.stack,
+          err instanceof Error ? err.stack : undefined,
         );
       }
     }
@@ -126,14 +131,198 @@ export class ProactiveSchedulerService {
             content: briefingText,
           },
         });
-      } catch (err: any) {
+      } catch (err: unknown) {
         this.logger.error(
           `Erreur lors de la génération de briefing pour l'utilisateur ${u.id}: ${err instanceof Error ? err.message : String(err)}`,
-          err.stack,
+          err instanceof Error ? err.stack : undefined,
         );
       }
     }
 
     this.logger.log('Pré-calcul planifié des briefings matinaux terminé.');
+  }
+
+  /**
+   * Effectue l'analyse proactive événementielle pour un workspace ciblé (détection immédiate).
+   */
+  async runProactiveChecksForWorkspace(workspaceId: string) {
+    this.logger.log(`Analyse proactive événementielle lancée pour le workspace ${workspaceId}`);
+    try {
+      const alerts = await this.copilotService.calculatePredictiveAlerts(workspaceId);
+      const members = await this.prisma.membership.findMany({
+        where: { workspaceId },
+        include: { user: true },
+      });
+      const administrators = members.filter((m) => m.role === 'OWNER' || m.role === 'ADMIN');
+
+      for (const alert of alerts) {
+        if (alert.type === 'OVERLOADED' && alert.userId) {
+          await this.notificationsService.createNotification({
+            userId: alert.userId,
+            senderId: undefined,
+            type: 'SYSTEM',
+            title: 'Alerte Surcharge',
+            content: alert.message,
+          });
+
+          for (const admin of administrators) {
+            if (admin.userId !== alert.userId) {
+              await this.notificationsService.createNotification({
+                userId: admin.userId,
+                senderId: undefined,
+                type: 'SYSTEM',
+                title: `Surcharge membre: ${alert.userName}`,
+                content: alert.message,
+              });
+            }
+          }
+        }
+
+        if (alert.severity === 'CRITICAL' || alert.severity === 'HIGH') {
+          for (const admin of administrators) {
+            await this.notificationsService.createNotification({
+              userId: admin.userId,
+              senderId: undefined,
+              type: 'SYSTEM',
+              title: `Alerte Critique Workspace: ${alert.type}`,
+              content: alert.message,
+              taskId: alert.taskId,
+            });
+          }
+        }
+      }
+    } catch (err: unknown) {
+      this.logger.error(
+        `Erreur lors du traitement proactif événementiel pour le workspace ${workspaceId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /**
+   * Planification automatique de créneaux TimeBlocks libres de conflits pour toutes les tâches du workspace.
+   */
+  async autoScheduleWorkspace(workspaceId: string) {
+    this.logger.log(`[Auto-Schedule] Planification automatique pour le workspace ${workspaceId}`);
+
+    // 1. Récupérer toutes les tâches actives, non terminées du workspace
+    const tasks = await this.prisma.task.findMany({
+      where: {
+        project: { workspaceId, deletedAt: null },
+        status: { in: ['TODO', 'IN_PROGRESS'] },
+        deletedAt: null,
+      },
+      include: {
+        assignees: { include: { user: true } },
+        project: true,
+      },
+    });
+
+    const unscheduledTasks: typeof tasks = [];
+    for (const t of tasks) {
+      const tbCount = await this.prisma.timeBlock.count({ where: { taskId: t.id } });
+      if (tbCount === 0) {
+        unscheduledTasks.push(t);
+      }
+    }
+
+    if (unscheduledTasks.length === 0) {
+      this.logger.log(`[Auto-Schedule] Aucune tâche non planifiée à scheduler.`);
+      return { success: true, scheduledCount: 0 };
+    }
+
+    // 2. Charger les conflits d'agendas externes détectés
+    const existingConflicts = await this.calendarSyncService.detectCalendarConflicts(workspaceId);
+
+    // Charger aussi tous les TimeBlocks déjà alloués du workspace
+    const existingTimeBlocks = await this.prisma.timeBlock.findMany({
+      where: {
+        task: {
+          project: { workspaceId },
+          deletedAt: null,
+        },
+      },
+    });
+
+    let scheduledCount = 0;
+    const now = new Date();
+    // Commencer la planification à partir de demain à 9h00 UTC
+    const startPlanner = new Date(now);
+    startPlanner.setDate(now.getDate() + 1);
+    startPlanner.setUTCHours(9, 0, 0, 0);
+
+    const allocatedBlocks: Array<{ start: Date; end: Date; taskId: string }> = [];
+
+    for (const task of unscheduledTasks) {
+      const durationHours = 2; // Allouer des plages de 2 heures par défaut
+      const assignees = task.assignees.map((a) => a.user.email);
+
+      let foundPlage = false;
+      const checkStart = new Date(startPlanner);
+
+      // Chercher sur les 30 prochains jours maximum
+      for (let day = 0; day < 30 && !foundPlage; day++) {
+        // Plage de travail standard de 9h à 18h
+        for (let hour = 9; hour <= 16 && !foundPlage; hour++) {
+          const slotStart = new Date(checkStart);
+          slotStart.setUTCHours(hour, 0, 0, 0);
+
+          const slotEnd = new Date(slotStart);
+          slotEnd.setUTCHours(hour + durationHours, 0, 0, 0);
+
+          // Éviter les week-ends
+          const dayOfWeek = slotStart.getUTCDay();
+          if (dayOfWeek === 0 || dayOfWeek === 6) {
+            continue;
+          }
+
+          // Vérifier les chevauchements
+          const overlapDB = existingTimeBlocks.some(
+            (tb) => new Date(tb.startTime) < slotEnd && slotStart < new Date(tb.endTime),
+          );
+
+          const overlapAllocated = allocatedBlocks.some(
+            (ab) => ab.start < slotEnd && slotStart < ab.end,
+          );
+
+          const overlapConflicts = existingConflicts.some((c) => {
+            const hasUserMatch =
+              assignees.length === 0 ||
+              assignees.includes(c.userName) ||
+              assignees.includes(c.userId);
+            return (
+              hasUserMatch && new Date(c.startTime) < slotEnd && slotStart < new Date(c.endTime)
+            );
+          });
+
+          if (!overlapDB && !overlapAllocated && !overlapConflicts) {
+            await this.prisma.timeBlock.create({
+              data: {
+                taskId: task.id,
+                startTime: slotStart,
+                endTime: slotEnd,
+              },
+            });
+
+            allocatedBlocks.push({
+              start: slotStart,
+              end: slotEnd,
+              taskId: task.id,
+            });
+
+            scheduledCount++;
+            foundPlage = true;
+          }
+        }
+        checkStart.setDate(checkStart.getDate() + 1);
+      }
+    }
+
+    if (scheduledCount > 0 && this.trackingGateway?.server) {
+      this.trackingGateway.server
+        .to(`workspace:${workspaceId}`)
+        .emit('project-data-updated', { workspaceId });
+    }
+
+    return { success: true, scheduledCount };
   }
 }

@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import './IntegrationsPanel.css';
 
+const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+
 interface Integration {
   id: string;
   type: 'SLACK' | 'TEAMS' | 'GOOGLE_CALENDAR' | 'OUTLOOK';
@@ -10,6 +12,7 @@ interface Integration {
   calendarId: string | null;
   active: boolean;
   createdAt: string;
+  status?: 'CONNECTED' | 'EXPIRED' | 'DEMO' | 'DISABLED';
 }
 
 interface CalendarConflict {
@@ -36,7 +39,13 @@ export const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({ workspaceI
     deleteIntegration,
     exportToCalendar,
     getCalendarConflicts,
+    user,
   } = useApp();
+
+  const getHeaders = () => ({
+    'Content-Type': 'application/json',
+    Authorization: user?.token ? `Bearer ${user.token}` : '',
+  });
 
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [conflicts, setConflicts] = useState<CalendarConflict[]>([]);
@@ -48,18 +57,43 @@ export const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({ workspaceI
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
   const [calendarId, setCalendarId] = useState('');
+  const [scheduling, setScheduling] = useState(false);
+
+  const handleAutoSchedule = async () => {
+    setScheduling(true);
+    try {
+      const res = await fetch(`${BACKEND_URL}/projects/workspaces/${workspaceId}/auto-schedule`, {
+        method: 'POST',
+        headers: getHeaders(),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        alert(
+          `Planification automatique réussie ! ${data.scheduledCount} créneaux horaires alloués.`,
+        );
+        loadData();
+      } else {
+        alert('Erreur lors de la planification automatique.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Erreur réseau.');
+    } finally {
+      setScheduling(false);
+    }
+  };
 
   const loadData = async () => {
     if (!workspaceId) return;
     setLoading(true);
     setError(null);
     try {
-      const list = await listIntegrations(workspaceId);
+      const list = (await listIntegrations(workspaceId)) as Integration[];
       setIntegrations(list);
-      const confs = await getCalendarConflicts(workspaceId);
+      const confs = (await getCalendarConflicts(workspaceId)) as CalendarConflict[];
       setConflicts(confs);
-    } catch (err: any) {
-      setError(err.message || 'Erreur lors du chargement des intégrations.');
+    } catch (err: unknown) {
+      setError((err as Error).message || 'Erreur lors du chargement des intégrations.');
     } finally {
       setLoading(false);
     }
@@ -88,8 +122,8 @@ export const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({ workspaceI
       setCalendarId('');
       // Reload
       await loadData();
-    } catch (err: any) {
-      setError(err.message || "Erreur lors de la création de l'intégration.");
+    } catch (err: unknown) {
+      setError((err as Error).message || "Erreur lors de la création de l'intégration.");
     }
   };
 
@@ -97,8 +131,8 @@ export const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({ workspaceI
     try {
       await toggleIntegration(id);
       await loadData();
-    } catch (err: any) {
-      setError(err.message || 'Erreur lors du toggle.');
+    } catch (err: unknown) {
+      setError((err as Error).message || 'Erreur lors du toggle.');
     }
   };
 
@@ -107,17 +141,17 @@ export const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({ workspaceI
     try {
       await deleteIntegration(id);
       await loadData();
-    } catch (err: any) {
-      setError(err.message || 'Erreur lors de la suppression.');
+    } catch (err: unknown) {
+      setError((err as Error).message || 'Erreur lors de la suppression.');
     }
   };
 
   const handleExport = async (id: string) => {
     try {
-      const res = await exportToCalendar(workspaceId, id);
+      const res = (await exportToCalendar(workspaceId, id)) as { exportedCount: number };
       alert(`Export réussi ! ${res.exportedCount} créneaux horaires locaux synchronisés.`);
-    } catch (err: any) {
-      setError(err.message || "Erreur lors de l'exportation.");
+    } catch (err: unknown) {
+      setError((err as Error).message || "Erreur lors de l'exportation.");
     }
   };
 
@@ -138,12 +172,46 @@ export const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({ workspaceI
 
   return (
     <div className="integrations-container">
-      <div className="integrations-header-section">
-        <h2>Synchronisation Réelle</h2>
-        <p>
-          Connectez vos messageries d'équipe et vos agendas externes pour centraliser et coordonner
-          la planification.
-        </p>
+      <div
+        className="integrations-header-section"
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '1rem',
+        }}
+      >
+        <div>
+          <h2>Synchronisation Réelle</h2>
+          <p>
+            Connectez vos messageries d'équipe et vos agendas externes pour centraliser et
+            coordonner la planification.
+          </p>
+        </div>
+        <button
+          onClick={handleAutoSchedule}
+          disabled={scheduling}
+          className="btn-primary-gradient auto-schedule-btn"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            boxShadow: '0 0 15px rgba(139, 92, 246, 0.35)',
+            alignSelf: 'center',
+            padding: '0.75rem 1.25rem',
+            fontSize: '0.85rem',
+            border: 'none',
+            borderRadius: '8px',
+            color: 'white',
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+          }}
+        >
+          <span>{scheduling ? 'Planification...' : 'Planifier Automatiquement'}</span>
+          <span>⚡</span>
+        </button>
       </div>
 
       {error && (
@@ -173,7 +241,34 @@ export const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({ workspaceI
                 <div className="integration-icon-wrapper">{getIcon(integration.type)}</div>
                 <div>
                   <h3>{integration.name}</h3>
-                  <span className="integration-type-badge">{integration.type}</span>
+                  <div className="integration-status-wrapper">
+                    <span className="integration-type-badge">{integration.type}</span>
+                    {integration.active ? (
+                      integration.status === 'CONNECTED' ? (
+                        <span className="integration-status-badge connected">
+                          <span className="pulse-dot"></span>
+                          Connecté
+                        </span>
+                      ) : integration.status === 'EXPIRED' ? (
+                        <span className="integration-status-badge expired">
+                          <span className="pulse-dot"></span>
+                          Expiré
+                        </span>
+                      ) : integration.status === 'DEMO' ? (
+                        <span className="integration-status-badge demo">
+                          <span className="pulse-dot"></span>
+                          Démonstration
+                        </span>
+                      ) : (
+                        <span className="integration-status-badge connected">
+                          <span className="pulse-dot"></span>
+                          Actif
+                        </span>
+                      )
+                    ) : (
+                      <span className="integration-status-badge disabled">Désactivé</span>
+                    )}
+                  </div>
                 </div>
               </div>
               <label className="switch">
@@ -248,7 +343,12 @@ export const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({ workspaceI
           <div className="form-row">
             <div className="form-group">
               <label>Service</label>
-              <select value={type} onChange={(e) => setType(e.target.value as any)}>
+              <select
+                value={type}
+                onChange={(e) =>
+                  setType(e.target.value as 'SLACK' | 'TEAMS' | 'GOOGLE_CALENDAR' | 'OUTLOOK')
+                }
+              >
                 <option value="SLACK">Slack (Webhook)</option>
                 <option value="TEAMS">Microsoft Teams (Webhook)</option>
                 <option value="GOOGLE_CALENDAR">Google Calendar</option>

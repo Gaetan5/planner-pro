@@ -72,7 +72,10 @@ export const AiCommandBar: React.FC = () => {
   // Écouter les retours de la voix en streaming via WebSockets
   useEffect(() => {
     if (socket) {
-      const handleVoiceResult = (result: any) => {
+      const handleVoiceResult = (result: {
+        transcription: string;
+        actions: ResolvedAiAction[];
+      }) => {
         setIsLoading(false);
         setCommandText(result.transcription);
         setActions(result.actions);
@@ -81,7 +84,7 @@ export const AiCommandBar: React.FC = () => {
         }
       };
 
-      const handleVoiceError = (err: any) => {
+      const handleVoiceError = (err: { message?: string }) => {
         setIsLoading(false);
         setErrorMessage(
           err.message || "Une erreur est survenue lors de l'analyse vocale en streaming.",
@@ -108,7 +111,7 @@ export const AiCommandBar: React.FC = () => {
 
       try {
         recorder = new MediaRecorder(stream, options);
-      } catch (e) {
+      } catch {
         recorder = new MediaRecorder(stream);
       }
 
@@ -146,7 +149,7 @@ export const AiCommandBar: React.FC = () => {
 
       recorder.start(250); // Déclencher ondataavailable toutes les 250ms
       setIsRecording(true);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Erreur microphone:', err);
       setErrorMessage("Impossible d'accéder au microphone. Veuillez vérifier vos permissions.");
     }
@@ -207,11 +210,19 @@ export const AiCommandBar: React.FC = () => {
         );
       }
 
-      let resolved = [];
+      let resolved: ResolvedAiAction[] = [];
       if (selectedImage) {
-        resolved = await parseAiImageCommand(workspaceId, projectId, selectedImage);
+        resolved = (await parseAiImageCommand(
+          workspaceId,
+          projectId,
+          selectedImage,
+        )) as ResolvedAiAction[];
       } else {
-        resolved = await parseAiCommand(workspaceId, projectId, commandText.trim());
+        resolved = (await parseAiCommand(
+          workspaceId,
+          projectId,
+          commandText.trim(),
+        )) as ResolvedAiAction[];
       }
 
       setActions(resolved);
@@ -219,16 +230,16 @@ export const AiCommandBar: React.FC = () => {
       if (resolved.length === 0) {
         setErrorMessage("Aucune action n'a pu être interprétée. Essayez d'être plus spécifique.");
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      setErrorMessage(err.message || "Une erreur est survenue lors de l'analyse.");
+      setErrorMessage((err as Error).message || "Une erreur est survenue lors de l'analyse.");
     } finally {
       setIsLoading(false);
     }
   };
 
   // Mettre à jour une action spécifique localement
-  const handleUpdateActionField = (actionId: string, field: string, value: any) => {
+  const handleUpdateActionField = (actionId: string, field: string, value: string) => {
     setActions((prev) =>
       prev.map((act) => {
         if (act.id !== actionId) return act;
@@ -279,9 +290,9 @@ export const AiCommandBar: React.FC = () => {
       } else {
         throw new Error("L'exécution n'a pas renvoyé un résultat positif.");
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      setErrorMessage(err.message || "Une erreur est survenue lors de l'exécution.");
+      setErrorMessage((err as Error).message || "Une erreur est survenue lors de l'exécution.");
     } finally {
       setIsLoading(false);
     }

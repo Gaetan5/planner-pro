@@ -158,6 +158,45 @@ export class IntegrationService {
   }
 
   /**
+   * Retourne l'état de statut détaillé de chaque intégration d'un workspace.
+   */
+  async getIntegrationsStatus(workspaceId: string) {
+    const integrations = await this.prisma.integration.findMany({
+      where: { workspaceId },
+    });
+
+    const isProduction = process.env.NODE_ENV === 'production';
+
+    return integrations.map((integration) => {
+      let status = 'CONNECTED';
+
+      if (!integration.active) {
+        status = 'DISABLED';
+      } else if (integration.type === 'GOOGLE_CALENDAR' || integration.type === 'OUTLOOK') {
+        const hasCredentials =
+          integration.type === 'GOOGLE_CALENDAR'
+            ? process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+            : process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET;
+
+        if (!hasCredentials && !isProduction) {
+          status = 'DEMO';
+        } else if (integration.expiresAt && new Date(integration.expiresAt) < new Date()) {
+          status = 'EXPIRED';
+        }
+      }
+
+      return {
+        id: integration.id,
+        type: integration.type,
+        name: integration.name,
+        active: integration.active,
+        status,
+        expiresAt: integration.expiresAt,
+      };
+    });
+  }
+
+  /**
    * Masque l'URL ou le jeton pour ne pas l'exposer entièrement dans le frontend.
    */
   private maskSensitiveUrl(url: string): string {

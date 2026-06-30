@@ -14,6 +14,14 @@ export interface CalendarConflict {
   message: string;
 }
 
+export interface CalendarEvent {
+  title: string;
+  start: Date;
+  end: Date;
+  userEmail: string;
+  userName: string;
+}
+
 @Injectable()
 export class CalendarSyncService {
   private readonly logger = new Logger(CalendarSyncService.name);
@@ -21,7 +29,7 @@ export class CalendarSyncService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Simule l'exportation des TimeBlocks Planner Pro vers un calendrier tiers.
+   * Exporte réellement ou simule l'exportation des TimeBlocks Planner Pro vers un calendrier tiers.
    */
   async exportToCalendar(workspaceId: string, integrationId: string) {
     this.logger.log(`Exportation des créneaux vers l'intégration de calendrier ${integrationId}`);
@@ -47,8 +55,89 @@ export class CalendarSyncService {
       },
     });
 
-    this.logger.log(`Exporté avec succès ${timeBlocks.length} blocs horaires.`);
-    return { success: true, exportedCount: timeBlocks.length };
+    let token = 'mock-token';
+    if (integration.accessToken) {
+      if (integration.expiresAt && new Date(integration.expiresAt) < new Date()) {
+        token = await this.refreshAccessToken(integration.id);
+      } else {
+        token = decrypt(integration.accessToken);
+      }
+    }
+
+    const hasCredentials =
+      integration.type === 'GOOGLE_CALENDAR'
+        ? process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+        : process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET;
+
+    let exportedRealCount = 0;
+
+    if (hasCredentials && process.env.NODE_ENV !== 'test' && integration.accessToken) {
+      for (const block of timeBlocks) {
+        try {
+          const provider = integration.type;
+          const calendarId = integration.calendarId || 'primary';
+          const url =
+            provider === 'GOOGLE_CALENDAR'
+              ? `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(
+                  calendarId,
+                )}/events`
+              : `https://graph.microsoft.com/v1.0/me/calendars/${encodeURIComponent(
+                  calendarId === 'calendar' ? 'primary' : calendarId,
+                )}/events`;
+
+          const body =
+            provider === 'GOOGLE_CALENDAR'
+              ? {
+                  summary: block.task.title,
+                  description: block.task.description || '',
+                  start: { dateTime: new Date(block.startTime).toISOString() },
+                  end: { dateTime: new Date(block.endTime).toISOString() },
+                }
+              : {
+                  subject: block.task.title,
+                  body: {
+                    contentType: 'text',
+                    content: block.task.description || '',
+                  },
+                  start: {
+                    dateTime: new Date(block.startTime).toISOString().split('.')[0],
+                    timeZone: 'UTC',
+                  },
+                  end: {
+                    dateTime: new Date(block.endTime).toISOString().split('.')[0],
+                    timeZone: 'UTC',
+                  },
+                };
+
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(body),
+          });
+
+          if (res.ok) {
+            exportedRealCount++;
+          } else {
+            const errText = await res.text();
+            this.logger.warn(
+              `Impossible d'exporter le TimeBlock ${block.id} vers ${provider}: ${res.statusText}. Détails : ${errText}`,
+            );
+          }
+        } catch (err: unknown) {
+          this.logger.error(
+            `Erreur d'exportation REST : ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+    }
+
+    this.logger.log(
+      `Exporté avec succès ${timeBlocks.length} blocs horaires (réels : ${exportedRealCount}).`,
+    );
+    return { success: true, exportedCount: timeBlocks.length, exportedRealCount };
   }
 
   /**
@@ -124,8 +213,36 @@ export class CalendarSyncService {
           targetName,
         );
         externalEvents.push(...fetchedEvents);
+      } else if (integration.accessToken) {
+        const hasCredentials =
+          integration.type === 'GOOGLE_CALENDAR'
+            ? process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+            : process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET;
+
+        if (hasCredentials && process.env.NODE_ENV !== 'test') {
+          let token = decrypt(integration.accessToken);
+          if (integration.expiresAt && new Date(integration.expiresAt) < new Date()) {
+            token = await this.refreshAccessToken(integration.id);
+          }
+          const fetchedEvents = await this.fetchOAuthCalendarEvents(
+            integration.type as 'GOOGLE_CALENDAR' | 'OUTLOOK',
+            token,
+            integration.calendarId || 'primary',
+          );
+          externalEvents.push(
+            ...fetchedEvents.map((e) => ({
+              ...e,
+              userEmail: targetEmail,
+              userName: targetName,
+            })),
+          );
+        } else {
+          // Aucun URL configuré -> On utilise le simulateur dynamique en temps réel
+          const simEvents = this.getSimulatedEvents(targetEmail, targetName);
+          externalEvents.push(...simEvents);
+        }
       } else {
-        // Aucun URL configuré -> On utilise le simulateur dynamique en temps réel (incluant le cas historique 2026-06-01 pour les tests Jest)
+        // Aucun URL ni token -> On utilise le simulateur dynamique en temps réel
         const simEvents = this.getSimulatedEvents(targetEmail, targetName);
         externalEvents.push(...simEvents);
       }
@@ -181,7 +298,7 @@ export class CalendarSyncService {
     url: string,
     userEmail: string,
     userName: string,
-  ): Promise<any[]> {
+  ): Promise<CalendarEvent[]> {
     try {
       this.logger.log(`Fetching external calendar from URL: ${url}`);
       const response = await fetch(url);
@@ -204,7 +321,7 @@ export class CalendarSyncService {
             userEmail: e.userEmail || userEmail,
             userName: e.userName || userName,
           }));
-        } catch (e) {
+        } catch {
           this.logger.warn(`Failed to parse response as JSON, trying ICS parser.`);
         }
       }
@@ -216,7 +333,7 @@ export class CalendarSyncService {
 
       this.logger.warn(`Unsupported calendar format from URL: ${url}`);
       return [];
-    } catch (err: any) {
+    } catch (err: unknown) {
       this.logger.error(
         `Error fetching external calendar from ${url}: ${err instanceof Error ? err.message : String(err)}`,
       );
@@ -227,8 +344,8 @@ export class CalendarSyncService {
   /**
    * Parser iCal / ICS custom robuste
    */
-  private parseICS(icsText: string, userEmail: string, userName: string): any[] {
-    const events: any[] = [];
+  private parseICS(icsText: string, userEmail: string, userName: string): CalendarEvent[] {
+    const events: CalendarEvent[] = [];
     const vevents = icsText.split('BEGIN:VEVENT');
 
     for (let i = 1; i < vevents.length; i++) {
@@ -278,10 +395,79 @@ export class CalendarSyncService {
   }
 
   /**
+   * Récupère les événements réels via API REST Google/Microsoft en utilisant le token OAuth2.
+   */
+  private async fetchOAuthCalendarEvents(
+    provider: 'GOOGLE_CALENDAR' | 'OUTLOOK',
+    accessToken: string,
+    calendarId: string,
+  ): Promise<CalendarEvent[]> {
+    try {
+      const url =
+        provider === 'GOOGLE_CALENDAR'
+          ? `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(
+              calendarId,
+            )}/events?singleEvents=true&maxResults=100`
+          : `https://graph.microsoft.com/v1.0/me/calendars/${encodeURIComponent(
+              calendarId === 'calendar' ? 'primary' : calendarId,
+            )}/events?$top=100`;
+
+      const response = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        this.logger.warn(
+          `Échec de récupération des événements via API OAuth ${provider} : ${response.statusText}. Détails : ${errText}`,
+        );
+        return [];
+      }
+
+      const data = await response.json();
+      if (provider === 'GOOGLE_CALENDAR') {
+        const items = data.items || [];
+        return items.map(
+          (item: {
+            summary?: string;
+            start?: { dateTime?: string; date?: string };
+            end?: { dateTime?: string; date?: string };
+          }) => ({
+            title: item.summary || 'Événement Externe Google',
+            start: new Date(item.start?.dateTime || item.start?.date || ''),
+            end: new Date(item.end?.dateTime || item.end?.date || ''),
+          }),
+        );
+      } else {
+        const value = data.value || [];
+        return value.map(
+          (item: {
+            subject?: string;
+            start?: { dateTime?: string };
+            end?: { dateTime?: string };
+          }) => ({
+            title: item.subject || 'Événement Externe Outlook',
+            start: new Date(item.start?.dateTime ? item.start.dateTime + 'Z' : ''),
+            end: new Date(item.end?.dateTime ? item.end.dateTime + 'Z' : ''),
+          }),
+        );
+      }
+    } catch (err: unknown) {
+      this.logger.error(
+        `Erreur lors de l'appel d'API calendrier OAuth : ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return [];
+    }
+  }
+
+  /**
    * Générateur de calendrier externe simulé en temps réel (maintient la compatibilité des tests existants et génère des cas dynamiques)
    */
-  private getSimulatedEvents(userEmail: string, userName: string): any[] {
-    const events: any[] = [];
+  private getSimulatedEvents(userEmail: string, userName: string): CalendarEvent[] {
+    const events: CalendarEvent[] = [];
     const now = new Date();
     const todayStr = now.toISOString().split('T')[0];
 
@@ -360,7 +546,9 @@ export class CalendarSyncService {
       const clientId = process.env.MICROSOFT_CLIENT_ID || 'mock-microsoft-client-id';
       return `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(
         redirectUri,
-      )}&state=${encodeURIComponent(workspaceId + ':OUTLOOK')}`;
+      )}&response_type=code&scope=${encodeURIComponent(
+        'offline_access Calendars.ReadWrite',
+      )}&response_mode=query&state=${encodeURIComponent(workspaceId + ':OUTLOOK')}`;
     }
   }
 
@@ -381,11 +569,17 @@ export class CalendarSyncService {
     let refreshToken = 'mock-refresh-token-' + Math.random().toString(36).substring(2);
     let expiresInSeconds = 3600;
 
-    // Simulation d'un appel API réel si configuré, sinon mode mock robuste
+    const isProduction = process.env.NODE_ENV === 'production';
     const hasCredentials =
       provider === 'GOOGLE_CALENDAR'
         ? process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
         : process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET;
+
+    if (isProduction && !hasCredentials) {
+      throw new Error(
+        `Identifiants OAuth manquants pour le fournisseur ${provider} en production.`,
+      );
+    }
 
     if (hasCredentials && process.env.NODE_ENV !== 'test') {
       try {
@@ -421,14 +615,22 @@ export class CalendarSyncService {
           expiresInSeconds = tokens.expires_in || expiresInSeconds;
         } else {
           const errText = await res.text();
-          this.logger.warn(
-            `Échec d'échange de token OAuth avec le fournisseur externe. Utilisation du mock en fallback. Détails : ${errText}`,
+          this.logger.error(
+            `Échec d'échange de token OAuth avec le fournisseur externe. Détails : ${errText}`,
           );
+          if (isProduction) {
+            throw new Error(
+              `Échec d'authentification auprès du fournisseur de calendrier ${provider}.`,
+            );
+          }
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         this.logger.error(
-          `Erreur HTTP lors de l'échange OAuth : ${err instanceof Error ? err.message : String(err)}. Repli sur mock.`,
+          `Erreur HTTP lors de l'échange OAuth : ${err instanceof Error ? err.message : String(err)}`,
         );
+        if (isProduction) {
+          throw err;
+        }
       }
     }
 
@@ -490,11 +692,18 @@ export class CalendarSyncService {
     let newRefreshToken = decryptedRefresh; // Garder l'ancien si non renouvelé
     let expiresInSeconds = 3600;
 
+    const isProduction = process.env.NODE_ENV === 'production';
     const provider = integration.type as 'GOOGLE_CALENDAR' | 'OUTLOOK';
     const hasCredentials =
       provider === 'GOOGLE_CALENDAR'
         ? process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
         : process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET;
+
+    if (isProduction && !hasCredentials) {
+      throw new Error(
+        `Identifiants OAuth manquants pour le rafraîchissement ${provider} en production.`,
+      );
+    }
 
     if (hasCredentials && process.env.NODE_ENV !== 'test') {
       try {
@@ -528,12 +737,19 @@ export class CalendarSyncService {
           newRefreshToken = tokens.refresh_token || newRefreshToken;
           expiresInSeconds = tokens.expires_in || expiresInSeconds;
         } else {
-          this.logger.warn(`Échec de rafraîchissement du jeton OAuth. Fallback sur mock.`);
+          const errText = await res.text();
+          this.logger.error(`Échec de rafraîchissement du jeton OAuth. Détails : ${errText}`);
+          if (isProduction) {
+            throw new Error(`Impossible de rafraîchir le jeton d'accès pour ${provider}.`);
+          }
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         this.logger.error(
-          `Erreur HTTP lors du rafraîchissement OAuth : ${err instanceof Error ? err.message : String(err)}. Repli sur mock.`,
+          `Erreur HTTP lors du rafraîchissement OAuth : ${err instanceof Error ? err.message : String(err)}`,
         );
+        if (isProduction) {
+          throw err;
+        }
       }
     }
 
@@ -583,12 +799,29 @@ export class CalendarSyncService {
       }
 
       // 2. Récupérer les événements externes
-      let events: any[] = [];
+      let events: CalendarEvent[];
       if (integration.url) {
         // Si synchro par URL publique (iCal/ICS)
         events = await this.fetchExternalEvents(integration.url, 'alice@test.com', 'Alice');
+      } else if (integration.accessToken) {
+        // Si OAuth2
+        const hasCredentials =
+          integration.type === 'GOOGLE_CALENDAR'
+            ? process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+            : process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET;
+
+        if (hasCredentials && process.env.NODE_ENV !== 'test') {
+          events = await this.fetchOAuthCalendarEvents(
+            integration.type as 'GOOGLE_CALENDAR' | 'OUTLOOK',
+            token,
+            integration.calendarId || 'primary',
+          );
+        } else {
+          // Fallback pour le dev / test local
+          events = this.getSimulatedEvents('alice@test.com', 'Alice');
+        }
       } else {
-        // Si OAuth2 (simulation de récupération de l'agenda principal)
+        // Simulation par défaut
         events = this.getSimulatedEvents('alice@test.com', 'Alice');
       }
 

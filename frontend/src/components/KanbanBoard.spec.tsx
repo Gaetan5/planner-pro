@@ -1,8 +1,7 @@
 import { render, screen, fireEvent } from '@testing-library/react';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { KanbanBoard } from './KanbanBoard';
 import { AppProvider } from '../context/AppContext';
-import React from 'react';
 
 describe('KanbanBoard', () => {
   it('doit rendre le titre du projet', () => {
@@ -20,10 +19,10 @@ describe('KanbanBoard', () => {
         <KanbanBoard />
       </AppProvider>,
     );
-    
+
     const addButton = screen.getByText(/Ajouter une tâche/i);
     fireEvent.click(addButton);
-    
+
     expect(screen.getByText('Nouvelle Tâche')).toBeInTheDocument();
   });
 });

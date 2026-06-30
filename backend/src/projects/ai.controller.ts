@@ -13,11 +13,20 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt.guard';
-import { AiService } from './ai.service';
+import { AiService, ResolvedAiAction } from './ai.service';
 import { CopilotService } from './copilot.service';
 import { AiCommandDto } from './dto/ai-command.dto';
 import { TrackingGateway } from '../tracking/tracking.gateway';
+import { PrismaService } from '../prisma/prisma.service';
+import { TASK_INCLUDE } from './tasks.service';
+
+interface AuthenticatedRequest extends Request {
+  user: {
+    id: string;
+  };
+}
 
 @Controller('projects/ai')
 @UseGuards(JwtAuthGuard)
@@ -26,6 +35,7 @@ export class AiController {
     private readonly aiService: AiService,
     private readonly copilotService: CopilotService,
     private readonly trackingGateway: TrackingGateway,
+    private readonly prisma: PrismaService,
   ) {}
 
   /**
@@ -33,7 +43,7 @@ export class AiController {
    */
   @Post('command')
   @HttpCode(HttpStatus.OK)
-  async analyzeCommand(@Req() req: any, @Body() body: AiCommandDto) {
+  async analyzeCommand(@Req() req: AuthenticatedRequest, @Body() body: AiCommandDto) {
     return this.aiService.analyzeCommand(
       req.user.id,
       body.workspaceId,
@@ -49,7 +59,8 @@ export class AiController {
   @UseInterceptors(FileInterceptor('file'))
   @HttpCode(HttpStatus.OK)
   async analyzeVoice(
-    @Req() req: any,
+    @Req() req: AuthenticatedRequest,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     @UploadedFile() file: any,
     @Body('workspaceId') workspaceId: string,
     @Body('projectId') projectId?: string,
@@ -75,8 +86,13 @@ export class AiController {
   @Post('execute')
   @HttpCode(HttpStatus.OK)
   async executeActions(
-    @Req() req: any,
-    @Body() body: { workspaceId: string; projectId?: string; actions: any[] },
+    @Req() req: AuthenticatedRequest,
+    @Body()
+    body: {
+      workspaceId: string;
+      projectId?: string;
+      actions: ResolvedAiAction[];
+    },
   ) {
     const result = await this.aiService.executeActions(
       req.user.id,
@@ -87,16 +103,26 @@ export class AiController {
 
     // Diffuser des notifications WebSocket pour rafraîchir en temps réel chez les autres clients connectés
     if (result.success && this.trackingGateway.server) {
+      const room = `workspace:${body.workspaceId}`;
       // Émettre un signal général de mise à jour du projet/workspace
-      this.trackingGateway.server.emit('project-data-updated', {
+      this.trackingGateway.server.to(room).emit('project-data-updated', {
         workspaceId: body.workspaceId,
         projectId: body.projectId || null,
       });
 
       // Diffuser individuellement pour les tâches modifiées si nécessaire
       for (const action of body.actions) {
-        if (action.taskId) {
-          this.trackingGateway.server.emit('task-status-changed', { taskId: action.taskId });
+        if (action.taskId && typeof action.taskId === 'string') {
+          const dbTask = await this.prisma.task.findUnique({
+            where: { id: action.taskId },
+            include: TASK_INCLUDE,
+          });
+          if (dbTask) {
+            this.trackingGateway.server.to(room).emit('task-status-changed', {
+              taskId: action.taskId,
+              task: dbTask,
+            });
+          }
         }
       }
     }
@@ -111,7 +137,8 @@ export class AiController {
   @UseInterceptors(FileInterceptor('file'))
   @HttpCode(HttpStatus.OK)
   async analyzeVision(
-    @Req() req: any,
+    @Req() req: AuthenticatedRequest,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     @UploadedFile() file: any,
     @Body('workspaceId') workspaceId: string,
     @Body('projectId') projectId?: string,
@@ -147,7 +174,7 @@ export class AiController {
    */
   @Get('copilot/briefing')
   async getCopilotBriefing(
-    @Req() req: any,
+    @Req() req: AuthenticatedRequest,
     @Query('workspaceId') workspaceId: string,
     @Query('isMock') isMock?: string,
   ) {

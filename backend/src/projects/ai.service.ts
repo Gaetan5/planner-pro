@@ -114,7 +114,7 @@ export class AiService {
   ): Promise<ResolvedAiAction[]> {
     this.logger.log(`Analyse d'image de projet demandée par l'utilisateur ${userId}`);
 
-    let parsedActions: ParsedAiAction[] = [];
+    let parsedActions: ParsedAiAction[];
 
     if (isMock || !this.geminiService.isAvailable()) {
       this.logger.log(
@@ -371,7 +371,7 @@ export class AiService {
   ): Promise<{ transcription: string; actions: ResolvedAiAction[] }> {
     this.logger.log(`Transcription et analyse vocale demandées par l'utilisateur ${userId}`);
 
-    let transcription = '';
+    let transcription: string;
 
     // Bypass pour le mode test/mock ou si l'API n'est pas configurée
     if (isMock || !this.geminiService.isAvailable()) {
@@ -536,9 +536,7 @@ export class AiService {
     if (match) return match;
 
     // 2. Recherche par correspondance sur le nom complet
-    match = members.find(
-      (m) => m.user.name && this.normalizeString(m.user.name).includes(search),
-    );
+    match = members.find((m) => m.user.name && this.normalizeString(m.user.name).includes(search));
     if (match) return match;
 
     // 3. Recherche par préfixe d'email
