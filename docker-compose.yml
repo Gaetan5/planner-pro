@@ -18,7 +18,7 @@ services:
     container_name: planner_cache
     restart: always
     ports:
-      - '6379:6379'
+      - '6385:6379'
 
   backend:
     build:
@@ -27,7 +27,7 @@ services:
     container_name: planner_backend
     restart: always
     ports:
-      - '3002:3001'
+      - '3003:3001'
     environment:
       DATABASE_URL: mysql://planner_user:planner_password@db:3306/planner_pro
       REDIS_HOST: cache
@@ -36,6 +36,7 @@ services:
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
       JWT_SECRET: ${JWT_SECRET}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      CORS_ORIGINS: http://localhost:3004,http://localhost:3000
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -53,9 +54,9 @@ services:
     container_name: planner_frontend
     restart: always
     ports:
-      - '3000:3000'
+      - '3004:3000'
     environment:
-      VITE_API_URL: http://localhost:3002
+      VITE_API_URL: http://localhost:3003
     volumes:
       - ./frontend:/home/node/app/frontend
       - /home/node/app/frontend/node_modules

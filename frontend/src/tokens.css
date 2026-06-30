@@ -1,0 +1,28 @@
+:root {
+  /* Couleurs de base */
+  --color-primary: #3b82f6;
+  --color-primary-dark: #1d4ed8;
+  --color-bg-page: #f9fafb;
+  --color-bg-card: #ffffff;
+  --color-text-main: #111827;
+  --color-text-muted: #6b7280;
+  --color-border: #e5e7eb;
+
+  /* Espacements */
+  --space-xs: 0.25rem;
+  --space-sm: 0.5rem;
+  --space-md: 1rem;
+  --space-lg: 1.5rem;
+  --space-xl: 2rem;
+
+  /* Typographie */
+  --font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.25rem;
+
+  /* Bordures */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+}

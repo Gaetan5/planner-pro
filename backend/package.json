@@ -4,11 +4,13 @@
   "description": "",
   "private": true,
   "license": "UNLICENSED",
+  "prisma": {
+    "schema": "prisma/schema"
+  },
   "scripts": {
-    "build": "pnpm prisma:import && nest build",
-    "prisma:import": "prisma-import -f -s \"./prisma/schema/*.prisma\" -o ./prisma/schema.prisma",
+    "build": "nest build",
     "start": "nest start",
-    "start:dev": "pnpm prisma:import && nest start --watch",
+    "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
     "test": "jest"
   },
