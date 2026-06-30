@@ -9,9 +9,14 @@ async function bootstrap() {
   app.use(helmet());
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }));
   app.use(cookieParser());
-  const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:3000').split(',');
+  const allowedOrigins = (process.env.CORS_ORIGINS || '').split(',').filter(Boolean);
+  
+  if (process.env.NODE_ENV === 'production' && allowedOrigins.length === 0) {
+    throw new Error('La variable d\'environnement CORS_ORIGINS doit être définie en production.');
+  }
+
   app.enableCors({
-    origin: allowedOrigins,
+    origin: allowedOrigins.length > 0 ? allowedOrigins : 'http://localhost:3000',
     credentials: true,
   });
   const port = process.env.PORT || 3001;
