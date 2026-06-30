@@ -63,7 +63,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  transition: background var(--transition-fast), color var(--transition-fast);
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast);
 }
 
 .notepad-note-item:hover {
@@ -90,7 +92,9 @@
   color: var(--text-muted);
   cursor: pointer;
   opacity: 0.5;
-  transition: opacity var(--transition-fast), color var(--transition-fast);
+  transition:
+    opacity var(--transition-fast),
+    color var(--transition-fast);
   display: inline-flex;
   align-items: center;
 }
@@ -196,8 +200,12 @@
 }
 
 @keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* Responsive */

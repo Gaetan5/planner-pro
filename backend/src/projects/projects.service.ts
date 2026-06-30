@@ -9,7 +9,16 @@ import { MilestonesService } from './milestones.service';
 import { ResourcesService } from './resources.service';
 import { FinancesService } from './finances.service';
 import { ProjectPermissionsService } from './project-permissions.service';
-import { Prisma, TaskPriority, ProjectStatus, DeliverableStatus, DependencyType, DeliveryStatus, WorkspaceRole, TaskStatus } from '@prisma/client';
+import {
+  Prisma,
+  TaskPriority,
+  ProjectStatus,
+  DeliverableStatus,
+  DependencyType,
+  DeliveryStatus,
+  WorkspaceRole,
+  TaskStatus,
+} from '@prisma/client';
 import * as crypto from 'crypto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { CreateTaskDto } from './dto/create-task.dto';
@@ -17,10 +26,10 @@ import { UpdateProjectDto } from './dto/update-project.dto';
 
 /**
  * ProjectsService — Façade d'Orchestration
- * 
+ *
  * Responsabilités propres : Workspace, Memberships, Projects CRUD, GitHub Webhooks.
  * Délègue aux sous-services spécialisés pour tâches, dépendances, timeblocks, jalons, ressources, finances.
- * 
+ *
  * Expose des méthodes de délégation pour compatibilité ascendante avec le contrôleur et l'AiService.
  */
 @Injectable()
@@ -86,7 +95,11 @@ export class ProjectsService {
     return membership;
   }
 
-  private async assertWorkspaceRole(workspaceId: string, userId: string, allowedRoles: WorkspaceRole[]) {
+  private async assertWorkspaceRole(
+    workspaceId: string,
+    userId: string,
+    allowedRoles: WorkspaceRole[],
+  ) {
     const membership = await this.assertWorkspaceMember(workspaceId, userId);
     if (!allowedRoles.includes(membership.role)) {
       throw new ForbiddenException('Unauthorized: insufficient workspace permissions');
@@ -215,7 +228,12 @@ export class ProjectsService {
 
   async getProject(projectId: string, userId: string) {
     // Vérifier l'accès au projet
-    await this.projectPermissionsService.assertProjectRole(projectId, userId, ['MANAGER', 'CONTRIBUTOR', 'COMMENTER', 'CLIENT']);
+    await this.projectPermissionsService.assertProjectRole(projectId, userId, [
+      'MANAGER',
+      'CONTRIBUTOR',
+      'COMMENTER',
+      'CLIENT',
+    ]);
 
     return this.prisma.project.findFirst({
       where: {
@@ -243,7 +261,10 @@ export class ProjectsService {
   }
 
   async updateProject(projectId: string, userId: string, data: UpdateProjectDto) {
-    await this.projectPermissionsService.assertProjectRole(projectId, userId, ['MANAGER', 'CONTRIBUTOR']);
+    await this.projectPermissionsService.assertProjectRole(projectId, userId, [
+      'MANAGER',
+      'CONTRIBUTOR',
+    ]);
 
     const oldProject = await this.prisma.project.findUnique({ where: { id: projectId } });
 
@@ -260,13 +281,10 @@ export class ProjectsService {
       },
     });
 
-    await this.projectPermissionsService.logAction(
-      userId,
-      'PROJECT_UPDATE',
-      'Project',
-      projectId,
-      { before: oldProject, after: updated },
-    );
+    await this.projectPermissionsService.logAction(userId, 'PROJECT_UPDATE', 'Project', projectId, {
+      before: oldProject,
+      after: updated,
+    });
 
     return updated;
   }
@@ -284,13 +302,9 @@ export class ProjectsService {
       data: { deletedAt: new Date() },
     });
 
-    await this.projectPermissionsService.logAction(
-      userId,
-      'PROJECT_DELETE',
-      'Project',
-      projectId,
-      { deleted },
-    );
+    await this.projectPermissionsService.logAction(userId, 'PROJECT_DELETE', 'Project', projectId, {
+      deleted,
+    });
 
     return deleted;
   }
@@ -313,7 +327,7 @@ export class ProjectsService {
       const digest = 'sha256=' + hmac.update(bodyStr).digest('hex');
       return crypto.timingSafeEqual(
         new Uint8Array(Buffer.from(signature)),
-        new Uint8Array(Buffer.from(digest))
+        new Uint8Array(Buffer.from(digest)),
       );
     } catch (e) {
       return false;
@@ -322,7 +336,8 @@ export class ProjectsService {
 
   private extractTaskIdsFromText(text: string): string[] {
     if (!text) return [];
-    const regex = /(?:fix|fixes|fixed|close|closes|closed|resolve|resolves|resolved)\s+#([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/gi;
+    const regex =
+      /(?:fix|fixes|fixed|close|closes|closed|resolve|resolves|resolved)\s+#([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/gi;
     const taskIds: string[] = [];
     let match;
     while ((match = regex.exec(text)) !== null) {
@@ -343,7 +358,7 @@ export class ProjectsService {
       if (pr.merged === true) {
         const textToSearch = `${pr.title || ''} ${pr.body || ''}`;
         const ids = this.extractTaskIdsFromText(textToSearch);
-        ids.forEach(id => taskIdsToClose.add(id));
+        ids.forEach((id) => taskIdsToClose.add(id));
       }
     }
 
@@ -351,7 +366,7 @@ export class ProjectsService {
       for (const commit of payload.commits) {
         if (commit.message) {
           const ids = this.extractTaskIdsFromText(commit.message);
-          ids.forEach(id => taskIdsToClose.add(id));
+          ids.forEach((id) => taskIdsToClose.add(id));
         }
       }
     }
@@ -372,7 +387,14 @@ export class ProjectsService {
   // ═══════════════════════════════════════════════════════════════════
 
   // --- Tasks ---
-  createTask(projectId: string, userId: string, title: string, description?: string, priority?: TaskPriority, options?: any) {
+  createTask(
+    projectId: string,
+    userId: string,
+    title: string,
+    description?: string,
+    priority?: TaskPriority,
+    options?: any,
+  ) {
     return this.tasksService.createTask(projectId, userId, title, description, priority, options);
   }
   getTasks(projectId: string, userId: string) {
@@ -389,7 +411,12 @@ export class ProjectsService {
   }
 
   // --- Dependencies ---
-  addTaskDependency(taskId: string, userId: string, dependsOnTaskId: string, type?: DependencyType) {
+  addTaskDependency(
+    taskId: string,
+    userId: string,
+    dependsOnTaskId: string,
+    type?: DependencyType,
+  ) {
     return this.dependenciesService.addTaskDependency(taskId, userId, dependsOnTaskId, type);
   }
   removeTaskDependency(taskId: string, userId: string, dependsOnTaskId: string) {
@@ -411,14 +438,34 @@ export class ProjectsService {
   }
 
   // --- Milestones & Governance ---
-  createMilestone(projectId: string, userId: string, name: string, description?: string, dueDate?: string) {
+  createMilestone(
+    projectId: string,
+    userId: string,
+    name: string,
+    description?: string,
+    dueDate?: string,
+  ) {
     return this.milestonesService.createMilestone(projectId, userId, name, description, dueDate);
   }
   completeMilestone(milestoneId: string, userId: string) {
     return this.milestonesService.completeMilestone(milestoneId, userId);
   }
-  createDeliverable(projectId: string, userId: string, title: string, description?: string, status?: DeliverableStatus, dueDate?: string) {
-    return this.milestonesService.createDeliverable(projectId, userId, title, description, status, dueDate);
+  createDeliverable(
+    projectId: string,
+    userId: string,
+    title: string,
+    description?: string,
+    status?: DeliverableStatus,
+    dueDate?: string,
+  ) {
+    return this.milestonesService.createDeliverable(
+      projectId,
+      userId,
+      title,
+      description,
+      status,
+      dueDate,
+    );
   }
   updateDeliverableStatus(deliverableId: string, userId: string, status: DeliverableStatus) {
     return this.milestonesService.updateDeliverableStatus(deliverableId, userId, status);
@@ -440,17 +487,55 @@ export class ProjectsService {
   getResourceCapacityReport(userId: string, workspaceId?: string) {
     return this.resourcesService.getResourceCapacityReport(userId, workspaceId);
   }
-  updateResourceProfile(actingUserId: string, memberUserId: string, data: any, workspaceId?: string) {
-    return this.resourcesService.updateResourceProfile(actingUserId, memberUserId, data, workspaceId);
+  updateResourceProfile(
+    actingUserId: string,
+    memberUserId: string,
+    data: any,
+    workspaceId?: string,
+  ) {
+    return this.resourcesService.updateResourceProfile(
+      actingUserId,
+      memberUserId,
+      data,
+      workspaceId,
+    );
   }
-  createResourceAllocation(projectId: string, actingUserId: string, userId: string, allocationPercent: number, roleLabel?: string, startDate?: string, endDate?: string) {
-    return this.resourcesService.createResourceAllocation(projectId, actingUserId, userId, allocationPercent, roleLabel, startDate, endDate);
+  createResourceAllocation(
+    projectId: string,
+    actingUserId: string,
+    userId: string,
+    allocationPercent: number,
+    roleLabel?: string,
+    startDate?: string,
+    endDate?: string,
+  ) {
+    return this.resourcesService.createResourceAllocation(
+      projectId,
+      actingUserId,
+      userId,
+      allocationPercent,
+      roleLabel,
+      startDate,
+      endDate,
+    );
   }
   optimizeWorkspaceResources(workspaceId: string, userId: string) {
     return this.resourcesService.optimizeWorkspaceResources(workspaceId, userId);
   }
-  createResourceLeave(actingUserId: string, userId: string, startDate: string, endDate: string, reason?: string) {
-    return this.resourcesService.createResourceLeave(actingUserId, userId, startDate, endDate, reason);
+  createResourceLeave(
+    actingUserId: string,
+    userId: string,
+    startDate: string,
+    endDate: string,
+    reason?: string,
+  ) {
+    return this.resourcesService.createResourceLeave(
+      actingUserId,
+      userId,
+      startDate,
+      endDate,
+      reason,
+    );
   }
   getResourceLeaves(actingUserId: string, userId: string) {
     return this.resourcesService.getResourceLeaves(actingUserId, userId);

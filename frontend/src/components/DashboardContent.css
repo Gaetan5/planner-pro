@@ -79,7 +79,9 @@
   cursor: pointer;
   font-weight: 600;
   font-family: var(--font-primary);
-  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+  transition:
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast);
 }
 
 .timer-stop-btn:hover {

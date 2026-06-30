@@ -38,7 +38,7 @@ services:
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       CORS_ORIGINS: http://localhost:3004,http://localhost:3000
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - 'host.docker.internal:host-gateway'
     volumes:
       - ./backend:/home/node/app/backend
       - /home/node/app/backend/node_modules
@@ -63,7 +63,6 @@ services:
       - /home/node/app/node_modules
     depends_on:
       - backend
-
 
 volumes:
   mysql_data:

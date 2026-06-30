@@ -1,89 +1,50 @@
-# Plan d'implémentation — Extension Professionnelle & Sécurisation de Planner Pro
+# 🛠️ Plan d'Implémentation — Synchronisation Kanban / Gantt Réactive (Méthode OODA)
 
-Ce document détaille le plan d'action pour sécuriser les logs de tracking et intégrer l'ensemble des modules métiers professionnels (phases 1 à 4) dans l'interface utilisateur de Planner Pro.
+> **Posture** : Lead Software Architect / Senior Full-Stack Engineer  
+> **Date** : 30 juin 2026  
+> **Objectif** : Implémenter les règles d'auto-synchronisation intelligente et réactive entre le Kanban (statuts fonctionnels) et le Gantt (planification temporelle globale).
 
-## User Review Required
-
-> [!IMPORTANT]
-> Les modifications proposées ajoutent deux nouveaux onglets dans le Header principal de l'application : **Gouvernance** (pour les jalons, livrables, dépendances et livraisons) et **Ressources** (pour les membres, profils de ressources, capacités de charge et allocations de projets).
-
-> [!WARNING]
-> La correction de sécurité sur le endpoint `GET /tracking/logs/:taskId` restreindra l'accès aux logs uniquement au créateur de la tâche ou aux membres du workspace lié.
+---
 
 ## Proposed Changes
 
----
+### [Backend]
 
-### [Component Backend] - Sécurisation du Time Tracking
+#### [MODIFY] [tasks.service.ts](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/projects/tasks.service.ts)
 
-#### [MODIFY] [tracking.controller.ts](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/tracking/tracking.controller.ts)
-- Ajouter l'injection de `@Req() req: any` dans l'endpoint `getTimeLogsForTask(@Param('taskId') taskId: string)` pour pouvoir passer `req.user.id`.
+- **Règle 1 (Kanban ➔ Gantt)** :
+  Dans la méthode `updateTask` (ou juste avant de sauvegarder les modifications dans la transaction Prisma), si le nouveau statut de la tâche passe à `IN_PROGRESS` (En cours) et que la tâche ne possède pas encore de dates globales de planification (`startDate` ou `dueDate`), affecter automatiquement :
+  - `startDate` = date/heure actuelle.
+  - `dueDate` = date/heure actuelle + 2 jours (48 heures).
 
-#### [MODIFY] [tracking.service.ts](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/tracking/tracking.service.ts)
-- Mettre à jour la méthode `startTracking(userId, taskId)` pour valider que la tâche appartient à l'utilisateur ou qu'il fait partie du workspace du projet de la tâche.
-- Mettre à jour la méthode `getTimeLogsForTask(userId, taskId)` pour ajouter la même clause de garde d'autorisation (fail-fast avec `ForbiddenException` ou `BadRequestException` si non autorisé).
+- **Règle 2 (Gantt ➔ Kanban)** :
+  Dans la méthode `updateTask`, si la tâche reçoit ou modifie sa date globale de début (`startDate`) pour une date égale ou antérieure à la date actuelle (aujourd'hui ou dans le passé), et que son statut est encore à l'état `TODO`, basculer automatiquement son statut à `IN_PROGRESS`.
 
----
+- **Propagation** :
+  Veiller à ce que ces dates auto-calculées ou statuts modifiés soient correctement propagés en cascade vers les tâches dépendantes via la méthode existante `propagateScheduleUpdates`.
 
-### [Component Frontend] - Contexte & Actions Globales
+#### [MODIFY] [tasks.service.spec.ts](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/projects/tasks.service.spec.ts) (ou les tests unitaires associés)
 
-#### [MODIFY] [AppContext.tsx](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/context/AppContext.tsx)
-- Mettre à jour l'interface `AppContextType` pour inclure :
-  - Les états : `workspaces` (tableau) et `resourceCapacity` (tableau).
-  - Les fonctions : `createMilestone`, `completeMilestone`, `createDeliverable`, `updateDeliverableStatus`, `createDelivery`, `updateDeliveryStatus`, `addTaskDependency`, `removeTaskDependency`, `updateResourceProfile`, `createResourceAllocation`.
-- Implémenter les appels d'API correspondants dans le corps d' `AppProvider`.
-- Mettre à jour `refreshData()` pour récupérer les workspaces (`/projects/workspaces`) et le rapport de capacité des ressources (`/projects/resources/capacity`) en parallèle des autres requêtes.
-
----
-
-### [Component Frontend Components] - Nouvelles Vues Métiers
-
-#### [NEW] [GovernanceView.tsx](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/components/GovernanceView.tsx)
-- Créer une vue sémantique premium gérant :
-  1. **Workspaces & Équipe** : Visualiser l'Espace de travail en cours, son propriétaire, et ses membres avec leurs rôles respectifs.
-  2. **Jalons (Milestones)** : Afficher la liste des jalons par projet avec leurs échéances, leur état d'achèvement et un formulaire pour ajouter un jalon. Bouton d'action pour marquer un jalon comme terminé.
-  3. **Livrables (Deliverables)** : Affichage interactif des livrables, filtre par statut, formulaire d'ajout, et dropdown pour changer leur statut (DRAFT -> READY_FOR_REVIEW -> ACCEPTED -> DELIVERED).
-  4. **Validation de Livraison (Delivery Records)** : Formulaire de livraison d'un projet avec résumé et checklist d'acceptation. Liste des livraisons précédentes avec gestion dynamique de la checklist interactive et boutons de décision (Accepter / Rejeter la livraison).
-  5. **Bilan & Clôture de Projet** : Afficher un rapport final quand toutes les tâches et tous les livrables sont validés (comparatif temps prévu/réel, retards, etc.).
-
-#### [NEW] [GovernanceView.css](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/components/GovernanceView.css)
-- Styles CSS vanilla premium respectant le design system de l'application (thème sombre/clair, Glassmorphism, animations douces et contrastes HSL).
-
-#### [NEW] [CapacityView.tsx](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/components/CapacityView.tsx)
-- Créer la vue de planification de charge de travail :
-  1. **Tableau de Charge (Capacity Report)** : Cartes d'utilisateurs indiquant le rôle, la capacité hebdomadaire (en heures), les minutes planifiées (time-blocks) et le taux d'allocation projet global.
-  2. **Alertes de Surcharge** : Badge rougeoyant d'avertissement si la capacité hebdomadaire ou l'allocation projet dépasse 100%.
-  3. **Configuration du Profil (ResourceProfile)** : Formulaire pour mettre à jour la capacité hebdomadaire, les compétences et le coût horaire d'un membre.
-  4. **Allocation de Projet (ResourceAllocation)** : Formulaire d'affectation d'un membre à un projet (dates d'allocation et taux de disponibilité %).
-
-#### [NEW] [CapacityView.css](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/components/CapacityView.css)
-- Styles CSS vanilla premium assortis à la charte graphique pour la visualisation des charges des membres.
-
----
-
-### [Component Frontend Integration] - Intégration Générale
-
-#### [MODIFY] [KanbanBoard.tsx](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/components/KanbanBoard.tsx)
-- Dans la carte de tâche `DraggableCard` : afficher les dépendances actives s'il y en a.
-- Dans le formulaire d'ajout/modification de tâche : ajouter des champs permettant de lier ou de supprimer des dépendances entre tâches (ex: "Dépend de...").
-
-#### [MODIFY] [App.tsx](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/App.tsx)
-- Importer et déclarer les deux nouveaux onglets `governance` et `resources` dans le routeur local de `AppWithSession()`.
-- Mettre à jour le Header de navigation de bureau et la barre de navigation mobile en ajoutant les boutons correspondants équipés des icônes Lucide (`ShieldCheck` et `Users`).
+- Ajouter des cas de tests unitaires pour valider les comportements attendus :
+  - Tester que le passage d'une tâche sans dates à `IN_PROGRESS` remplit bien sa `startDate` et `dueDate` par défaut.
+  - Tester que la planification d'une tâche `TODO` avec une `startDate` passée ou présente la fait basculer automatiquement en `IN_PROGRESS`.
+  - S'assurer qu'aucune régression n'est introduite sur les 116 tests existants.
 
 ---
 
 ## Verification Plan
 
 ### Automated Tests
-- Lancer la suite de tests backend pour s'assurer que les changements de sécurité n'ont pas altéré les fonctionnalités existantes.
+
+- Exécuter la suite complète de tests Jest sur le backend pour valider le comportement :
+
   ```bash
   pnpm --filter backend test
   ```
 
 ### Manual Verification
-1. Lancer l'application localement avec `pnpm dev` ou Docker.
-2. Créer des jalons et des livrables sur un projet existant, puis vérifier leur affichage en temps réel.
-3. Programmer des blocs de temps pour un utilisateur, et vérifier son taux de charge dans l'onglet **Ressources**.
-4. Déclarer une livraison et changer le statut vers `ACCEPTED`, puis vérifier que le projet passe automatiquement au statut `DELIVERED`.
-5. Valider que les modifications de sécurité renvoient bien une erreur 400/403 si un utilisateur tente de requêter les logs d'une tâche dont il n'est pas le propriétaire ni membre.
+
+1. Lancer l'environnement Docker-Compose ou le serveur local.
+2. Ouvrir le Kanban et déplacer une tâche non planifiée de "À faire" à "En cours".
+3. Ouvrir le diagramme de Gantt et vérifier que la tâche y apparaît désormais sur un créneau de 2 jours débutant aujourd'hui.
+4. Ouvrir le Gantt, déplacer la date de début d'une tâche au statut "À faire" vers aujourd'hui ou dans le passé, et vérifier qu'elle passe automatiquement à "En cours" sur le Kanban.

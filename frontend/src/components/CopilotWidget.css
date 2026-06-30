@@ -5,8 +5,9 @@
   margin-bottom: 24px;
   background: rgba(22, 22, 33, 0.7) !important;
   border: 1px solid rgba(255, 255, 255, 0.08) !important;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35),
-              0 0 20px rgba(139, 92, 246, 0.05) !important;
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.35),
+    0 0 20px rgba(139, 92, 246, 0.05) !important;
   border-radius: 16px !important;
   overflow: hidden;
   display: flex;
@@ -15,8 +16,9 @@
 [data-theme='light'] .copilot-widget-container {
   background: rgba(255, 255, 255, 0.8) !important;
   border: 1px solid rgba(0, 0, 0, 0.08) !important;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.08),
-              0 0 15px rgba(139, 92, 246, 0.02) !important;
+  box-shadow:
+    0 10px 25px rgba(0, 0, 0, 0.08),
+    0 0 15px rgba(139, 92, 246, 0.02) !important;
 }
 
 /* Header */
@@ -142,7 +144,7 @@
 }
 
 /* Placeholders & Loaders */
-.copilot-briefing-placeholder, 
+.copilot-briefing-placeholder,
 .copilot-loading-briefing,
 .copilot-loading-alerts,
 .copilot-alerts-empty-state {
@@ -394,9 +396,15 @@
 .alert-badge-icon {
   margin-top: 3px;
 }
-.alert-badge-icon.text-red { color: #f87171; }
-.alert-badge-icon.text-orange { color: #fbbf24; }
-.alert-badge-icon.text-yellow { color: #60a5fa; }
+.alert-badge-icon.text-red {
+  color: #f87171;
+}
+.alert-badge-icon.text-orange {
+  color: #fbbf24;
+}
+.alert-badge-icon.text-yellow {
+  color: #60a5fa;
+}
 
 .alert-card-info {
   display: flex;
@@ -410,9 +418,15 @@
   text-transform: uppercase;
   letter-spacing: 0.3px;
 }
-.critical .alert-severity-badge { color: #f87171; }
-.high .alert-severity-badge { color: #fbbf24; }
-.medium .alert-severity-badge { color: #60a5fa; }
+.critical .alert-severity-badge {
+  color: #f87171;
+}
+.high .alert-severity-badge {
+  color: #fbbf24;
+}
+.medium .alert-severity-badge {
+  color: #60a5fa;
+}
 
 .alert-message {
   margin: 0;
@@ -461,12 +475,17 @@
 }
 
 @keyframes count-pulse-glow {
-  from { box-shadow: 0 0 2px rgba(239, 68, 68, 0.3); }
-  to { box-shadow: 0 0 8px rgba(239, 68, 68, 0.6); }
+  from {
+    box-shadow: 0 0 2px rgba(239, 68, 68, 0.3);
+  }
+  to {
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
+  }
 }
 
 @keyframes brain-bounce {
-  0%, 100% {
+  0%,
+  100% {
     transform: translateY(0);
   }
   50% {

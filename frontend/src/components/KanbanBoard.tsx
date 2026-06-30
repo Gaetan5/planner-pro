@@ -1,7 +1,7 @@
-import React, { useState } from 'react'
-import { useApp, Task } from '../context/AppContext'
-import { Plus, Trash2, Play, Square, FolderPlus, MessageSquare } from 'lucide-react'
-import { TaskCommentsPanel } from './TaskCommentsPanel'
+import React, { useState } from 'react';
+import { useApp, Task } from '../context/AppContext';
+import { Plus, Trash2, Play, Square, FolderPlus, MessageSquare } from 'lucide-react';
+import { TaskCommentsPanel } from './TaskCommentsPanel';
 import {
   DndContext,
   DragOverlay,
@@ -13,9 +13,9 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
-} from '@dnd-kit/core'
-import { CSS } from '@dnd-kit/utilities'
-import './KanbanBoard.css'
+} from '@dnd-kit/core';
+import { CSS } from '@dnd-kit/utilities';
+import './KanbanBoard.css';
 
 /* ======== Sub-components for DnD ======== */
 
@@ -24,11 +24,11 @@ function DroppableColumn({
   isOver,
   children,
 }: {
-  status: string
-  isOver: boolean
-  children: React.ReactNode
+  status: string;
+  isOver: boolean;
+  children: React.ReactNode;
 }) {
-  const { setNodeRef } = useDroppable({ id: status })
+  const { setNodeRef } = useDroppable({ id: status });
   return (
     <div
       ref={setNodeRef}
@@ -36,7 +36,7 @@ function DroppableColumn({
     >
       {children}
     </div>
-  )
+  );
 }
 
 function DraggableCard({
@@ -50,30 +50,30 @@ function DraggableCard({
   getPriorityClass,
   onOpenComments,
 }: {
-  task: Task
-  col: { status: string }
-  activeTimer: any
-  startTimer: (id: string) => void
-  stopTimer: () => void
-  deleteTask: (id: string) => void
-  moveTaskStatus: (id: string, status: string) => void
-  getPriorityClass: (priority: string) => string
-  onOpenComments: (task: Task) => void
+  task: Task;
+  col: { status: string };
+  activeTimer: any;
+  startTimer: (id: string) => void;
+  stopTimer: () => void;
+  deleteTask: (id: string) => void;
+  moveTaskStatus: (id: string, status: string) => void;
+  getPriorityClass: (priority: string) => string;
+  onOpenComments: (task: Task) => void;
 }) {
-  const { isReadOnly } = useApp()
+  const { isReadOnly } = useApp();
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: task.id,
     data: { task },
     disabled: isReadOnly,
-  })
+  });
 
-  const style = transform
-    ? { transform: CSS.Translate.toString(transform) }
-    : undefined
+  const style = transform ? { transform: CSS.Translate.toString(transform) } : undefined;
 
-  const isTrackingThis = activeTimer?.taskId === task.id
-  const dueDate = task.dueDate ? new Date(task.dueDate).toLocaleDateString() : null
-  const estimate = task.estimatedMinutes ? `${Math.round(task.estimatedMinutes / 60 * 10) / 10}h` : null
+  const isTrackingThis = activeTimer?.taskId === task.id;
+  const dueDate = task.dueDate ? new Date(task.dueDate).toLocaleDateString() : null;
+  const estimate = task.estimatedMinutes
+    ? `${Math.round((task.estimatedMinutes / 60) * 10) / 10}h`
+    : null;
 
   return (
     <div
@@ -89,9 +89,9 @@ function DraggableCard({
           {task.priority}
         </span>
 
-        <div className="kanban-card-controls" onClick={e => e.stopPropagation()}>
-          {!isReadOnly && (
-            isTrackingThis ? (
+        <div className="kanban-card-controls" onClick={(e) => e.stopPropagation()}>
+          {!isReadOnly &&
+            (isTrackingThis ? (
               <button
                 onClick={stopTimer}
                 className="kanban-card-btn-timer kanban-card-btn-timer--stop"
@@ -105,39 +105,43 @@ function DraggableCard({
               >
                 <Play size={12} fill="#fff" style={{ marginLeft: '2px' }} />
               </button>
-            )
-          )}
+            ))}
           <button
             onClick={(e) => {
-              e.stopPropagation()
-              onOpenComments(task)
+              e.stopPropagation();
+              onOpenComments(task);
             }}
             className="kanban-card-btn-comments"
             title="Commentaires"
-            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px', borderRadius: '4px', transition: 'all 0.2s', marginRight: '4px' }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--text-muted)',
+              cursor: 'pointer',
+              padding: '4px',
+              borderRadius: '4px',
+              transition: 'all 0.2s',
+              marginRight: '4px',
+            }}
           >
             <MessageSquare size={14} />
           </button>
           {!isReadOnly && (
-            <button
-              onClick={() => deleteTask(task.id)}
-              className="kanban-card-btn-delete"
-            >
+            <button onClick={() => deleteTask(task.id)} className="kanban-card-btn-delete">
               <Trash2 size={14} />
             </button>
           )}
         </div>
       </div>
 
-      <h5
-        className={`kanban-card-title ${col.status === 'DONE' ? 'kanban-card-title--done' : ''}`}
-      >
+      <h5 className={`kanban-card-title ${col.status === 'DONE' ? 'kanban-card-title--done' : ''}`}>
         {task.title}
       </h5>
 
-      {task.description && (
-        <p className="kanban-card-desc">{task.description}</p>
-      )}
+      {task.description && <p className="kanban-card-desc">{task.description}</p>}
 
       <div className="kanban-card-meta">
         {dueDate && <span>Échéance {dueDate}</span>}
@@ -146,9 +150,26 @@ function DraggableCard({
       </div>
 
       {task.dependencies && task.dependencies.length > 0 && (
-        <div className="kanban-card-dependencies" style={{ marginTop: 'var(--space-xs)', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+        <div
+          className="kanban-card-dependencies"
+          style={{
+            marginTop: 'var(--space-xs)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '2px',
+          }}
+        >
           {task.dependencies.map((dep) => (
-            <span key={dep.id} style={{ fontSize: 'var(--font-2xs)', color: 'var(--color-error)', display: 'flex', alignItems: 'center', gap: '2px' }}>
+            <span
+              key={dep.id}
+              style={{
+                fontSize: 'var(--font-2xs)',
+                color: 'var(--color-error)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '2px',
+              }}
+            >
               🔗 Bloqué par : {dep.dependsOnTask?.title || 'Tâche'}
             </span>
           ))}
@@ -165,7 +186,7 @@ function DraggableCard({
         </div>
       )}
     </div>
-  )
+  );
 }
 
 /* ======== Main Component ======== */
@@ -184,124 +205,124 @@ export const KanbanBoard: React.FC = () => {
     stopTimer,
     addTaskDependency,
     isReadOnly,
-  } = useApp()
+  } = useApp();
 
-  const [selectedProjId, setSelectedProjId] = useState<string>(projects[0]?.id || '')
-  const [showNewTaskForm, setShowNewTaskForm] = useState(false)
-  const [taskTitle, setTaskTitle] = useState('')
-  const [taskDesc, setTaskDesc] = useState('')
-  const [taskPriority, setTaskPriority] = useState('MEDIUM')
-  const [taskDueDate, setTaskDueDate] = useState('')
-  const [taskEstimateHours, setTaskEstimateHours] = useState('')
-  const [taskProgress, setTaskProgress] = useState('0')
-  const [taskLabels, setTaskLabels] = useState('')
-  const [taskAssigneeIds, setTaskAssigneeIds] = useState<string[]>([])
-  const [taskDependencyId, setTaskDependencyId] = useState('')
+  const [selectedProjId, setSelectedProjId] = useState<string>(projects[0]?.id || '');
+  const [showNewTaskForm, setShowNewTaskForm] = useState(false);
+  const [taskTitle, setTaskTitle] = useState('');
+  const [taskDesc, setTaskDesc] = useState('');
+  const [taskPriority, setTaskPriority] = useState('MEDIUM');
+  const [taskDueDate, setTaskDueDate] = useState('');
+  const [taskEstimateHours, setTaskEstimateHours] = useState('');
+  const [taskProgress, setTaskProgress] = useState('0');
+  const [taskLabels, setTaskLabels] = useState('');
+  const [taskAssigneeIds, setTaskAssigneeIds] = useState<string[]>([]);
+  const [taskDependencyId, setTaskDependencyId] = useState('');
 
-  const [showNewProjForm, setShowNewProjForm] = useState(false)
-  const [projName, setProjName] = useState('')
-  const [projDesc, setProjDesc] = useState('')
+  const [showNewProjForm, setShowNewProjForm] = useState(false);
+  const [projName, setProjName] = useState('');
+  const [projDesc, setProjDesc] = useState('');
 
-  const [activeDragTask, setActiveDragTask] = useState<Task | null>(null)
-  const [overColumnId, setOverColumnId] = useState<string | null>(null)
-  const [commentingTask, setCommentingTask] = useState<Task | null>(null)
+  const [activeDragTask, setActiveDragTask] = useState<Task | null>(null);
+  const [overColumnId, setOverColumnId] = useState<string | null>(null);
+  const [commentingTask, setCommentingTask] = useState<Task | null>(null);
 
-  const activeProject = projects.find(p => p.id === selectedProjId) || projects[0]
+  const activeProject = projects.find((p) => p.id === selectedProjId) || projects[0];
 
   // DnD sensor with activation constraint to distinguish click from drag
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 8 },
-    })
-  )
+    }),
+  );
 
   const handleCreateTask = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!taskTitle.trim() || !activeProject) return
+    e.preventDefault();
+    if (!taskTitle.trim() || !activeProject) return;
     const createdTask = await createTask(activeProject.id, taskTitle, taskDesc, taskPriority, {
       dueDate: taskDueDate ? new Date(taskDueDate).toISOString() : undefined,
       estimatedMinutes: taskEstimateHours ? Math.round(Number(taskEstimateHours) * 60) : undefined,
       progress: Number(taskProgress) || 0,
       labels: taskLabels || undefined,
       assigneeIds: taskAssigneeIds,
-    })
+    });
 
     if (createdTask && taskDependencyId) {
-      await addTaskDependency(createdTask.id, taskDependencyId)
+      await addTaskDependency(createdTask.id, taskDependencyId);
     }
 
-    setTaskTitle('')
-    setTaskDesc('')
-    setTaskPriority('MEDIUM')
-    setTaskDueDate('')
-    setTaskEstimateHours('')
-    setTaskProgress('0')
-    setTaskLabels('')
-    setTaskAssigneeIds([])
-    setTaskDependencyId('')
-    setShowNewTaskForm(false)
-  }
+    setTaskTitle('');
+    setTaskDesc('');
+    setTaskPriority('MEDIUM');
+    setTaskDueDate('');
+    setTaskEstimateHours('');
+    setTaskProgress('0');
+    setTaskLabels('');
+    setTaskAssigneeIds([]);
+    setTaskDependencyId('');
+    setShowNewTaskForm(false);
+  };
 
   const handleCreateProject = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!projName.trim()) return
-    createProject(projName, projDesc)
-    setProjName('')
-    setProjDesc('')
-    setShowNewProjForm(false)
-  }
+    e.preventDefault();
+    if (!projName.trim()) return;
+    createProject(projName, projDesc);
+    setProjName('');
+    setProjDesc('');
+    setShowNewProjForm(false);
+  };
 
   const moveTaskStatus = (taskId: string, currentStatus: string) => {
-    let nextStatus: Task['status'] = 'TODO'
-    if (currentStatus === 'TODO') nextStatus = 'IN_PROGRESS'
-    else if (currentStatus === 'IN_PROGRESS') nextStatus = 'DONE'
-    else if (currentStatus === 'DONE') nextStatus = 'TODO'
-    updateTask(taskId, { status: nextStatus })
-  }
+    let nextStatus: Task['status'] = 'TODO';
+    if (currentStatus === 'TODO') nextStatus = 'IN_PROGRESS';
+    else if (currentStatus === 'IN_PROGRESS') nextStatus = 'DONE';
+    else if (currentStatus === 'DONE') nextStatus = 'TODO';
+    updateTask(taskId, { status: nextStatus });
+  };
 
   /* DnD Handlers */
   const handleDragStart = (event: DragStartEvent) => {
-    const task = event.active.data.current?.task as Task | undefined
-    setActiveDragTask(task || null)
-  }
+    const task = event.active.data.current?.task as Task | undefined;
+    setActiveDragTask(task || null);
+  };
 
   const handleDragOver = (event: any) => {
-    setOverColumnId(event.over?.id as string || null)
-  }
+    setOverColumnId((event.over?.id as string) || null);
+  };
 
   const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event
-    setActiveDragTask(null)
-    setOverColumnId(null)
+    const { active, over } = event;
+    setActiveDragTask(null);
+    setOverColumnId(null);
 
-    if (!over) return
+    if (!over) return;
 
-    const taskId = active.id as string
-    const newStatus = over.id as Task['status']
-    const task = active.data.current?.task as Task | undefined
+    const taskId = active.id as string;
+    const newStatus = over.id as Task['status'];
+    const task = active.data.current?.task as Task | undefined;
 
     // Only update if status actually changes
     if (task && task.status !== newStatus) {
-      updateTask(taskId, { status: newStatus })
+      updateTask(taskId, { status: newStatus });
     }
-  }
+  };
 
   const columns: { title: string; status: Task['status']; color: string }[] = [
     { title: 'À faire', status: 'TODO', color: 'var(--text-muted)' },
     { title: 'En cours', status: 'IN_PROGRESS', color: 'var(--accent-primary)' },
     { title: 'Terminé', status: 'DONE', color: 'var(--color-success)' },
-  ]
+  ];
 
   const getPriorityClass = (priority: string) => {
     switch (priority) {
       case 'HIGH':
-        return 'badge--priority-high'
+        return 'badge--priority-high';
       case 'MEDIUM':
-        return 'badge--priority-medium'
+        return 'badge--priority-medium';
       default:
-        return 'badge--priority-low'
+        return 'badge--priority-low';
     }
-  }
+  };
 
   return (
     <div className="kanban-layout">
@@ -325,7 +346,7 @@ export const KanbanBoard: React.FC = () => {
               type="text"
               placeholder="Nom du projet"
               value={projName}
-              onChange={e => setProjName(e.target.value)}
+              onChange={(e) => setProjName(e.target.value)}
               required
             />
             <button type="submit" className="btn-primary">
@@ -335,7 +356,7 @@ export const KanbanBoard: React.FC = () => {
         )}
 
         <ul className="kanban-project-list">
-          {projects.map(proj => (
+          {projects.map((proj) => (
             <li
               key={proj.id}
               onClick={() => setSelectedProjId(proj.id)}
@@ -345,9 +366,9 @@ export const KanbanBoard: React.FC = () => {
               {proj.name !== 'Inbox' && !isReadOnly && (
                 <button
                   className="kanban-project-delete-btn"
-                  onClick={e => {
-                    e.stopPropagation()
-                    deleteProject(proj.id)
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    deleteProject(proj.id);
                   }}
                 >
                   <Trash2 size={13} />
@@ -384,27 +405,27 @@ export const KanbanBoard: React.FC = () => {
             <form
               onSubmit={handleCreateTask}
               className="glass-panel modal-content task-modal-form"
-              onClick={e => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
             >
               <h3>Nouvelle Tâche</h3>
               <input
                 type="text"
                 placeholder="Titre de la tâche"
                 value={taskTitle}
-                onChange={e => setTaskTitle(e.target.value)}
+                onChange={(e) => setTaskTitle(e.target.value)}
                 className="form-input"
                 required
               />
               <textarea
                 placeholder="Description (optionnel)"
                 value={taskDesc}
-                onChange={e => setTaskDesc(e.target.value)}
+                onChange={(e) => setTaskDesc(e.target.value)}
                 className="form-textarea"
                 rows={3}
               />
               <select
                 value={taskPriority}
-                onChange={e => setTaskPriority(e.target.value)}
+                onChange={(e) => setTaskPriority(e.target.value)}
                 className="form-select"
               >
                 <option value="LOW">Priorité Basse</option>
@@ -417,7 +438,7 @@ export const KanbanBoard: React.FC = () => {
                   <input
                     type="date"
                     value={taskDueDate}
-                    onChange={e => setTaskDueDate(e.target.value)}
+                    onChange={(e) => setTaskDueDate(e.target.value)}
                     className="form-input"
                   />
                 </label>
@@ -428,7 +449,7 @@ export const KanbanBoard: React.FC = () => {
                     min="0"
                     step="0.5"
                     value={taskEstimateHours}
-                    onChange={e => setTaskEstimateHours(e.target.value)}
+                    onChange={(e) => setTaskEstimateHours(e.target.value)}
                     className="form-input"
                   />
                 </label>
@@ -439,7 +460,7 @@ export const KanbanBoard: React.FC = () => {
                     min="0"
                     max="100"
                     value={taskProgress}
-                    onChange={e => setTaskProgress(e.target.value)}
+                    onChange={(e) => setTaskProgress(e.target.value)}
                     className="form-input"
                   />
                 </label>
@@ -449,7 +470,7 @@ export const KanbanBoard: React.FC = () => {
                     type="text"
                     placeholder="design, api, urgent"
                     value={taskLabels}
-                    onChange={e => setTaskLabels(e.target.value)}
+                    onChange={(e) => setTaskLabels(e.target.value)}
                     className="form-input"
                   />
                 </label>
@@ -459,7 +480,11 @@ export const KanbanBoard: React.FC = () => {
                 <select
                   multiple
                   value={taskAssigneeIds}
-                  onChange={e => setTaskAssigneeIds(Array.from(e.currentTarget.selectedOptions, option => option.value))}
+                  onChange={(e) =>
+                    setTaskAssigneeIds(
+                      Array.from(e.currentTarget.selectedOptions, (option) => option.value),
+                    )
+                  }
                   className="form-select"
                 >
                   {workspaceMembers.map((member) => (
@@ -473,7 +498,7 @@ export const KanbanBoard: React.FC = () => {
                 Dépendance (Bloqué par)
                 <select
                   value={taskDependencyId}
-                  onChange={e => setTaskDependencyId(e.target.value)}
+                  onChange={(e) => setTaskDependencyId(e.target.value)}
                   className="form-select"
                 >
                   <option value="">Aucune</option>
@@ -484,12 +509,19 @@ export const KanbanBoard: React.FC = () => {
                   ))}
                 </select>
               </label>
-              <div className="kanban-card-controls" style={{ justifyContent: 'flex-end', gap: '12px', marginTop: '8px' }}>
+              <div
+                className="kanban-card-controls"
+                style={{ justifyContent: 'flex-end', gap: '12px', marginTop: '8px' }}
+              >
                 <button
                   type="button"
                   onClick={() => setShowNewTaskForm(false)}
                   className="btn-ghost"
-                  style={{ padding: '8px 16px', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-sm)' }}
+                  style={{
+                    padding: '8px 16px',
+                    border: '1px solid var(--glass-border)',
+                    borderRadius: 'var(--radius-sm)',
+                  }}
                 >
                   Annuler
                 </button>
@@ -510,9 +542,8 @@ export const KanbanBoard: React.FC = () => {
           onDragEnd={handleDragEnd}
         >
           <div className="kanban-columns">
-            {columns.map(col => {
-              const colTasks =
-                activeProject?.tasks?.filter(t => t.status === col.status) || []
+            {columns.map((col) => {
+              const colTasks = activeProject?.tasks?.filter((t) => t.status === col.status) || [];
 
               return (
                 <div key={col.status} className="glass-panel kanban-column">
@@ -529,11 +560,8 @@ export const KanbanBoard: React.FC = () => {
                   </div>
 
                   {/* Droppable Tasks List */}
-                  <DroppableColumn
-                    status={col.status}
-                    isOver={overColumnId === col.status}
-                  >
-                    {colTasks.map(task => (
+                  <DroppableColumn status={col.status} isOver={overColumnId === col.status}>
+                    {colTasks.map((task) => (
                       <DraggableCard
                         key={task.id}
                         task={task}
@@ -549,7 +577,7 @@ export const KanbanBoard: React.FC = () => {
                     ))}
                   </DroppableColumn>
                 </div>
-              )
+              );
             })}
           </div>
 
@@ -558,7 +586,9 @@ export const KanbanBoard: React.FC = () => {
             {activeDragTask ? (
               <div className="glass-panel kanban-card dnd-drag-overlay">
                 <div className="kanban-card-header">
-                  <span className={`kanban-card-priority ${getPriorityClass(activeDragTask.priority)}`}>
+                  <span
+                    className={`kanban-card-priority ${getPriorityClass(activeDragTask.priority)}`}
+                  >
                     {activeDragTask.priority}
                   </span>
                 </div>
@@ -580,5 +610,5 @@ export const KanbanBoard: React.FC = () => {
         />
       )}
     </div>
-  )
-}
+  );
+};

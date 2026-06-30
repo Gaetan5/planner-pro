@@ -105,7 +105,7 @@ describe('MailService', () => {
 
     it('should successfully complete sending in simulated mode without invoking nodemailer', async () => {
       jest.clearAllMocks();
-      
+
       const result = await fallbackService.sendInvitationEmail(
         'invited@test.com',
         'Simulated WS',

@@ -1,7 +1,7 @@
-import React, { useState } from 'react'
-import { useApp } from '../context/AppContext'
-import { Play, Pause, RotateCcw, SkipForward, Settings, Clock, CheckCircle } from 'lucide-react'
-import './PomodoroTimer.css'
+import React, { useState } from 'react';
+import { useApp } from '../context/AppContext';
+import { Play, Pause, RotateCcw, SkipForward, Settings, Clock, CheckCircle } from 'lucide-react';
+import './PomodoroTimer.css';
 
 export const PomodoroTimer: React.FC = () => {
   const {
@@ -17,50 +17,53 @@ export const PomodoroTimer: React.FC = () => {
     resumePomodoro,
     resetPomodoro,
     skipBreak,
-  } = useApp()
+  } = useApp();
 
-  const [showSettings, setShowSettings] = useState(false)
-  const [tempFocus, setTempFocus] = useState(pomodoroSettings.focusDuration)
-  const [tempBreak, setTempBreak] = useState(pomodoroSettings.breakDuration)
-  const [selectedTaskId, setSelectedTaskId] = useState<string>('')
+  const [showSettings, setShowSettings] = useState(false);
+  const [tempFocus, setTempFocus] = useState(pomodoroSettings.focusDuration);
+  const [tempBreak, setTempBreak] = useState(pomodoroSettings.breakDuration);
+  const [selectedTaskId, setSelectedTaskId] = useState<string>('');
 
   // Trouver la tâche en cours
-  const allTasks = projects.flatMap((p) => p.tasks || [])
-  const currentTask = allTasks.find((t) => t.id === pomodoroTaskId)
+  const allTasks = projects.flatMap((p) => p.tasks || []);
+  const currentTask = allTasks.find((t) => t.id === pomodoroTaskId);
 
   // Calculer le pourcentage de temps restant
-  const totalSeconds = (pomodoroState === 'break' ? pomodoroSettings.breakDuration : pomodoroSettings.focusDuration) * 60
-  const progressPercent = totalSeconds > 0 ? ((totalSeconds - pomodoroTimeLeft) / totalSeconds) * 100 : 0
+  const totalSeconds =
+    (pomodoroState === 'break' ? pomodoroSettings.breakDuration : pomodoroSettings.focusDuration) *
+    60;
+  const progressPercent =
+    totalSeconds > 0 ? ((totalSeconds - pomodoroTimeLeft) / totalSeconds) * 100 : 0;
 
   // Formater le temps restant en MM:SS
   const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60)
-    const secs = seconds % 60
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
-  }
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
 
   // Gérer la sauvegarde des settings
   const handleSaveSettings = (e: React.FormEvent) => {
-    e.preventDefault()
+    e.preventDefault();
     setPomodoroSettings({
       focusDuration: tempFocus,
       breakDuration: tempBreak,
-    })
-    setShowSettings(false)
-    resetPomodoro()
-  }
+    });
+    setShowSettings(false);
+    resetPomodoro();
+  };
 
   const handleStart = () => {
     if (pomodoroState === 'idle') {
       if (!selectedTaskId) {
-        alert('Veuillez sélectionner une tâche à lier à ce cycle Pomodoro.')
-        return
+        alert('Veuillez sélectionner une tâche à lier à ce cycle Pomodoro.');
+        return;
       }
-      startPomodoro(selectedTaskId)
+      startPomodoro(selectedTaskId);
     } else {
-      resumePomodoro()
+      resumePomodoro();
     }
-  }
+  };
 
   return (
     <div className={`pomodoro-container ${pomodoroState}`}>
@@ -97,7 +100,9 @@ export const PomodoroTimer: React.FC = () => {
           {pomodoroState !== 'idle' && currentTask ? (
             <div className="current-task-badge">
               <CheckCircle size={14} className="badge-icon" />
-              <span>Tâche : <strong>{currentTask.title}</strong></span>
+              <span>
+                Tâche : <strong>{currentTask.title}</strong>
+              </span>
             </div>
           ) : (
             <div className="task-selector-wrapper">
@@ -112,11 +117,12 @@ export const PomodoroTimer: React.FC = () => {
                 <option value="">-- Choisir une tâche --</option>
                 {projects.map((proj) => (
                   <optgroup key={proj.id} label={proj.name}>
-                    {proj.tasks && proj.tasks.map((task) => (
-                      <option key={task.id} value={task.id}>
-                        {task.title}
-                      </option>
-                    ))}
+                    {proj.tasks &&
+                      proj.tasks.map((task) => (
+                        <option key={task.id} value={task.id}>
+                          {task.title}
+                        </option>
+                      ))}
                   </optgroup>
                 ))}
               </select>
@@ -201,5 +207,5 @@ export const PomodoroTimer: React.FC = () => {
         )}
       </div>
     </div>
-  )
-}
+  );
+};

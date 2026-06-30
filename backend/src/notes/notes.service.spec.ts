@@ -71,9 +71,18 @@ describe('NotesService', () => {
       const noteTitle = 'Ma Note';
       const noteContent = '- [ ] Acheter du lait #Inbox';
 
-      mockPrisma.note.create.mockResolvedValue({ id: noteId, title: noteTitle, content: noteContent, userId });
+      mockPrisma.note.create.mockResolvedValue({
+        id: noteId,
+        title: noteTitle,
+        content: noteContent,
+        userId,
+      });
       mockPrisma.project.findFirst.mockResolvedValue({ id: 'project-inbox', name: 'Inbox' });
-      mockPrisma.task.create.mockResolvedValue({ id: 'task-new-id', title: 'Acheter du lait', status: 'TODO' });
+      mockPrisma.task.create.mockResolvedValue({
+        id: 'task-new-id',
+        title: 'Acheter du lait',
+        status: 'TODO',
+      });
 
       await service.createNote(userId, noteTitle, noteContent);
 
@@ -87,7 +96,7 @@ describe('NotesService', () => {
             userId,
             noteId,
           }),
-        })
+        }),
       );
 
       // Devrait mettre à jour le contenu de la note avec le tag <!-- task:... -->
@@ -95,9 +104,11 @@ describe('NotesService', () => {
         expect.objectContaining({
           where: { id: noteId },
           data: expect.objectContaining({
-            content: expect.stringMatching(/- \[ \] Acheter du lait #Inbox <!-- task:[a-f0-9-]+ -->/),
+            content: expect.stringMatching(
+              /- \[ \] Acheter du lait #Inbox <!-- task:[a-f0-9-]+ -->/,
+            ),
           }),
-        })
+        }),
       );
     });
 
@@ -108,9 +119,19 @@ describe('NotesService', () => {
       const taskId = 'task-existing-uuid';
       const noteContent = `- [ ] Nettoyer le code #Inbox <!-- task:${taskId} -->`;
 
-      mockPrisma.note.create.mockResolvedValue({ id: noteId, title: noteTitle, content: noteContent, userId });
+      mockPrisma.note.create.mockResolvedValue({
+        id: noteId,
+        title: noteTitle,
+        content: noteContent,
+        userId,
+      });
       mockPrisma.project.findFirst.mockResolvedValue({ id: 'project-inbox', name: 'Inbox' });
-      mockPrisma.task.findFirst.mockResolvedValue({ id: taskId, title: 'Ancien Titre', status: 'TODO', projectId: 'project-inbox' });
+      mockPrisma.task.findFirst.mockResolvedValue({
+        id: taskId,
+        title: 'Ancien Titre',
+        status: 'TODO',
+        projectId: 'project-inbox',
+      });
 
       await service.createNote(userId, noteTitle, noteContent);
 
@@ -124,7 +145,7 @@ describe('NotesService', () => {
           data: expect.objectContaining({
             title: 'Nettoyer le code',
           }),
-        })
+        }),
       );
     });
   });
@@ -151,7 +172,7 @@ describe('NotesService', () => {
           data: expect.objectContaining({
             content: `- [x] Réviser le projet #Startup <!-- task:${taskId} -->`,
           }),
-        })
+        }),
       );
     });
   });

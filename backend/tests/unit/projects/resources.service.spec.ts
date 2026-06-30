@@ -44,10 +44,7 @@ describe('ResourcesService', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        ResourcesService,
-        { provide: PrismaService, useValue: mockPrisma },
-      ],
+      providers: [ResourcesService, { provide: PrismaService, useValue: mockPrisma }],
     }).compile();
 
     service = module.get<ResourcesService>(ResourcesService);
@@ -57,7 +54,7 @@ describe('ResourcesService', () => {
   });
 
   describe('createResourceLeave', () => {
-    it('devrait créer un congé si l\'utilisateur crée son propre congé', async () => {
+    it("devrait créer un congé si l'utilisateur crée son propre congé", async () => {
       const mockLeave = {
         id: 'leave-1',
         userId: 'user-1',
@@ -103,7 +100,10 @@ describe('ResourcesService', () => {
 
   describe('getResourceCapacityReport avec réduction de capacité', () => {
     it('devrait calculer la capacité ajustée avec congés et jours fériés', async () => {
-      mockPrisma.membership.findFirst.mockResolvedValue({ id: 'member-1', role: WorkspaceRole.MEMBER });
+      mockPrisma.membership.findFirst.mockResolvedValue({
+        id: 'member-1',
+        role: WorkspaceRole.MEMBER,
+      });
       mockPrisma.membership.findMany.mockResolvedValue([
         {
           userId: 'user-1',
@@ -117,7 +117,7 @@ describe('ResourcesService', () => {
       mockPrisma.task.findMany.mockResolvedValue([]);
       mockPrisma.timeBlock.findMany.mockResolvedValue([]);
       mockPrisma.resourceAllocation.findMany.mockResolvedValue([]);
-      
+
       // Ajoutons un congé de 1 jour pendant la semaine de test
       // Mettons le test sur une semaine fixe (ex: du lundi 15 juin 2026 au dimanche 21 juin 2026)
       // Aucun jour férié en France cette semaine-là.
@@ -133,7 +133,7 @@ describe('ResourcesService', () => {
 
       const RealDate = global.Date;
       const mockDate = new RealDate('2026-06-15T09:00:00.000Z');
-      
+
       (global as any).Date = class extends RealDate {
         constructor(...args: any[]) {
           if (args.length > 0) {

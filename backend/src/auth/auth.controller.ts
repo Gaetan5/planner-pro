@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, Param, Query, UseGuards, Req, Res } from '@nestjs/common';
+import { Controller, Post, Get, Body, UseGuards, Req, Res } from '@nestjs/common';
 import { Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
@@ -36,7 +36,11 @@ export class AuthController {
   @Post('register')
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async register(@Body() registerDto: RegisterDto, @Res({ passthrough: true }) res: Response) {
-    const { user, accessToken } = await this.authService.register(registerDto.email, registerDto.passwordRaw, registerDto.name);
+    const { user, accessToken } = await this.authService.register(
+      registerDto.email,
+      registerDto.passwordRaw,
+      registerDto.name,
+    );
     this.setTokenCookie(res, accessToken);
     return { user };
   }
@@ -47,11 +51,13 @@ export class AuthController {
   @Post('login')
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async login(@Body() loginDto: LoginDto, @Res({ passthrough: true }) res: Response) {
-    const { user, accessToken } = await this.authService.login(loginDto.email, loginDto.passwordRaw);
+    const { user, accessToken } = await this.authService.login(
+      loginDto.email,
+      loginDto.passwordRaw,
+    );
     this.setTokenCookie(res, accessToken);
     return { user };
   }
-
 
   /**
    * Endpoint de login simulé pour le développement local
@@ -60,7 +66,6 @@ export class AuthController {
   mockLogin(@Body() body: { name: string }) {
     return this.authService.mockLogin(body.name);
   }
-
 
   /**
    * Récupère les dépôts GitHub de l'utilisateur connecté
@@ -77,10 +82,7 @@ export class AuthController {
    */
   @Post('github/sync')
   @UseGuards(JwtAuthGuard)
-  syncRepository(
-    @Body() body: { projectId: string; repoFullName: string },
-    @Req() req: any,
-  ) {
+  syncRepository(@Body() body: { projectId: string; repoFullName: string }, @Req() req: any) {
     const userId = req.user.id;
     return this.authService.syncRepositoryToProject(userId, body.projectId, body.repoFullName);
   }

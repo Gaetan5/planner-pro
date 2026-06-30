@@ -11,14 +11,11 @@ export class TrackingService {
       where: {
         id: taskId,
         deletedAt: null,
-        OR: [
-          { userId },
-          { project: { workspace: { memberships: { some: { userId } } } } },
-        ],
+        OR: [{ userId }, { project: { workspace: { memberships: { some: { userId } } } } }],
       },
     });
     if (!task) {
-      throw new BadRequestException('La tâche spécifiée n\'existe pas ou vous n\'y avez pas accès.');
+      throw new BadRequestException("La tâche spécifiée n'existe pas ou vous n'y avez pas accès.");
     }
 
     // Arrêter automatiquement toute session de tracking en cours pour cet utilisateur
@@ -85,14 +82,11 @@ export class TrackingService {
       where: {
         id: taskId,
         deletedAt: null,
-        OR: [
-          { userId },
-          { project: { workspace: { memberships: { some: { userId } } } } },
-        ],
+        OR: [{ userId }, { project: { workspace: { memberships: { some: { userId } } } } }],
       },
     });
     if (!task) {
-      throw new BadRequestException('La tâche spécifiée n\'existe pas ou vous n\'y avez pas accès.');
+      throw new BadRequestException("La tâche spécifiée n'existe pas ou vous n'y avez pas accès.");
     }
 
     return this.prisma.timeLog.findMany({

@@ -19,7 +19,7 @@ describe('Encryption Utility (AES-256-GCM)', () => {
 
     expect(cipherText).toBeDefined();
     expect(cipherText).toContain(':');
-    
+
     const parts = cipherText.split(':');
     expect(parts.length).toBe(3); // iv, tag, encrypted
 
@@ -29,7 +29,9 @@ describe('Encryption Utility (AES-256-GCM)', () => {
 
   it('devrait lever une erreur si la clé de chiffrement est absente', () => {
     delete process.env.ENCRYPTION_KEY;
-    expect(() => encrypt('test')).toThrow('La variable d\'environnement ENCRYPTION_KEY est obligatoire mais absente.');
+    expect(() => encrypt('test')).toThrow(
+      "La variable d'environnement ENCRYPTION_KEY est obligatoire mais absente.",
+    );
   });
 
   it('devrait lever une erreur si la clé de chiffrement ne fait pas 32 octets', () => {

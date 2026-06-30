@@ -38,7 +38,9 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
   ) {}
 
   async afterInit(server: Server) {
-    const pubClient = createClient({ url: `redis://${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || 6379}` });
+    const pubClient = createClient({
+      url: `redis://${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || 6379}`,
+    });
     const subClient = pubClient.duplicate();
     await Promise.all([pubClient.connect(), subClient.connect()]);
     server.adapter(createAdapter(pubClient, subClient));
@@ -47,7 +49,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   async handleConnection(client: Socket) {
     console.log(`Client connecté : ${client.id}`);
-    
+
     let token = client.handshake.auth?.token || client.handshake.headers?.authorization;
     if (token && token.startsWith('Bearer ')) {
       token = token.slice(7);
@@ -64,11 +66,11 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
       client.data.userId = payload.sub;
       client.join(`user:${client.data.userId}`);
       console.log(`Client authentifié : ${client.data.userId} (Socket: ${client.id})`);
-      
+
       const activeTracking = await this.trackingService.getActiveTracking(client.data.userId);
       client.emit('active-timer-state', activeTracking);
-    } catch (error: unknown) {
-      console.log('Accès WebSocket refusé : Validation de l\'identité échouée.');
+    } catch (_error: unknown) {
+      console.log("Accès WebSocket refusé : Validation de l'identité échouée.");
       client.disconnect(true);
     }
   }
@@ -91,7 +93,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
       // Diffuser le nouvel état à TOUS les clients connectés du même utilisateur
       this.server.to(`user:${userId}`).emit('timer-started', log);
       return { status: 'success', data: log };
-    } catch (error: unknown) {
+    } catch (_error: unknown) {
       return { status: 'error', message: error instanceof Error ? error.message : String(error) };
     }
   }
@@ -107,7 +109,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
       // Diffuser l'arrêt à TOUS les clients connectés du même utilisateur
       this.server.to(`user:${userId}`).emit('timer-stopped', log);
       return { status: 'success', data: log };
-    } catch (error: unknown) {
+    } catch (_error: unknown) {
       return { status: 'error', message: error instanceof Error ? error.message : String(error) };
     }
   }
@@ -121,10 +123,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
   }
 
   @SubscribeMessage('join-task')
-  async handleJoinTask(
-    @MessageBody() data: { taskId: string },
-    @ConnectedSocket() client: Socket,
-  ) {
+  async handleJoinTask(@MessageBody() data: { taskId: string }, @ConnectedSocket() client: Socket) {
     const userId = client.data.userId;
     if (!userId) return { status: 'error', message: 'Non authentifié.' };
 
@@ -137,8 +136,13 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
 
     try {
       // Vérifier la permission d'accès au projet
-      await this.projectPermissionsService.assertProjectRole(task.projectId, userId, ['MANAGER', 'CONTRIBUTOR', 'COMMENTER', 'CLIENT']);
-      
+      await this.projectPermissionsService.assertProjectRole(task.projectId, userId, [
+        'MANAGER',
+        'CONTRIBUTOR',
+        'COMMENTER',
+        'CLIENT',
+      ]);
+
       client.join(`task:${data.taskId}`);
       console.log(`Socket ${client.id} a rejoint la room task:${data.taskId}`);
       return { status: 'success' };
@@ -181,10 +185,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
   }
 
   @SubscribeMessage('voice-chunk')
-  handleVoiceChunk(
-    @MessageBody() chunk: Buffer | ArrayBuffer,
-    @ConnectedSocket() client: Socket,
-  ) {
+  handleVoiceChunk(@MessageBody() chunk: Buffer | ArrayBuffer, @ConnectedSocket() client: Socket) {
     if (!client.data.audioChunks) {
       client.data.audioChunks = [];
     }
@@ -195,7 +196,8 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   @SubscribeMessage('voice-end')
   async handleVoiceEnd(
-    @MessageBody() data: { workspaceId: string; projectId: string | null; mimeType?: string; isMock?: boolean },
+    @MessageBody()
+    data: { workspaceId: string; projectId: string | null; mimeType?: string; isMock?: boolean },
     @ConnectedSocket() client: Socket,
   ) {
     const userId = client.data.userId;

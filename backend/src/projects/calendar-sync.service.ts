@@ -28,8 +28,11 @@ export class CalendarSyncService {
     const integration = await this.prisma.integration.findUnique({
       where: { id: integrationId },
     });
-    if (!integration || (integration.type !== 'GOOGLE_CALENDAR' && integration.type !== 'OUTLOOK')) {
-      throw new NotFoundException("Calendrier externe introuvable ou invalide.");
+    if (
+      !integration ||
+      (integration.type !== 'GOOGLE_CALENDAR' && integration.type !== 'OUTLOOK')
+    ) {
+      throw new NotFoundException('Calendrier externe introuvable ou invalide.');
     }
 
     const timeBlocks = await this.prisma.timeBlock.findMany({
@@ -106,15 +109,20 @@ export class CalendarSyncService {
     for (const integration of calendarIntegrations) {
       // On associe l'intégration à un utilisateur spécifique si calendarId est un email,
       // sinon on l'applique à tous les membres ou à un membre par défaut.
-      const targetEmail = integration.calendarId && integration.calendarId.includes('@')
-        ? integration.calendarId
-        : 'alice@test.com'; // Fallback par défaut de test
+      const targetEmail =
+        integration.calendarId && integration.calendarId.includes('@')
+          ? integration.calendarId
+          : 'alice@test.com'; // Fallback par défaut de test
 
       const targetName = targetEmail.split('@')[0];
 
       if (integration.url && integration.url.trim().startsWith('http')) {
         // Flux externe configurable (iCal/ICS ou JSON)
-        const fetchedEvents = await this.fetchExternalEvents(integration.url, targetEmail, targetName);
+        const fetchedEvents = await this.fetchExternalEvents(
+          integration.url,
+          targetEmail,
+          targetName,
+        );
         externalEvents.push(...fetchedEvents);
       } else {
         // Aucun URL configuré -> On utilise le simulateur dynamique en temps réel (incluant le cas historique 2026-06-01 pour les tests Jest)
@@ -144,8 +152,9 @@ export class CalendarSyncService {
 
           if (hasOverlap) {
             const formatDate = (d: Date) => d.toLocaleDateString('fr-FR');
-            const formatTime = (d: Date) => d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-            
+            const formatTime = (d: Date) =>
+              d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+
             conflicts.push({
               id: `conflict-${block.id}-${extEvent.start.getTime()}`,
               userId: user.id,
@@ -208,7 +217,9 @@ export class CalendarSyncService {
       this.logger.warn(`Unsupported calendar format from URL: ${url}`);
       return [];
     } catch (err: any) {
-      this.logger.error(`Error fetching external calendar from ${url}: ${err instanceof Error ? err.message : String(err)}`);
+      this.logger.error(
+        `Error fetching external calendar from ${url}: ${err instanceof Error ? err.message : String(err)}`,
+      );
       return [];
     }
   }
@@ -240,7 +251,16 @@ export class CalendarSyncService {
             const hh = cleaned.substring(9, 11);
             const mm = cleaned.substring(11, 13);
             const ss = cleaned.substring(13, 15);
-            return new Date(Date.UTC(parseInt(y), parseInt(m) - 1, parseInt(d), parseInt(hh), parseInt(mm), parseInt(ss)));
+            return new Date(
+              Date.UTC(
+                parseInt(y),
+                parseInt(m) - 1,
+                parseInt(d),
+                parseInt(hh),
+                parseInt(mm),
+                parseInt(ss),
+              ),
+            );
           }
           return new Date(str);
         };
@@ -347,8 +367,14 @@ export class CalendarSyncService {
   /**
    * Gère le callback OAuth2, échange le code contre les tokens, les chiffre et les stocke.
    */
-  async handleOAuthCallback(workspaceId: string, provider: 'GOOGLE_CALENDAR' | 'OUTLOOK', code: string) {
-    this.logger.log(`Échange du code OAuth pour le workspace ${workspaceId} avec le fournisseur ${provider}`);
+  async handleOAuthCallback(
+    workspaceId: string,
+    provider: 'GOOGLE_CALENDAR' | 'OUTLOOK',
+    code: string,
+  ) {
+    this.logger.log(
+      `Échange du code OAuth pour le workspace ${workspaceId} avec le fournisseur ${provider}`,
+    );
     const redirectUri = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/oauth/callback`;
 
     let accessToken = 'mock-access-token-' + Math.random().toString(36).substring(2);
@@ -356,22 +382,30 @@ export class CalendarSyncService {
     let expiresInSeconds = 3600;
 
     // Simulation d'un appel API réel si configuré, sinon mode mock robuste
-    const hasCredentials = provider === 'GOOGLE_CALENDAR'
-      ? (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)
-      : (process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET);
+    const hasCredentials =
+      provider === 'GOOGLE_CALENDAR'
+        ? process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+        : process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET;
 
     if (hasCredentials && process.env.NODE_ENV !== 'test') {
       try {
-        const tokenUrl = provider === 'GOOGLE_CALENDAR'
-          ? 'https://oauth2.googleapis.com/token'
-          : 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
+        const tokenUrl =
+          provider === 'GOOGLE_CALENDAR'
+            ? 'https://oauth2.googleapis.com/token'
+            : 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
 
         const bodyParams = new URLSearchParams({
           code,
           redirect_uri: redirectUri,
           grant_type: 'authorization_code',
-          client_id: provider === 'GOOGLE_CALENDAR' ? process.env.GOOGLE_CLIENT_ID! : process.env.MICROSOFT_CLIENT_ID!,
-          client_secret: provider === 'GOOGLE_CALENDAR' ? process.env.GOOGLE_CLIENT_SECRET! : process.env.MICROSOFT_CLIENT_SECRET!,
+          client_id:
+            provider === 'GOOGLE_CALENDAR'
+              ? process.env.GOOGLE_CLIENT_ID!
+              : process.env.MICROSOFT_CLIENT_ID!,
+          client_secret:
+            provider === 'GOOGLE_CALENDAR'
+              ? process.env.GOOGLE_CLIENT_SECRET!
+              : process.env.MICROSOFT_CLIENT_SECRET!,
         });
 
         const res = await fetch(tokenUrl, {
@@ -387,10 +421,14 @@ export class CalendarSyncService {
           expiresInSeconds = tokens.expires_in || expiresInSeconds;
         } else {
           const errText = await res.text();
-          this.logger.warn(`Échec d'échange de token OAuth avec le fournisseur externe. Utilisation du mock en fallback. Détails : ${errText}`);
+          this.logger.warn(
+            `Échec d'échange de token OAuth avec le fournisseur externe. Utilisation du mock en fallback. Détails : ${errText}`,
+          );
         }
       } catch (err: any) {
-        this.logger.error(`Erreur HTTP lors de l'échange OAuth : ${err instanceof Error ? err.message : String(err)}. Repli sur mock.`);
+        this.logger.error(
+          `Erreur HTTP lors de l'échange OAuth : ${err instanceof Error ? err.message : String(err)}. Repli sur mock.`,
+        );
       }
     }
 
@@ -444,7 +482,7 @@ export class CalendarSyncService {
     });
 
     if (!integration || !integration.refreshToken) {
-      throw new NotFoundException("Intégration ou Refresh Token introuvable.");
+      throw new NotFoundException('Intégration ou Refresh Token introuvable.');
     }
 
     const decryptedRefresh = decrypt(integration.refreshToken);
@@ -453,21 +491,29 @@ export class CalendarSyncService {
     let expiresInSeconds = 3600;
 
     const provider = integration.type as 'GOOGLE_CALENDAR' | 'OUTLOOK';
-    const hasCredentials = provider === 'GOOGLE_CALENDAR'
-      ? (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)
-      : (process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET);
+    const hasCredentials =
+      provider === 'GOOGLE_CALENDAR'
+        ? process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+        : process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET;
 
     if (hasCredentials && process.env.NODE_ENV !== 'test') {
       try {
-        const tokenUrl = provider === 'GOOGLE_CALENDAR'
-          ? 'https://oauth2.googleapis.com/token'
-          : 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
+        const tokenUrl =
+          provider === 'GOOGLE_CALENDAR'
+            ? 'https://oauth2.googleapis.com/token'
+            : 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
 
         const bodyParams = new URLSearchParams({
           refresh_token: decryptedRefresh,
           grant_type: 'refresh_token',
-          client_id: provider === 'GOOGLE_CALENDAR' ? process.env.GOOGLE_CLIENT_ID! : process.env.MICROSOFT_CLIENT_ID!,
-          client_secret: provider === 'GOOGLE_CALENDAR' ? process.env.GOOGLE_CLIENT_SECRET! : process.env.MICROSOFT_CLIENT_SECRET!,
+          client_id:
+            provider === 'GOOGLE_CALENDAR'
+              ? process.env.GOOGLE_CLIENT_ID!
+              : process.env.MICROSOFT_CLIENT_ID!,
+          client_secret:
+            provider === 'GOOGLE_CALENDAR'
+              ? process.env.GOOGLE_CLIENT_SECRET!
+              : process.env.MICROSOFT_CLIENT_SECRET!,
         });
 
         const res = await fetch(tokenUrl, {
@@ -485,7 +531,9 @@ export class CalendarSyncService {
           this.logger.warn(`Échec de rafraîchissement du jeton OAuth. Fallback sur mock.`);
         }
       } catch (err: any) {
-        this.logger.error(`Erreur HTTP lors du rafraîchissement OAuth : ${err instanceof Error ? err.message : String(err)}. Repli sur mock.`);
+        this.logger.error(
+          `Erreur HTTP lors du rafraîchissement OAuth : ${err instanceof Error ? err.message : String(err)}. Repli sur mock.`,
+        );
       }
     }
 
@@ -508,7 +556,9 @@ export class CalendarSyncService {
    * Synchronisation bidirectionnelle : importe des événements externes vers l'agenda local (TimeBlocks).
    */
   async syncCalendarEvents(workspaceId: string): Promise<{ importedCount: number }> {
-    this.logger.log(`Synchronisation bidirectionnelle des événements de calendrier pour le workspace ${workspaceId}`);
+    this.logger.log(
+      `Synchronisation bidirectionnelle des événements de calendrier pour le workspace ${workspaceId}`,
+    );
     let importedCount = 0;
 
     // 1. Trouver les intégrations actives
@@ -557,11 +607,12 @@ export class CalendarSyncService {
       if (!syncTask) {
         const defaultUser = await this.prisma.user.findFirst();
         if (!defaultUser) continue;
-        
+
         syncTask = await this.prisma.task.create({
           data: {
             title: 'Synchronisation Calendrier',
-            description: 'Tâche automatique contenant les plages horaires synchronisées de vos agendas externes.',
+            description:
+              'Tâche automatique contenant les plages horaires synchronisées de vos agendas externes.',
             status: 'IN_PROGRESS',
             projectId: project.id,
             userId: defaultUser.id,

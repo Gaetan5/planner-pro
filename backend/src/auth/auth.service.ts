@@ -20,7 +20,9 @@ export class AuthService {
     const clientSecret = process.env.GITHUB_CLIENT_SECRET;
 
     if (!clientId || !clientSecret) {
-      throw new BadRequestException('Les clés GITHUB_CLIENT_ID et GITHUB_CLIENT_SECRET ne sont pas configurées.');
+      throw new BadRequestException(
+        'Les clés GITHUB_CLIENT_ID et GITHUB_CLIENT_SECRET ne sont pas configurées.',
+      );
     }
 
     // 1. Échanger le code contre un token d'accès
@@ -37,9 +39,11 @@ export class AuthService {
       }),
     });
 
-    const tokenData = await tokenResponse.json() as any;
+    const tokenData = (await tokenResponse.json()) as any;
     if (tokenData.error) {
-      throw new UnauthorizedException(`Échec OAuth GitHub : ${tokenData.error_description || tokenData.error}`);
+      throw new UnauthorizedException(
+        `Échec OAuth GitHub : ${tokenData.error_description || tokenData.error}`,
+      );
     }
 
     const accessToken = tokenData.access_token;
@@ -51,7 +55,7 @@ export class AuthService {
         'User-Agent': 'Planner-Pro-App',
       },
     });
-    const userData = await userResponse.json() as any;
+    const userData = (await userResponse.json()) as any;
 
     // 3. Récupérer l'adresse e-mail (si elle n'est pas publique)
     let email = userData.email;
@@ -62,7 +66,7 @@ export class AuthService {
           'User-Agent': 'Planner-Pro-App',
         },
       });
-      const emails = await emailResponse.json() as any[];
+      const emails = (await emailResponse.json()) as any[];
       const primaryEmail = emails?.find((e: any) => e.primary);
       email = primaryEmail ? primaryEmail.email : `${userData.login}@github.planner.pro`;
     }
@@ -100,7 +104,7 @@ export class AuthService {
    */
   async mockLogin(name: string) {
     if (process.env.NODE_ENV === 'production') {
-      throw new BadRequestException('Le mode simulation n\'est pas disponible en production.');
+      throw new BadRequestException("Le mode simulation n'est pas disponible en production.");
     }
 
     const email = `${name.toLowerCase().replace(/\s+/g, '')}@local.planner.pro`;
@@ -129,7 +133,6 @@ export class AuthService {
     };
   }
 
-
   /**
    * Récupère la liste des dépôts GitHub publics et privés de l'utilisateur.
    */
@@ -152,10 +155,12 @@ export class AuthService {
     });
 
     if (!response.ok) {
-      throw new UnauthorizedException('Impossible de récupérer les dépôts GitHub. Le jeton d\'accès a peut-être expiré.');
+      throw new UnauthorizedException(
+        "Impossible de récupérer les dépôts GitHub. Le jeton d'accès a peut-être expiré.",
+      );
     }
 
-    const repos = await response.json() as any[];
+    const repos = (await response.json()) as any[];
     return repos.map((repo: any) => ({
       id: repo.id,
       name: repo.name,
@@ -178,7 +183,7 @@ export class AuthService {
     });
 
     if (!project) {
-      throw new BadRequestException('Projet introuvable ou vous n\'avez pas les droits d\'accès.');
+      throw new BadRequestException("Projet introuvable ou vous n'avez pas les droits d'accès.");
     }
 
     return this.prisma.project.update({
@@ -240,7 +245,7 @@ export class AuthService {
    */
   async login(email: string, passwordRaw: string) {
     if (!email || !passwordRaw) {
-      throw new BadRequestException('L\'email et le mot de passe sont requis.');
+      throw new BadRequestException("L'email et le mot de passe sont requis.");
     }
     const emailLower = email.toLowerCase().trim();
     const user = await this.prisma.user.findUnique({
@@ -303,7 +308,8 @@ export class AuthService {
     const project = await this.prisma.project.create({
       data: {
         name: '🚀 Démarrage Planner-Pro',
-        description: 'Projet d\'apprentissage interactif pour maîtriser toutes les fonctionnalités de Planner-Pro.',
+        description:
+          "Projet d'apprentissage interactif pour maîtriser toutes les fonctionnalités de Planner-Pro.",
         status: 'ACTIVE',
         userId: userId,
         workspaceId: workspace.id,
@@ -314,7 +320,8 @@ export class AuthService {
     const task1 = await this.prisma.task.create({
       data: {
         title: '📖 Découvrir le Kanban',
-        description: 'Déplacez cette tâche de "À faire" à "En cours". Vous pouvez changer son statut, sa priorité et y ajouter des commentaires.',
+        description:
+          'Déplacez cette tâche de "À faire" à "En cours". Vous pouvez changer son statut, sa priorité et y ajouter des commentaires.',
         status: 'TODO',
         priority: 'LOW',
         projectId: project.id,
@@ -325,7 +332,8 @@ export class AuthService {
     const task2 = await this.prisma.task.create({
       data: {
         title: '⏱️ Lancer un timer Pomodoro',
-        description: 'Allez sur l\'onglet Pomodoro, sélectionnez cette tâche, puis lancez le timer de 25 min pour tracker votre temps de focus.',
+        description:
+          "Allez sur l'onglet Pomodoro, sélectionnez cette tâche, puis lancez le timer de 25 min pour tracker votre temps de focus.",
         status: 'TODO',
         priority: 'MEDIUM',
         projectId: project.id,
@@ -335,8 +343,9 @@ export class AuthService {
 
     const task3 = await this.prisma.task.create({
       data: {
-        title: '🤖 Poser une question à l\'Assistant IA',
-        description: 'Cliquez sur l\'icône Sparkles ou tapez ⌘+K pour ouvrir la barre de commande IA. Tapez "Briefing de mon projet" pour voir l\'IA à l\'œuvre.',
+        title: "🤖 Poser une question à l'Assistant IA",
+        description:
+          "Cliquez sur l'icône Sparkles ou tapez ⌘+K pour ouvrir la barre de commande IA. Tapez \"Briefing de mon projet\" pour voir l'IA à l'œuvre.",
         status: 'TODO',
         priority: 'HIGH',
         projectId: project.id,
@@ -347,7 +356,8 @@ export class AuthService {
     const task4 = await this.prisma.task.create({
       data: {
         title: '📊 Voir le chemin critique sur Gantt',
-        description: 'Consultez l\'onglet Gantt. Vous y verrez cette tâche qui dépend de la première tâche ("Découvrir le Kanban"). Le chemin critique est affiché en rouge.',
+        description:
+          'Consultez l\'onglet Gantt. Vous y verrez cette tâche qui dépend de la première tâche ("Découvrir le Kanban"). Le chemin critique est affiché en rouge.',
         status: 'TODO',
         priority: 'HIGH',
         projectId: project.id,
@@ -365,4 +375,3 @@ export class AuthService {
     });
   }
 }
-

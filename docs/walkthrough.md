@@ -1,55 +1,38 @@
-# Walkthrough — Clôture de l'Audit & Extension Professionnelle
+# 🚀 Walkthrough — Synchronisation Kanban / Gantt Réactive (Méthode OODA)
 
-Ce document résume le travail effectué pour finaliser les phases 1 à 5 de l'application **Planner Pro**.
+> **Posture** : Lead Software Architect / Senior Full-Stack Engineer  
+> **Date** : 30 juin 2026
 
----
-
-## 🛠️ Modifications Réalisées
-
-### 1. Securisation du Module de Time Tracking
-- **[tracking.controller.ts](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/tracking/tracking.controller.ts)** : Ajout du décorateur `@Req() req: any` pour passer l'identifiant de l'utilisateur authentifié `req.user.id` à la méthode `getTimeLogsForTask`.
-- **[tracking.service.ts](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/tracking/tracking.service.ts)** :
-  - Mise à jour de `startTracking` pour s'assurer que la tâche existe, n'est pas supprimée et appartient à l'utilisateur ou à son workspace.
-  - Mise à jour de `getTimeLogsForTask` pour exiger et vérifier la même autorisation d'accès utilisateur avant de renvoyer les logs de temps.
-
-### 2. Extension du Contexte Applicatif (Frontend)
-- **[AppContext.tsx](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/context/AppContext.tsx)** :
-  - Ajout des types de données pour les workspaces, les jalons (milestones), les livrables (deliverables), les livraisons (deliveries), les dépendances de tâches et la capacité des ressources.
-  - Mise à jour de `refreshData()` pour charger les workspaces et le rapport de capacité des ressources en parallèle des autres appels d'API.
-  - Implémentation des 11 méthodes de mutation API (création de jalon, acceptation de livrable, toggle de checklist de livraison, etc.) et exposition de ces méthodes aux composants enfants.
-
-### 3. Vues Professionnelles Intégrées
-- **[GovernanceView.tsx](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/components/GovernanceView.tsx)** & **[GovernanceView.css](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/components/GovernanceView.css)** :
-  - En-tête d'équipe dynamique montrant les avatars des membres du workspace.
-  - Gestion des Jalons (création, complétion).
-  - Gestion des Livrables (création, cycle de statut).
-  - Workflow de livraison interactive (création avec checklist, toggle interactif des éléments de checklist, décision d'acceptation/rejet).
-  - Bilan de clôture finale de projet (glowing premium UI) s'affichant dès que toutes les tâches et livrables sont acceptés et validés.
-- **[CapacityView.tsx](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/components/CapacityView.tsx)** & **[CapacityView.css](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/components/CapacityView.css)** :
-  - Visualisation des taux de charge (capacité planifiée vs capacité hebdomadaire) et d'allocation projet.
-  - Alertes de surcharge glowing (en rouge) avec badges de conflits (`CAPACITY_EXCEEDED` / `ALLOCATION_EXCEEDED`).
-  - Formulaires de mise à jour de profil d'équipe et d'affectation projet.
-
-### 4. Liaisons et Navigation Globales
-- **[KanbanBoard.tsx](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/components/KanbanBoard.tsx)** : Affichage des tâches bloquantes sur les cartes Kanban et possibilité de lier une dépendance lors de la création d'une tâche.
-- **[App.tsx](file:///home/gaetan/Documents/GitHub/planner-pro/frontend/src/App.tsx)** : Intégration des deux nouveaux onglets **Gouvernance** et **Ressources** dans le menu principal (bureau) et la barre de navigation inférieure (mobile) avec des icônes sémantiques.
+Nous avons implémenté les règles d'auto-synchronisation intelligente et bidirectionnelle réactive pour améliorer la synergie entre les vues Kanban et Gantt.
 
 ---
 
-## 🧪 Validation & Compilation
+## 🛠️ Modifications Apportées
 
-### Compilation TypeScript & Bundling
-Le monorepo a été compilé avec succès en exécutant la commande globale :
-```bash
-pnpm build
-```
-Le build du frontend React (Vite) et du backend NestJS se sont terminés sans aucune erreur TypeScript ou de transpilateur.
+### [Backend]
 
-### Tests Unitaires & Sécurité
-Un nouveau fichier de test unitaire [tracking.service.spec.ts](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/tracking/tracking.service.spec.ts) a été créé pour garantir l'étanchéité des autorisations sur les logs et le tracking.
+- **Règles OODA intégrées dans [tasks.service.ts](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/projects/tasks.service.ts) :**
+  - **Règle 1** : Si une tâche passe au statut `IN_PROGRESS` et que ses dates globales de planification (`startDate` / `dueDate`) sont vides, le système lui affecte automatiquement la date actuelle comme date de début, et l'échéance à +2 jours. Elle apparaît ainsi directement sur le diagramme de Gantt.
+  - **Règle 2** : Si une tâche a le statut `TODO` et que sa date de début (`startDate`) est planifiée à aujourd'hui ou dans le passé sur le Gantt, elle passe automatiquement à l'état `IN_PROGRESS` sur le Kanban.
+- **Mise à jour des tests dans [tasks.service.spec.ts](file:///home/gaetan/Documents/GitHub/planner-pro/backend/tests/unit/projects/tasks.service.spec.ts) :**
+  - Ajout de la validation unitaire pour la Règle 1.
+  - Ajout de la validation unitaire pour la Règle 2.
+  - Correction du typage TypeScript de l'objet de mock Prisma pour éviter les erreurs de self-referencing.
 
-Les tests unitaires Jest ont été lancés :
+---
+
+## 🧪 Plan de Validation
+
+### Tests Automatisés
+
+La suite de tests unitaires et d'intégration Jest a été exécutée sur le backend pour s'assurer du bon fonctionnement :
+
 ```bash
 pnpm --filter backend test
 ```
-Les 3 suites de tests du backend (chiffrement, notes et sécurité du tracking) sont validées à 100% (10/10 PASS).
+
+### Validation Manuelle
+
+1. Ouvrir le Kanban sur `http://localhost:3004`.
+2. Glisser une tâche sans date (ex: _"Poser une question à l'Assistant IA"_) vers "En cours" : elle reçoit des dates et s'affiche sur le Gantt.
+3. Programmer une tâche au statut "À faire" avec une date de début égale ou antérieure à aujourd'hui : elle bascule directement en "En cours".

@@ -10,7 +10,8 @@ export interface ExtractedTask {
 }
 
 export interface ParsedAiAction {
-  type: 'CREATE_TASK' | 'ASSIGN_TASK' | 'CREATE_DEPENDENCY' | 'CREATE_TIMEBLOCK' | 'UPDATE_TASK_STATUS';
+  type:
+    'CREATE_TASK' | 'ASSIGN_TASK' | 'CREATE_DEPENDENCY' | 'CREATE_TIMEBLOCK' | 'UPDATE_TASK_STATUS';
   taskTitle?: string;
   taskDescription?: string;
   priority?: 'LOW' | 'MEDIUM' | 'HIGH';
@@ -33,9 +34,11 @@ export class GeminiService {
     const apiKey = process.env.GEMINI_API_KEY;
     if (apiKey && apiKey !== 'dummy_key' && apiKey.trim() !== '') {
       this.genAI = new GoogleGenerativeAI(apiKey);
-      this.logger.log('GeminiService initialisé avec succès avec une clé d\'API.');
+      this.logger.log("GeminiService initialisé avec succès avec une clé d'API.");
     } else {
-      this.logger.warn('Clé d\'API GEMINI_API_KEY absente. Le mode extraction par IA sera désactivé.');
+      this.logger.warn(
+        "Clé d'API GEMINI_API_KEY absente. Le mode extraction par IA sera désactivé.",
+      );
     }
   }
 
@@ -71,29 +74,34 @@ export class GeminiService {
           responseMimeType: 'application/json',
           responseSchema: {
             type: 'array' as any,
-            description: "Liste des tâches extraites du texte",
+            description: 'Liste des tâches extraites du texte',
             items: {
               type: 'object' as any,
               properties: {
                 title: {
                   type: 'string' as any,
-                  description: "Titre propre de la tâche sans hashtags, sans tags de date ni mentions d'assignation.",
+                  description:
+                    "Titre propre de la tâche sans hashtags, sans tags de date ni mentions d'assignation.",
                 },
                 projectTag: {
                   type: 'string' as any,
-                  description: "Nom du projet associé (taggé avec '#' dans le texte). Sans le symbole '#'. Si aucun tag n'est spécifié, utiliser 'Inbox'.",
+                  description:
+                    "Nom du projet associé (taggé avec '#' dans le texte). Sans le symbole '#'. Si aucun tag n'est spécifié, utiliser 'Inbox'.",
                 },
                 isDone: {
                   type: 'boolean' as any,
-                  description: "true si la tâche est cochée (ex: - [x] ou - [X]), false sinon (ex: - [ ]).",
+                  description:
+                    'true si la tâche est cochée (ex: - [x] ou - [X]), false sinon (ex: - [ ]).',
                 },
                 dueDate: {
                   type: 'string' as any,
-                  description: "Date limite de la tâche calculée au format YYYY-MM-DD en fonction du contexte de date de référence (ex: 'mardi prochain' ou '25 juin'). Laisser vide ou nul si aucune date n'est mentionnée.",
+                  description:
+                    "Date limite de la tâche calculée au format YYYY-MM-DD en fonction du contexte de date de référence (ex: 'mardi prochain' ou '25 juin'). Laisser vide ou nul si aucune date n'est mentionnée.",
                 },
                 assigneeName: {
                   type: 'string' as any,
-                  description: "Le nom d'utilisateur associé au tag @Nom (ex: 'gaetan' pour '@gaetan'). Sans le symbole '@'. Laisser vide ou nul si aucune assignation.",
+                  description:
+                    "Le nom d'utilisateur associé au tag @Nom (ex: 'gaetan' pour '@gaetan'). Sans le symbole '@'. Laisser vide ou nul si aucune assignation.",
                 },
               },
               required: ['title', 'projectTag', 'isDone'],
@@ -122,11 +130,14 @@ ${content}
       const result = await model.generateContent(prompt);
       const responseText = result.response.text();
       this.logger.debug(`Réponse brute de Gemini: ${responseText}`);
-      
+
       const tasks: ExtractedTask[] = JSON.parse(responseText);
       return tasks;
     } catch (error: unknown) {
-      this.logger.error(`Erreur lors de l'extraction des tâches via Gemini: ${error instanceof Error ? error.message : String(error)}`, error instanceof Error ? error.stack : undefined);
+      this.logger.error(
+        `Erreur lors de l'extraction des tâches via Gemini: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
       throw error;
     }
   }
@@ -149,70 +160,85 @@ ${content}
             properties: {
               actions: {
                 type: 'array' as any,
-                description: "Liste des actions d'automatisation identifiées à partir de la commande en langage naturel.",
+                description:
+                  "Liste des actions d'automatisation identifiées à partir de la commande en langage naturel.",
                 items: {
                   type: 'object' as any,
                   properties: {
                     type: {
                       type: 'string' as any,
-                      enum: ['CREATE_TASK', 'ASSIGN_TASK', 'CREATE_DEPENDENCY', 'CREATE_TIMEBLOCK', 'UPDATE_TASK_STATUS'],
-                      description: "Le type de l'action à exécuter."
+                      enum: [
+                        'CREATE_TASK',
+                        'ASSIGN_TASK',
+                        'CREATE_DEPENDENCY',
+                        'CREATE_TIMEBLOCK',
+                        'UPDATE_TASK_STATUS',
+                      ],
+                      description: "Le type de l'action à exécuter.",
                     },
                     taskTitle: {
                       type: 'string' as any,
-                      description: "Le titre de la tâche ciblée. Requis pour toutes les actions sauf CREATE_TASK si aucun titre n'est défini. Pour CREATE_TASK, c'est le titre de la nouvelle tâche."
+                      description:
+                        "Le titre de la tâche ciblée. Requis pour toutes les actions sauf CREATE_TASK si aucun titre n'est défini. Pour CREATE_TASK, c'est le titre de la nouvelle tâche.",
                     },
                     taskDescription: {
                       type: 'string' as any,
-                      description: "Description de la tâche (optionnel, utilisé pour CREATE_TASK)."
+                      description: 'Description de la tâche (optionnel, utilisé pour CREATE_TASK).',
                     },
                     priority: {
                       type: 'string' as any,
                       enum: ['LOW', 'MEDIUM', 'HIGH'],
-                      description: "La priorité de la tâche (pour CREATE_TASK)."
+                      description: 'La priorité de la tâche (pour CREATE_TASK).',
                     },
                     dueDate: {
                       type: 'string' as any,
-                      description: "Date d'échéance calculée au format YYYY-MM-DD en se basant sur la date de référence. (pour CREATE_TASK)."
+                      description:
+                        "Date d'échéance calculée au format YYYY-MM-DD en se basant sur la date de référence. (pour CREATE_TASK).",
                     },
                     estimatedMinutes: {
                       type: 'number' as any,
-                      description: "Temps estimé pour faire la tâche, en minutes (pour CREATE_TASK)."
+                      description:
+                        'Temps estimé pour faire la tâche, en minutes (pour CREATE_TASK).',
                     },
                     assigneeName: {
                       type: 'string' as any,
-                      description: "Nom, prénom ou email de l'utilisateur à assigner à la tâche (pour ASSIGN_TASK ou CREATE_TASK)."
+                      description:
+                        "Nom, prénom ou email de l'utilisateur à assigner à la tâche (pour ASSIGN_TASK ou CREATE_TASK).",
                     },
                     dependsOnTaskTitle: {
                       type: 'string' as any,
-                      description: "Le titre de la tâche dont dépend la tâche cible (requis pour CREATE_DEPENDENCY)."
+                      description:
+                        'Le titre de la tâche dont dépend la tâche cible (requis pour CREATE_DEPENDENCY).',
                     },
                     dependencyType: {
                       type: 'string' as any,
                       enum: ['FINISH_TO_START', 'START_TO_START', 'FINISH_TO_FINISH'],
-                      description: "Le type de dépendance (pour CREATE_DEPENDENCY). Par défaut 'FINISH_TO_START'."
+                      description:
+                        "Le type de dépendance (pour CREATE_DEPENDENCY). Par défaut 'FINISH_TO_START'.",
                     },
                     timeBlockStart: {
                       type: 'string' as any,
-                      description: "Date et heure de début du créneau horaire au format ISO (ex: YYYY-MM-DDTHH:mm:ss) (pour CREATE_TIMEBLOCK)."
+                      description:
+                        'Date et heure de début du créneau horaire au format ISO (ex: YYYY-MM-DDTHH:mm:ss) (pour CREATE_TIMEBLOCK).',
                     },
                     timeBlockEnd: {
                       type: 'string' as any,
-                      description: "Date et heure de fin du créneau horaire au format ISO (ex: YYYY-MM-DDTHH:mm:ss) (pour CREATE_TIMEBLOCK)."
+                      description:
+                        'Date et heure de fin du créneau horaire au format ISO (ex: YYYY-MM-DDTHH:mm:ss) (pour CREATE_TIMEBLOCK).',
                     },
                     status: {
                       type: 'string' as any,
                       enum: ['TODO', 'IN_PROGRESS', 'DONE'],
-                      description: "Le nouveau statut de la tâche (pour UPDATE_TASK_STATUS)."
-                    }
+                      description: 'Le nouveau statut de la tâche (pour UPDATE_TASK_STATUS).',
+                    },
                   },
-                  required: ['type']
-                }
-              }
+                  required: ['type'],
+                },
+              },
             },
-            required: ['actions']
-          }
-        }
+            required: ['actions'],
+          },
+        },
       });
 
       const formattedRefDate = referenceDate.toISOString().split('T')[0];
@@ -242,11 +268,14 @@ ${content}
       const result = await model.generateContent(prompt);
       const responseText = result.response.text();
       this.logger.debug(`Réponse commande IA brute: ${responseText}`);
-      
+
       const parsed = JSON.parse(responseText);
       return parsed.actions || [];
     } catch (error: unknown) {
-      this.logger.error(`Erreur lors de l'analyse de la commande IA via Gemini: ${error instanceof Error ? error.message : String(error)}`, error instanceof Error ? error.stack : undefined);
+      this.logger.error(
+        `Erreur lors de l'analyse de la commande IA via Gemini: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
       throw error;
     }
   }
@@ -260,7 +289,9 @@ ${content}
     }
 
     try {
-      this.logger.log(`Transcription audio demandée. Taille : ${audioBuffer.length} octets, Type : ${mimeType}`);
+      this.logger.log(
+        `Transcription audio demandée. Taille : ${audioBuffer.length} octets, Type : ${mimeType}`,
+      );
       const model = this.genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
       const response = await model.generateContent([
@@ -277,7 +308,10 @@ ${content}
       this.logger.log(`Transcription réussie : "${transcription.trim()}"`);
       return transcription.trim();
     } catch (error: unknown) {
-      this.logger.error(`Erreur lors de la transcription audio via Gemini: ${error instanceof Error ? error.message : String(error)}`, error instanceof Error ? error.stack : undefined);
+      this.logger.error(
+        `Erreur lors de la transcription audio via Gemini: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
       throw error;
     }
   }
@@ -292,8 +326,10 @@ ${content}
     }
 
     try {
-      this.logger.log(`Analyse d'image demandée. Taille : ${imageBuffer.length} octets, Type : ${mimeType}`);
-      
+      this.logger.log(
+        `Analyse d'image demandée. Taille : ${imageBuffer.length} octets, Type : ${mimeType}`,
+      );
+
       const model = this.genAI.getGenerativeModel({
         model: 'gemini-1.5-flash',
         generationConfig: {
@@ -309,64 +345,70 @@ ${content}
                   properties: {
                     type: {
                       type: 'string' as any,
-                      enum: ['CREATE_TASK', 'ASSIGN_TASK', 'CREATE_DEPENDENCY', 'CREATE_TIMEBLOCK', 'UPDATE_TASK_STATUS'],
-                      description: "Le type de l'action à exécuter."
+                      enum: [
+                        'CREATE_TASK',
+                        'ASSIGN_TASK',
+                        'CREATE_DEPENDENCY',
+                        'CREATE_TIMEBLOCK',
+                        'UPDATE_TASK_STATUS',
+                      ],
+                      description: "Le type de l'action à exécuter.",
                     },
                     taskTitle: {
                       type: 'string' as any,
-                      description: "Le titre de la tâche ciblée ou créée."
+                      description: 'Le titre de la tâche ciblée ou créée.',
                     },
                     taskDescription: {
                       type: 'string' as any,
-                      description: "Description optionnelle."
+                      description: 'Description optionnelle.',
                     },
                     priority: {
                       type: 'string' as any,
                       enum: ['LOW', 'MEDIUM', 'HIGH'],
-                      description: "La priorité (optionnel)."
+                      description: 'La priorité (optionnel).',
                     },
                     dueDate: {
                       type: 'string' as any,
-                      description: "Date d'échéance calculée au format YYYY-MM-DD (optionnel)."
+                      description: "Date d'échéance calculée au format YYYY-MM-DD (optionnel).",
                     },
                     estimatedMinutes: {
                       type: 'number' as any,
-                      description: "Estimation en minutes (optionnel)."
+                      description: 'Estimation en minutes (optionnel).',
                     },
                     assigneeName: {
                       type: 'string' as any,
-                      description: "Nom de la personne à assigner (optionnel)."
+                      description: 'Nom de la personne à assigner (optionnel).',
                     },
                     dependsOnTaskTitle: {
                       type: 'string' as any,
-                      description: "Titre de la tâche dont dépend la tâche cible (optionnel)."
+                      description: 'Titre de la tâche dont dépend la tâche cible (optionnel).',
                     },
                     dependencyType: {
                       type: 'string' as any,
                       enum: ['FINISH_TO_START', 'START_TO_START', 'FINISH_TO_FINISH'],
-                      description: "Le type de dépendance (optionnel)."
+                      description: 'Le type de dépendance (optionnel).',
                     },
                     timeBlockStart: {
                       type: 'string' as any,
-                      description: "Début du créneau au format ISO (optionnel)."
+                      description: 'Début du créneau au format ISO (optionnel).',
                     },
                     timeBlockEnd: {
                       type: 'string' as any,
-                      description: "Fin du créneau au format ISO (optionnel)."
+                      description: 'Fin du créneau au format ISO (optionnel).',
                     },
                     status: {
                       type: 'string' as any,
                       enum: ['TODO', 'IN_PROGRESS', 'DONE'],
-                      description: "Nouveau statut (optionnel)."
-                    }
+                      description: 'Nouveau statut (optionnel).',
+                    },
                   },
-                  required: ['type']
-                }
-              }
+                  required: ['type'],
+                },
+              },
             },
-            required: ['actions']
-          }
-        }
+            required: ['actions'],
+          },
+        },
       });
 
       const response = await model.generateContent([
@@ -381,11 +423,14 @@ ${content}
 
       const responseText = response.response.text();
       this.logger.debug(`Réponse vision brute de Gemini: ${responseText}`);
-      
+
       const parsed = JSON.parse(responseText);
       return parsed.actions || [];
     } catch (error: unknown) {
-      this.logger.error(`Erreur lors de l'analyse d'image via Gemini: ${error instanceof Error ? error.message : String(error)}`, error instanceof Error ? error.stack : undefined);
+      this.logger.error(
+        `Erreur lors de l'analyse d'image via Gemini: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
       throw error;
     }
   }

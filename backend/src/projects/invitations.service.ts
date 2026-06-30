@@ -1,4 +1,9 @@
-import { Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { WorkspaceRole, InvitationStatus } from '@prisma/client';
 import * as crypto from 'crypto';
@@ -15,7 +20,11 @@ export class InvitationsService {
     return crypto.createHash('sha256').update(token).digest('hex');
   }
 
-  private async assertWorkspaceRole(workspaceId: string, userId: string, allowedRoles: WorkspaceRole[]) {
+  private async assertWorkspaceRole(
+    workspaceId: string,
+    userId: string,
+    allowedRoles: WorkspaceRole[],
+  ) {
     const membership = await this.prisma.membership.findFirst({
       where: {
         workspaceId,
@@ -29,7 +38,7 @@ export class InvitationsService {
     }
 
     if (!allowedRoles.includes(membership.role)) {
-      throw new ForbiddenException("Droits insuffisants dans cet espace de travail.");
+      throw new ForbiddenException('Droits insuffisants dans cet espace de travail.');
     }
   }
 
@@ -81,17 +90,22 @@ export class InvitationsService {
           where: { id: invitedById },
           select: { name: true, email: true },
         }),
-      ]).then(([workspace, invitedByUser]) => {
-        this.mailService.sendInvitationEmail(
-          email,
-          workspace?.name || 'Planner Pro',
-          invitedByUser?.name || invitedByUser?.email || 'Un collaborateur',
-          rawToken,
-          role,
-        );
-      }).catch(err => {
-        console.error("Erreur lors de la récupération des détails d'invitation pour email :", err);
-      });
+      ])
+        .then(([workspace, invitedByUser]) => {
+          this.mailService.sendInvitationEmail(
+            email,
+            workspace?.name || 'Planner Pro',
+            invitedByUser?.name || invitedByUser?.email || 'Un collaborateur',
+            rawToken,
+            role,
+          );
+        })
+        .catch((err) => {
+          console.error(
+            "Erreur lors de la récupération des détails d'invitation pour email :",
+            err,
+          );
+        });
     }
 
     return {
@@ -123,7 +137,7 @@ export class InvitationsService {
     });
 
     if (!invitation) {
-      throw new NotFoundException("Invitation introuvable.");
+      throw new NotFoundException('Invitation introuvable.');
     }
 
     await this.assertWorkspaceRole(invitation.workspaceId, userId, ['OWNER', 'ADMIN']);
@@ -153,7 +167,7 @@ export class InvitationsService {
       throw new BadRequestException("Cette invitation a été révoquée par l'administrateur.");
     }
     if (invitation.status === InvitationStatus.ACCEPTED) {
-      throw new BadRequestException("Cette invitation a déjà été acceptée.");
+      throw new BadRequestException('Cette invitation a déjà été acceptée.');
     }
     if (new Date() > invitation.expiresAt) {
       await this.prisma.invitation.update({
@@ -177,7 +191,7 @@ export class InvitationsService {
       });
       return {
         workspaceId: invitation.workspaceId,
-        message: "Vous êtes déjà membre de cet espace de travail.",
+        message: 'Vous êtes déjà membre de cet espace de travail.',
       };
     }
 

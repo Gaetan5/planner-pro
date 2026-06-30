@@ -41,13 +41,11 @@ export class ProjectPermissionsService {
       },
     });
 
-    await this.logAction(
-      actorUserId,
-      'PROJECT_ROLE_ASSIGN',
-      'ProjectMembership',
-      membership.id,
-      { projectId, targetUserId, role },
-    );
+    await this.logAction(actorUserId, 'PROJECT_ROLE_ASSIGN', 'ProjectMembership', membership.id, {
+      projectId,
+      targetUserId,
+      role,
+    });
 
     return membership;
   }
@@ -72,13 +70,10 @@ export class ProjectPermissionsService {
       where: { id: membership.id },
     });
 
-    await this.logAction(
-      actorUserId,
-      'PROJECT_ROLE_REMOVE',
-      'ProjectMembership',
-      membership.id,
-      { projectId, targetUserId },
-    );
+    await this.logAction(actorUserId, 'PROJECT_ROLE_REMOVE', 'ProjectMembership', membership.id, {
+      projectId,
+      targetUserId,
+    });
 
     return { success: true };
   }
@@ -88,7 +83,12 @@ export class ProjectPermissionsService {
    */
   async getProjectMembers(projectId: string, userId: string) {
     // L'utilisateur doit avoir un accès minimal de lecture
-    await this.assertProjectRole(projectId, userId, ['MANAGER', 'CONTRIBUTOR', 'COMMENTER', 'CLIENT']);
+    await this.assertProjectRole(projectId, userId, [
+      'MANAGER',
+      'CONTRIBUTOR',
+      'COMMENTER',
+      'CLIENT',
+    ]);
 
     return this.prisma.projectMembership.findMany({
       where: { projectId },
@@ -134,7 +134,7 @@ export class ProjectPermissionsService {
       if (workspaceMembership) {
         // Un OWNER ou ADMIN du workspace a un contrôle MANAGER par défaut
         if (workspaceMembership.role === 'OWNER' || workspaceMembership.role === 'ADMIN') {
-          return; 
+          return;
         }
       }
     }
@@ -147,7 +147,7 @@ export class ProjectPermissionsService {
     });
 
     if (!projectMembership) {
-      throw new ForbiddenException("Accès non autorisé au projet");
+      throw new ForbiddenException('Accès non autorisé au projet');
     }
 
     // Si MANAGER fait partie des rôles attendus et que l'utilisateur est MANAGER
@@ -157,16 +157,16 @@ export class ProjectPermissionsService {
 
     // Si on cherche d'autres rôles et que l'utilisateur a un rôle suffisant (hiérarchie des rôles)
     const roleHierarchy = {
-      'MANAGER': 4,
-      'CONTRIBUTOR': 3,
-      'COMMENTER': 2,
-      'CLIENT': 1,
+      MANAGER: 4,
+      CONTRIBUTOR: 3,
+      COMMENTER: 2,
+      CLIENT: 1,
     };
 
     const userRoleValue = roleHierarchy[projectMembership.role] || 0;
-    
+
     // Trouver la valeur maximale des rôles autorisés
-    const requiredRoleValues = allowedRoles.map(r => roleHierarchy[r]);
+    const requiredRoleValues = allowedRoles.map((r) => roleHierarchy[r]);
     const minRequiredRoleValue = Math.min(...requiredRoleValues);
 
     if (userRoleValue >= minRequiredRoleValue) {
@@ -213,7 +213,7 @@ export class ProjectPermissionsService {
     });
 
     if (!defaultWorkspace) {
-      throw new ForbiddenException('Accès aux logs d\'audit refusé');
+      throw new ForbiddenException("Accès aux logs d'audit refusé");
     }
 
     return this.prisma.auditLog.findMany({

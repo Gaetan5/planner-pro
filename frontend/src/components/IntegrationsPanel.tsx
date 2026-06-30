@@ -80,7 +80,7 @@ export const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({ workspaceI
         type,
         name,
         url ? url : undefined,
-        (type === 'GOOGLE_CALENDAR' || type === 'OUTLOOK') ? calendarId : undefined
+        type === 'GOOGLE_CALENDAR' || type === 'OUTLOOK' ? calendarId : undefined,
       );
       // Reset form
       setName('');
@@ -89,7 +89,7 @@ export const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({ workspaceI
       // Reload
       await loadData();
     } catch (err: any) {
-      setError(err.message || 'Erreur lors de la création de l\'intégration.');
+      setError(err.message || "Erreur lors de la création de l'intégration.");
     }
   };
 
@@ -117,17 +117,22 @@ export const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({ workspaceI
       const res = await exportToCalendar(workspaceId, id);
       alert(`Export réussi ! ${res.exportedCount} créneaux horaires locaux synchronisés.`);
     } catch (err: any) {
-      setError(err.message || 'Erreur lors de l\'exportation.');
+      setError(err.message || "Erreur lors de l'exportation.");
     }
   };
 
   const getIcon = (type: string) => {
     switch (type) {
-      case 'SLACK': return '💬';
-      case 'TEAMS': return '👥';
-      case 'GOOGLE_CALENDAR': return '📅';
-      case 'OUTLOOK': return '📧';
-      default: return '🔌';
+      case 'SLACK':
+        return '💬';
+      case 'TEAMS':
+        return '👥';
+      case 'GOOGLE_CALENDAR':
+        return '📅';
+      case 'OUTLOOK':
+        return '📧';
+      default:
+        return '🔌';
     }
   };
 
@@ -135,20 +140,37 @@ export const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({ workspaceI
     <div className="integrations-container">
       <div className="integrations-header-section">
         <h2>Synchronisation Réelle</h2>
-        <p>Connectez vos messageries d'équipe et vos agendas externes pour centraliser et coordonner la planification.</p>
+        <p>
+          Connectez vos messageries d'équipe et vos agendas externes pour centraliser et coordonner
+          la planification.
+        </p>
       </div>
 
-      {error && <div className="error-message" style={{ background: 'rgba(239, 68, 68, 0.1)', color: '#f87171', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>{error}</div>}
+      {error && (
+        <div
+          className="error-message"
+          style={{
+            background: 'rgba(239, 68, 68, 0.1)',
+            color: '#f87171',
+            padding: '1rem',
+            borderRadius: '8px',
+            border: '1px solid rgba(239, 68, 68, 0.2)',
+          }}
+        >
+          {error}
+        </div>
+      )}
 
       {/* Liste des intégrations */}
       <div className="integrations-grid">
         {integrations.map((integration) => (
-          <div key={integration.id} className={`integration-card ${integration.type.toLowerCase()}`}>
+          <div
+            key={integration.id}
+            className={`integration-card ${integration.type.toLowerCase()}`}
+          >
             <div className="integration-card-top">
               <div className="integration-icon-title">
-                <div className="integration-icon-wrapper">
-                  {getIcon(integration.type)}
-                </div>
+                <div className="integration-icon-wrapper">{getIcon(integration.type)}</div>
                 <div>
                   <h3>{integration.name}</h3>
                   <span className="integration-type-badge">{integration.type}</span>
@@ -204,7 +226,16 @@ export const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({ workspaceI
         ))}
 
         {integrations.length === 0 && !loading && (
-          <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '2rem', background: 'rgba(255,255,255,0.02)', borderRadius: '12px', border: '1px dashed rgba(255,255,255,0.1)' }}>
+          <div
+            style={{
+              gridColumn: '1/-1',
+              textAlign: 'center',
+              padding: '2rem',
+              background: 'rgba(255,255,255,0.02)',
+              borderRadius: '12px',
+              border: '1px dashed rgba(255,255,255,0.1)',
+            }}
+          >
             Aucune intégration connectée pour cet espace de travail.
           </div>
         )}
@@ -236,7 +267,7 @@ export const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({ workspaceI
               />
             </div>
 
-            {(type === 'SLACK' || type === 'TEAMS') ? (
+            {type === 'SLACK' || type === 'TEAMS' ? (
               <div className="form-group">
                 <label>URL du Webhook</label>
                 <input

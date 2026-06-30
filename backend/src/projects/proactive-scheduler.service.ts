@@ -19,8 +19,8 @@ export class ProactiveSchedulerService {
    */
   @Cron(CronExpression.EVERY_HOUR)
   async runProactiveChecks() {
-    this.logger.log('Début de l\'analyse proactive planifiée (surcharges, retards, etc.)...');
-    
+    this.logger.log("Début de l'analyse proactive planifiée (surcharges, retards, etc.)...");
+
     // 1. Récupérer tous les workspaces actifs
     const workspaces = await this.prisma.workspace.findMany({
       where: { deletedAt: null },
@@ -30,16 +30,14 @@ export class ProactiveSchedulerService {
       try {
         // Calculer les alertes prédictives du workspace
         const alerts = await this.copilotService.calculatePredictiveAlerts(ws.id);
-        
+
         // Récupérer les membres (pour savoir qui notifier, ex: OWNER ou ADMIN, ou l'utilisateur concerné)
         const members = await this.prisma.membership.findMany({
           where: { workspaceId: ws.id },
           include: { user: true },
         });
 
-        const administrators = members.filter(
-          m => m.role === 'OWNER' || m.role === 'ADMIN'
-        );
+        const administrators = members.filter((m) => m.role === 'OWNER' || m.role === 'ADMIN');
 
         for (const alert of alerts) {
           // Si surcharge d'un utilisateur, on notifie l'utilisateur concerné et les admins
@@ -82,7 +80,10 @@ export class ProactiveSchedulerService {
           }
         }
       } catch (err: any) {
-        this.logger.error(`Erreur lors du traitement proactif pour le workspace ${ws.id}: ${err instanceof Error ? err.message : String(err)}`, err.stack);
+        this.logger.error(
+          `Erreur lors du traitement proactif pour le workspace ${ws.id}: ${err instanceof Error ? err.message : String(err)}`,
+          err.stack,
+        );
       }
     }
 
@@ -108,7 +109,11 @@ export class ProactiveSchedulerService {
         if (!membership) continue;
 
         // Générer le briefing (mocké par défaut ou via Gemini)
-        const briefingText = await this.copilotService.generateBriefing(u.id, membership.workspaceId, true);
+        const briefingText = await this.copilotService.generateBriefing(
+          u.id,
+          membership.workspaceId,
+          true,
+        );
 
         // Mettre à jour dans la table AiBriefing
         await this.prisma.aiBriefing.upsert({
@@ -122,7 +127,10 @@ export class ProactiveSchedulerService {
           },
         });
       } catch (err: any) {
-        this.logger.error(`Erreur lors de la génération de briefing pour l'utilisateur ${u.id}: ${err instanceof Error ? err.message : String(err)}`, err.stack);
+        this.logger.error(
+          `Erreur lors de la génération de briefing pour l'utilisateur ${u.id}: ${err instanceof Error ? err.message : String(err)}`,
+          err.stack,
+        );
       }
     }
 

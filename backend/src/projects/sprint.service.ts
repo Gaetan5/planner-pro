@@ -1,4 +1,9 @@
-import { Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SprintStatus, Sprint, Prisma } from '@prisma/client';
 import { CreateSprintDto } from './dto/create-sprint.dto';
@@ -30,7 +35,9 @@ export class SprintService {
     const end = new Date(data.endDate);
 
     if (start >= end) {
-      throw new BadRequestException('La date de début doit être strictement antérieure à la date de fin.');
+      throw new BadRequestException(
+        'La date de début doit être strictement antérieure à la date de fin.',
+      );
     }
 
     return this.prisma.sprint.create({
@@ -60,8 +67,14 @@ export class SprintService {
     if (data.startDate !== undefined) updateData.startDate = new Date(data.startDate);
     if (data.endDate !== undefined) updateData.endDate = new Date(data.endDate);
 
-    if (updateData.startDate && updateData.endDate && (updateData.startDate as Date) >= (updateData.endDate as Date)) {
-      throw new BadRequestException('La date de début doit être strictement antérieure à la date de fin.');
+    if (
+      updateData.startDate &&
+      updateData.endDate &&
+      (updateData.startDate as Date) >= (updateData.endDate as Date)
+    ) {
+      throw new BadRequestException(
+        'La date de début doit être strictement antérieure à la date de fin.',
+      );
     }
 
     if (data.status !== undefined) {
@@ -143,7 +156,11 @@ export class SprintService {
     });
   }
 
-  async associateTasksToSprint(sprintId: string | null, taskIds: string[], userId: string): Promise<void> {
+  async associateTasksToSprint(
+    sprintId: string | null,
+    taskIds: string[],
+    userId: string,
+  ): Promise<void> {
     if (sprintId) {
       const sprint = await this.prisma.sprint.findUnique({
         where: { id: sprintId },
@@ -202,7 +219,10 @@ export class SprintService {
     }
 
     const totalPointsCompleted = completedSprints.reduce((sum, sprint) => {
-      const sprintPoints = sprint.tasks.reduce((taskSum, task) => taskSum + (task.storyPoints || 0), 0);
+      const sprintPoints = sprint.tasks.reduce(
+        (taskSum, task) => taskSum + (task.storyPoints || 0),
+        0,
+      );
       return sum + sprintPoints;
     }, 0);
 
@@ -240,7 +260,9 @@ export class SprintService {
     const end = new Date(sprint.endDate);
 
     // Travailler en UTC pour éviter tout décalage dû au timezone
-    const startUtc = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), current.getUTCDate()));
+    const startUtc = new Date(
+      Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), current.getUTCDate()),
+    );
     const endUtc = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate()));
 
     if (startUtc > endUtc) {

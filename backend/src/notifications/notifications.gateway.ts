@@ -18,7 +18,9 @@ import { createClient } from 'redis';
     credentials: true,
   },
 })
-export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit {
+export class NotificationsGateway
+  implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit
+{
   @WebSocketServer()
   server!: Server;
 
@@ -26,13 +28,18 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
 
   async afterInit(server: Server) {
     try {
-      const pubClient = createClient({ url: `redis://${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || 6379}` });
+      const pubClient = createClient({
+        url: `redis://${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || 6379}`,
+      });
       const subClient = pubClient.duplicate();
       await Promise.all([pubClient.connect(), subClient.connect()]);
       server.adapter(createAdapter(pubClient, subClient));
       console.log('Notifications Gateway: Socket.io Redis adapter configuré.');
     } catch (e) {
-      console.error('Erreur lors de la configuration de l\'adaptateur Redis pour les notifications:', e);
+      console.error(
+        "Erreur lors de la configuration de l'adaptateur Redis pour les notifications:",
+        e,
+      );
     }
   }
 
@@ -51,8 +58,10 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
       const payload = await this.jwtService.verifyAsync(token);
       client.data.userId = payload.sub;
       client.join(`user:${client.data.userId}`);
-      console.log(`Notifications Gateway: Client connecté et authentifié : ${client.data.userId} (Socket: ${client.id})`);
-    } catch (error: unknown) {
+      console.log(
+        `Notifications Gateway: Client connecté et authentifié : ${client.data.userId} (Socket: ${client.id})`,
+      );
+    } catch (_error: unknown) {
       client.disconnect(true);
     }
   }

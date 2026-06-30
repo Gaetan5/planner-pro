@@ -10,7 +10,9 @@
   color: var(--text-secondary);
   padding: var(--space-sm);
   border-radius: var(--radius-sm);
-  transition: color var(--transition-fast), background var(--transition-fast);
+  transition:
+    color var(--transition-fast),
+    background var(--transition-fast);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -40,8 +42,13 @@
 }
 
 @keyframes notif-pulse {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.15); }
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.15);
+  }
 }
 
 /* Inbox Overlay */

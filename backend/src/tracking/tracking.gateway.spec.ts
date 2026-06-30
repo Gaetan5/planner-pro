@@ -122,7 +122,7 @@ describe('TrackingGateway', () => {
       expect(mockClient.data.audioChunks).toEqual([]); // Nettoyé après envoi
     });
 
-    it('devrait retourner une erreur si aucun chunk n\'a été reçu', async () => {
+    it("devrait retourner une erreur si aucun chunk n'a été reçu", async () => {
       mockClient.data.audioChunks = [];
 
       const res = await gateway.handleVoiceEnd(

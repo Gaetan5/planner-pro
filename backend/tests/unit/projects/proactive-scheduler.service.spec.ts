@@ -57,8 +57,16 @@ describe('ProactiveSchedulerService', () => {
     it('devrait detecter les surcharges et envoyer les notifications', async () => {
       mockPrisma.workspace.findMany.mockResolvedValue([{ id: 'ws-123' }]);
       mockPrisma.membership.findMany.mockResolvedValue([
-        { userId: 'admin-id', role: 'OWNER', user: { id: 'admin-id', name: 'Admin', email: 'admin@test.com' } },
-        { userId: 'user-id', role: 'CONTRIBUTOR', user: { id: 'user-id', name: 'User', email: 'user@test.com' } },
+        {
+          userId: 'admin-id',
+          role: 'OWNER',
+          user: { id: 'admin-id', name: 'Admin', email: 'admin@test.com' },
+        },
+        {
+          userId: 'user-id',
+          role: 'CONTRIBUTOR',
+          user: { id: 'user-id', name: 'User', email: 'user@test.com' },
+        },
       ]);
 
       mockCopilotService.calculatePredictiveAlerts.mockResolvedValue([
@@ -76,7 +84,7 @@ describe('ProactiveSchedulerService', () => {
           severity: 'CRITICAL',
           message: 'Jalon critique en retard.',
           taskId: 'task-123',
-        }
+        },
       ]);
 
       await service.runProactiveChecks();
@@ -88,7 +96,7 @@ describe('ProactiveSchedulerService', () => {
           type: 'SYSTEM',
           title: 'Alerte Surcharge',
           content: 'User est en surcharge de travail.',
-        })
+        }),
       );
 
       // Vérifier que la notification de surcharge a été envoyée aux administrateurs (ex: admin-id)
@@ -98,7 +106,7 @@ describe('ProactiveSchedulerService', () => {
           type: 'SYSTEM',
           title: 'Surcharge membre: User',
           content: 'User est en surcharge de travail.',
-        })
+        }),
       );
 
       // Vérifier que l'alerte critique OVERDUE a été envoyée à l'administrateur
@@ -109,7 +117,7 @@ describe('ProactiveSchedulerService', () => {
           title: 'Alerte Critique Workspace: OVERDUE',
           content: 'Jalon critique en retard.',
           taskId: 'task-123',
-        })
+        }),
       );
     });
   });

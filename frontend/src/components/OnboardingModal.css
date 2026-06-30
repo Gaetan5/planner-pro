@@ -24,8 +24,9 @@
   max-width: 580px;
   background: rgba(17, 24, 39, 0.85);
   border: 1px solid var(--glass-border);
-  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.4),
-              0 0 80px rgba(139, 92, 246, 0.15);
+  box-shadow:
+    0 30px 60px rgba(0, 0, 0, 0.4),
+    0 0 80px rgba(139, 92, 246, 0.15);
   border-radius: var(--radius-xl);
   padding: var(--space-3xl);
   display: flex;
@@ -160,7 +161,8 @@
 }
 
 @keyframes pulse-glow {
-  0%, 100% {
+  0%,
+  100% {
     transform: scale(1);
     opacity: 0.95;
   }

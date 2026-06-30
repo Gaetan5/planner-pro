@@ -3,7 +3,6 @@ import * as argon2 from 'argon2';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12;
-const AUTH_TAG_LENGTH = 16;
 
 /**
  * Récupère la clé de chiffrement et s'assure qu'elle est valide (32 octets).
@@ -12,12 +11,14 @@ const AUTH_TAG_LENGTH = 16;
 function getEncryptionKey(): Buffer {
   const key = process.env.ENCRYPTION_KEY;
   if (!key) {
-    throw new Error('La variable d\'environnement ENCRYPTION_KEY est obligatoire mais absente.');
+    throw new Error("La variable d'environnement ENCRYPTION_KEY est obligatoire mais absente.");
   }
 
   const keyBuffer = Buffer.from(key, 'utf8');
   if (keyBuffer.length !== 32) {
-    throw new Error(`La clé ENCRYPTION_KEY doit faire exactement 32 octets (actuellement : ${keyBuffer.length} octets).`);
+    throw new Error(
+      `La clé ENCRYPTION_KEY doit faire exactement 32 octets (actuellement : ${keyBuffer.length} octets).`,
+    );
   }
 
   return keyBuffer;
@@ -46,7 +47,7 @@ export function encrypt(text: string): string {
 export function decrypt(cipherText: string): string {
   const key = getEncryptionKey();
   const parts = cipherText.split(':');
-  
+
   if (parts.length !== 3) {
     throw new Error('Format de texte chiffré invalide (doit être "iv:tag:encrypted").');
   }
@@ -75,7 +76,10 @@ export async function hashPassword(password: string): Promise<string> {
  * Vérifie si un mot de passe correspond à un hachage stocké (Argon2 ou PBKDF2 legacy).
  * Renvoie un objet indiquant si le mot de passe est valide et s'il nécessite une migration.
  */
-export async function verifyPassword(password: string, storedHash: string): Promise<{ isValid: boolean; needsMigration: boolean }> {
+export async function verifyPassword(
+  password: string,
+  storedHash: string,
+): Promise<{ isValid: boolean; needsMigration: boolean }> {
   // Détection du format : Argon2 commence par $argon2
   if (storedHash.startsWith('$argon2')) {
     const isValid = await argon2.verify(storedHash, password);
@@ -89,7 +93,6 @@ export async function verifyPassword(password: string, storedHash: string): Prom
   }
   const [salt, hash] = parts;
   const verifyHash = pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
-  
+
   return { isValid: hash === verifyHash, needsMigration: true };
 }
-

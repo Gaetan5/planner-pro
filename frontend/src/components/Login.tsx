@@ -1,85 +1,85 @@
-import React, { useState } from 'react'
-import { useApp } from '../context/AppContext'
-import logo from '../logo.png'
-import './Login.css'
+import React, { useState } from 'react';
+import { useApp } from '../context/AppContext';
+import logo from '../logo.png';
+import './Login.css';
 
 export const Login: React.FC = () => {
-  const { mockLogin, classicLogin, classicRegister } = useApp()
-  const [isRegisterMode, setIsRegisterMode] = useState(false)
-  
+  const { mockLogin, classicLogin, classicRegister } = useApp();
+  const [isRegisterMode, setIsRegisterMode] = useState(false);
+
   // Login fields
-  const [loginEmail, setLoginEmail] = useState('')
-  const [loginPassword, setLoginPassword] = useState('')
-  
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+
   // Register fields
-  const [regName, setRegName] = useState('')
-  const [regEmail, setRegEmail] = useState('')
-  const [regPassword, setRegPassword] = useState('')
-  
+  const [regName, setRegName] = useState('');
+  const [regEmail, setRegEmail] = useState('');
+  const [regPassword, setRegPassword] = useState('');
+
   // Local bypass fields
-  const [bypassName, setBypassName] = useState('')
-  
+  const [bypassName, setBypassName] = useState('');
+
   // UI states
-  const [errorMsg, setErrorMsg] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [errorMsg, setErrorMsg] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const handleGitHubLogin = () => {
-    const clientId = import.meta.env.VITE_GITHUB_CLIENT_ID || 'votre_client_id_github'
-    const redirectUri = window.location.origin
-    window.location.href = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&scope=user,repo`
-  }
+    const clientId = import.meta.env.VITE_GITHUB_CLIENT_ID || 'votre_client_id_github';
+    const redirectUri = window.location.origin;
+    window.location.href = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&scope=user,repo`;
+  };
 
   const handleBypass = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setErrorMsg('')
-    setLoading(true)
+    e.preventDefault();
+    setErrorMsg('');
+    setLoading(true);
     try {
-      await mockLogin(bypassName || 'Gaëtan')
+      await mockLogin(bypassName || 'Gaëtan');
     } catch (err: any) {
-      setErrorMsg(err.message || 'Échec de la simulation de connexion')
+      setErrorMsg(err.message || 'Échec de la simulation de connexion');
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   const handleClassicLogin = async (e: React.FormEvent) => {
-    e.preventDefault()
+    e.preventDefault();
     if (!loginEmail || !loginPassword) {
-      setErrorMsg('Veuillez remplir tous les champs.')
-      return
+      setErrorMsg('Veuillez remplir tous les champs.');
+      return;
     }
-    setErrorMsg('')
-    setLoading(true)
+    setErrorMsg('');
+    setLoading(true);
     try {
-      await classicLogin(loginEmail, loginPassword)
+      await classicLogin(loginEmail, loginPassword);
     } catch (err: any) {
-      setErrorMsg(err.message || 'Identifiants incorrects.')
+      setErrorMsg(err.message || 'Identifiants incorrects.');
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   const handleClassicRegister = async (e: React.FormEvent) => {
-    e.preventDefault()
+    e.preventDefault();
     if (!regName || !regEmail || !regPassword) {
-      setErrorMsg('Veuillez remplir tous les champs.')
-      return
+      setErrorMsg('Veuillez remplir tous les champs.');
+      return;
     }
     if (regPassword.length < 6) {
-      setErrorMsg('Le mot de passe doit faire au moins 6 caractères.')
-      return
+      setErrorMsg('Le mot de passe doit faire au moins 6 caractères.');
+      return;
     }
-    setErrorMsg('')
-    setLoading(true)
+    setErrorMsg('');
+    setLoading(true);
     try {
-      await classicRegister(regEmail, regPassword, regName)
+      await classicRegister(regEmail, regPassword, regName);
       // L'inscription déclenchera automatiquement la connexion et l'onboarding côté backend
     } catch (err: any) {
-      setErrorMsg(err.message || "Erreur lors de l'inscription.")
+      setErrorMsg(err.message || "Erreur lors de l'inscription.");
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   return (
     <div className="login-page">
@@ -108,8 +108,8 @@ export const Login: React.FC = () => {
           <button
             className={`auth-tab ${!isRegisterMode ? 'auth-tab--active' : ''}`}
             onClick={() => {
-              setIsRegisterMode(false)
-              setErrorMsg('')
+              setIsRegisterMode(false);
+              setErrorMsg('');
             }}
           >
             Se connecter
@@ -117,8 +117,8 @@ export const Login: React.FC = () => {
           <button
             className={`auth-tab ${isRegisterMode ? 'auth-tab--active' : ''}`}
             onClick={() => {
-              setIsRegisterMode(true)
-              setErrorMsg('')
+              setIsRegisterMode(true);
+              setErrorMsg('');
             }}
           >
             S'inscrire
@@ -164,11 +164,7 @@ export const Login: React.FC = () => {
                 />
               </div>
 
-              <button
-                type="submit"
-                className="btn-primary auth-submit-btn"
-                disabled={loading}
-              >
+              <button type="submit" className="btn-primary auth-submit-btn" disabled={loading}>
                 {loading ? 'Connexion en cours...' : 'Se connecter'}
               </button>
             </form>
@@ -211,11 +207,7 @@ export const Login: React.FC = () => {
                 />
               </div>
 
-              <button
-                type="submit"
-                className="btn-primary auth-submit-btn"
-                disabled={loading}
-              >
+              <button type="submit" className="btn-primary auth-submit-btn" disabled={loading}>
                 {loading ? 'Création du compte...' : 'Créer un compte professionnel'}
               </button>
             </form>
@@ -230,11 +222,7 @@ export const Login: React.FC = () => {
         </div>
 
         {/* GitHub SSO */}
-        <button
-          onClick={handleGitHubLogin}
-          className="github-btn"
-          type="button"
-        >
+        <button onClick={handleGitHubLogin} className="github-btn" type="button">
           <svg height="18" width="18" viewBox="0 0 16 16" fill="currentColor">
             <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
           </svg>
@@ -261,5 +249,5 @@ export const Login: React.FC = () => {
         </div>
       </div>
     </div>
-  )
-}
+  );
+};

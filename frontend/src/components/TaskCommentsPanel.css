@@ -137,7 +137,10 @@
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  background: var(--accent-primary-gradient, linear-gradient(135deg, var(--accent-primary), var(--accent-secondary)));
+  background: var(
+    --accent-primary-gradient,
+    linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))
+  );
   color: #fff;
   display: flex;
   align-items: center;
@@ -170,7 +173,11 @@
 }
 
 .comment-bubble-row--mine .comment-avatar {
-  background: linear-gradient(135deg, #fbbf24, #f59e0b); /* Couleur différente pour l'auteur connecté */
+  background: linear-gradient(
+    135deg,
+    #fbbf24,
+    #f59e0b
+  ); /* Couleur différente pour l'auteur connecté */
 }
 
 .comment-bubble-meta {
@@ -453,18 +460,32 @@
 
 /* Animations */
 @keyframes fadeInOverlay {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 @keyframes slideInDrawer {
-  from { transform: translateX(100%); }
-  to { transform: translateX(0); }
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
 }
 
 @keyframes slideUpMentions {
-  from { transform: translateY(10px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
+  from {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 
 /* Threads / Réponses */
@@ -797,9 +818,12 @@
 }
 
 @keyframes typingBounce {
-  0%, 80%, 100% { 
+  0%,
+  80%,
+  100% {
     transform: scale(0);
-  } 40% { 
+  }
+  40% {
     transform: scale(1);
   }
 }
@@ -816,4 +840,3 @@
   height: 10px;
   border-width: 1.5px;
 }
-

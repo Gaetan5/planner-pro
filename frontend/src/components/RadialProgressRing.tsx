@@ -30,7 +30,12 @@ export const RadialProgressRing: React.FC<RadialProgressRingProps> = ({
 
   return (
     <div className="radial-progress-ring-container" style={{ width: size, height: size }}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="radial-progress-ring-svg">
+      <svg
+        width={size}
+        height={size}
+        viewBox={`0 0 ${size} ${size}`}
+        className="radial-progress-ring-svg"
+      >
         <defs>
           {/* Dégradé Indigo/Violet (Actif / Standard) */}
           <linearGradient id="grad-ACTIVE" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -41,7 +46,7 @@ export const RadialProgressRing: React.FC<RadialProgressRingProps> = ({
             <stop offset="0%" stopColor="#818cf8" />
             <stop offset="100%" stopColor="#c084fc" />
           </linearGradient>
-          
+
           {/* Dégradé Vert Émeraude (Terminé) */}
           <linearGradient id="grad-DELIVERED" x1="0%" y1="0%" x2="100%" y2="100%">
             <stop offset="0%" stopColor="#34d399" />

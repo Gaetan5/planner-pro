@@ -1,385 +1,402 @@
-import React, { useState, useEffect, useRef } from 'react'
-import { useApp } from '../context/AppContext'
-import { X, MessageSquare, Send, Trash2, Edit2, AtSign, Check, Paperclip, CornerDownRight, FileText, Image, File } from 'lucide-react'
-import './TaskCommentsPanel.css'
+import React, { useState, useEffect, useRef } from 'react';
+import { useApp } from '../context/AppContext';
+import {
+  X,
+  MessageSquare,
+  Send,
+  Trash2,
+  Edit2,
+  AtSign,
+  Check,
+  Paperclip,
+  CornerDownRight,
+  FileText,
+  Image,
+  File,
+} from 'lucide-react';
+import './TaskCommentsPanel.css';
 
 interface TaskCommentsPanelProps {
-  taskId: string
-  taskTitle: string
-  onClose: () => void
+  taskId: string;
+  taskTitle: string;
+  onClose: () => void;
 }
 
-export const TaskCommentsPanel: React.FC<TaskCommentsPanelProps> = ({ taskId, taskTitle, onClose }) => {
-  const { 
-    user, 
-    socket, 
-    addComment, 
-    getComments, 
-    deleteComment, 
-    updateComment, 
+export const TaskCommentsPanel: React.FC<TaskCommentsPanelProps> = ({
+  taskId,
+  taskTitle,
+  onClose,
+}) => {
+  const {
+    user,
+    socket,
+    addComment,
+    getComments,
+    deleteComment,
+    updateComment,
     workspaceMembers,
     createTaskAttachment,
     getTaskAttachments,
-    deleteTaskAttachment
-  } = useApp()
+    deleteTaskAttachment,
+  } = useApp();
 
-  const [comments, setComments] = useState<any[]>([])
-  const [taskAttachments, setTaskAttachments] = useState<any[]>([])
-  const [newCommentText, setNewCommentText] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [attachmentsLoading, setAttachmentsLoading] = useState(false)
-  
+  const [comments, setComments] = useState<any[]>([]);
+  const [taskAttachments, setTaskAttachments] = useState<any[]>([]);
+  const [newCommentText, setNewCommentText] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [attachmentsLoading, setAttachmentsLoading] = useState(false);
+
   // États pour auto-complétion des mentions @
-  const [showMentionsList, setShowMentionsList] = useState(false)
-  const [mentionSearch, setMentionSearch] = useState('')
-  const [mentionTriggerIndex, setMentionTriggerIndex] = useState(-1)
+  const [showMentionsList, setShowMentionsList] = useState(false);
+  const [mentionSearch, setMentionSearch] = useState('');
+  const [mentionTriggerIndex, setMentionTriggerIndex] = useState(-1);
 
   // États pour la modification d'un commentaire
-  const [editingCommentId, setEditingCommentId] = useState<string | null>(null)
-  const [editingText, setEditingText] = useState('')
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState('');
 
   // État pour répondre à un commentaire
-  const [replyingTo, setReplyingTo] = useState<{ id: string; name: string } | null>(null)
+  const [replyingTo, setReplyingTo] = useState<{ id: string; name: string } | null>(null);
 
   // Pièces jointes en attente de publication pour le nouveau commentaire
-  const [pendingAttachments, setPendingAttachments] = useState<any[]>([])
+  const [pendingAttachments, setPendingAttachments] = useState<any[]>([]);
 
   // Indicateur de saisie en temps réel (typing indicator)
-  const [typingUsers, setTypingUsers] = useState<Record<string, string>>({})
-  
-  const commentsEndRef = useRef<HTMLDivElement>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const typingTimeoutRef = useRef<any>(null)
-  const taskFileInputRef = useRef<HTMLInputElement>(null)
-  const commentFileInputRef = useRef<HTMLInputElement>(null)
+  const [typingUsers, setTypingUsers] = useState<Record<string, string>>({});
+
+  const commentsEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const typingTimeoutRef = useRef<any>(null);
+  const taskFileInputRef = useRef<HTMLInputElement>(null);
+  const commentFileInputRef = useRef<HTMLInputElement>(null);
 
   // Fonctions pour manipuler l'arbre des commentaires localement
   const addCommentToTree = (list: any[], newComment: any): any[] => {
     if (!newComment.parentId) {
-      if (list.some(c => c.id === newComment.id)) return list
-      return [...list, { ...newComment, replies: [] }]
+      if (list.some((c) => c.id === newComment.id)) return list;
+      return [...list, { ...newComment, replies: [] }];
     }
-    
-    return list.map(c => {
+
+    return list.map((c) => {
       if (c.id === newComment.parentId) {
-        const replies = c.replies || []
-        if (replies.some((r: any) => r.id === newComment.id)) return c
+        const replies = c.replies || [];
+        if (replies.some((r: any) => r.id === newComment.id)) return c;
         return {
           ...c,
-          replies: [...replies, { ...newComment, replies: [] }]
-        }
+          replies: [...replies, { ...newComment, replies: [] }],
+        };
       } else if (c.replies && c.replies.length > 0) {
         return {
           ...c,
-          replies: addCommentToTree(c.replies, newComment)
-        }
+          replies: addCommentToTree(c.replies, newComment),
+        };
       }
-      return c
-    })
-  }
+      return c;
+    });
+  };
 
   const removeCommentFromTree = (list: any[], commentId: string): any[] => {
     return list
-      .filter(c => c.id !== commentId)
-      .map(c => {
+      .filter((c) => c.id !== commentId)
+      .map((c) => {
         if (c.replies && c.replies.length > 0) {
           return {
             ...c,
-            replies: removeCommentFromTree(c.replies, commentId)
-          }
+            replies: removeCommentFromTree(c.replies, commentId),
+          };
         }
-        return c
-      })
-  }
+        return c;
+      });
+  };
 
   const updateCommentInTree = (list: any[], updatedComment: any): any[] => {
-    return list.map(c => {
+    return list.map((c) => {
       if (c.id === updatedComment.id) {
-        return { ...c, ...updatedComment }
+        return { ...c, ...updatedComment };
       } else if (c.replies && c.replies.length > 0) {
         return {
           ...c,
-          replies: updateCommentInTree(c.replies, updatedComment)
-        }
+          replies: updateCommentInTree(c.replies, updatedComment),
+        };
       }
-      return c
-    })
-  }
+      return c;
+    });
+  };
 
   // Charger les commentaires, pièces jointes et s'abonner via WebSocket
   useEffect(() => {
     const initData = async () => {
-      setLoading(true)
+      setLoading(true);
       try {
         const [commentsList, attachmentsList] = await Promise.all([
           getComments(taskId),
-          getTaskAttachments(taskId)
-        ])
-        setComments(commentsList)
-        setTaskAttachments(attachmentsList)
+          getTaskAttachments(taskId),
+        ]);
+        setComments(commentsList);
+        setTaskAttachments(attachmentsList);
       } catch (e) {
-        console.error('Erreur chargement données discussion', e)
+        console.error('Erreur chargement données discussion', e);
       } finally {
-        setLoading(false)
+        setLoading(false);
       }
-    }
+    };
 
-    initData()
+    initData();
 
     // S'abonner aux événements temps réel de cette tâche
     if (socket) {
-      socket.emit('join-task', { taskId })
+      socket.emit('join-task', { taskId });
 
       const handleNewComment = (data: any) => {
         if (data.taskId === taskId) {
-          setComments(prev => addCommentToTree(prev, data.comment))
+          setComments((prev) => addCommentToTree(prev, data.comment));
         }
-      }
+      };
 
       const handleCommentDeleted = (data: any) => {
         if (data.taskId === taskId) {
-          setComments(prev => removeCommentFromTree(prev, data.commentId))
+          setComments((prev) => removeCommentFromTree(prev, data.commentId));
         }
-      }
+      };
 
       const handleCommentUpdated = (data: any) => {
         if (data.taskId === taskId) {
-          setComments(prev => updateCommentInTree(prev, data.comment))
+          setComments((prev) => updateCommentInTree(prev, data.comment));
         }
-      }
+      };
 
       const handleUserTyping = (data: any) => {
         if (data.taskId === taskId) {
-          setTypingUsers(prev => {
-            const next = { ...prev }
+          setTypingUsers((prev) => {
+            const next = { ...prev };
             if (data.isTyping) {
-              const member = workspaceMembers.find(m => m.user.id === data.userId)
-              const name = member ? (member.user.name || member.user.email) : 'Quelqu’un'
-              next[data.userId] = name
+              const member = workspaceMembers.find((m) => m.user.id === data.userId);
+              const name = member ? member.user.name || member.user.email : 'Quelqu’un';
+              next[data.userId] = name;
             } else {
-              delete next[data.userId]
+              delete next[data.userId];
             }
-            return next
-          })
+            return next;
+          });
         }
-      }
+      };
 
-      socket.on('new-comment', handleNewComment)
-      socket.on('comment-deleted', handleCommentDeleted)
-      socket.on('comment-updated', handleCommentUpdated)
-      socket.on('user-typing', handleUserTyping)
+      socket.on('new-comment', handleNewComment);
+      socket.on('comment-deleted', handleCommentDeleted);
+      socket.on('comment-updated', handleCommentUpdated);
+      socket.on('user-typing', handleUserTyping);
 
       return () => {
-        socket.emit('leave-task', { taskId })
-        socket.off('new-comment', handleNewComment)
-        socket.off('comment-deleted', handleCommentDeleted)
-        socket.off('comment-updated', handleCommentUpdated)
-        socket.off('user-typing', handleUserTyping)
-        
+        socket.emit('leave-task', { taskId });
+        socket.off('new-comment', handleNewComment);
+        socket.off('comment-deleted', handleCommentDeleted);
+        socket.off('comment-updated', handleCommentUpdated);
+        socket.off('user-typing', handleUserTyping);
+
         // Arrêter le typing
         if (typingTimeoutRef.current) {
-          clearTimeout(typingTimeoutRef.current)
+          clearTimeout(typingTimeoutRef.current);
         }
-      }
+      };
     }
-  }, [taskId, socket, workspaceMembers])
+  }, [taskId, socket, workspaceMembers]);
 
   // Faire défiler vers le bas lors de l'ajout d'un commentaire
   useEffect(() => {
-    commentsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [comments])
+    commentsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [comments]);
 
   // Gérer la saisie et l'auto-complétion du @
   const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const text = e.target.value
-    setNewCommentText(text)
+    const text = e.target.value;
+    setNewCommentText(text);
 
     // WebSocket typing
     if (socket) {
-      socket.emit('typing', { taskId, isTyping: true })
-      
+      socket.emit('typing', { taskId, isTyping: true });
+
       if (typingTimeoutRef.current) {
-        clearTimeout(typingTimeoutRef.current)
+        clearTimeout(typingTimeoutRef.current);
       }
-      
+
       typingTimeoutRef.current = setTimeout(() => {
-        socket.emit('typing', { taskId, isTyping: false })
-      }, 3000)
+        socket.emit('typing', { taskId, isTyping: false });
+      }, 3000);
     }
 
-    const cursorPosition = e.target.selectionStart
-    const lastAtPos = text.lastIndexOf('@', cursorPosition - 1)
+    const cursorPosition = e.target.selectionStart;
+    const lastAtPos = text.lastIndexOf('@', cursorPosition - 1);
 
     if (lastAtPos !== -1) {
-      const sub = text.slice(lastAtPos + 1, cursorPosition)
+      const sub = text.slice(lastAtPos + 1, cursorPosition);
       if (!sub.includes(' ') && !sub.includes('\n')) {
-        setShowMentionsList(true)
-        setMentionSearch(sub)
-        setMentionTriggerIndex(lastAtPos)
-        return
+        setShowMentionsList(true);
+        setMentionSearch(sub);
+        setMentionTriggerIndex(lastAtPos);
+        return;
       }
     }
 
-    setShowMentionsList(false)
-  }
+    setShowMentionsList(false);
+  };
 
   // Insérer une mention
   const handleSelectMention = (member: any) => {
-    if (mentionTriggerIndex === -1) return
+    if (mentionTriggerIndex === -1) return;
 
-    const name = member.user.name || member.user.email.split('@')[0]
-    const formattedMention = `@${name.replace(/\s+/g, '')} `
-    
-    const before = newCommentText.slice(0, mentionTriggerIndex)
-    const after = newCommentText.slice(textareaRef.current?.selectionStart || 0)
+    const name = member.user.name || member.user.email.split('@')[0];
+    const formattedMention = `@${name.replace(/\s+/g, '')} `;
 
-    setNewCommentText(before + formattedMention + after)
-    setShowMentionsList(false)
-    setMentionTriggerIndex(-1)
-    
-    setTimeout(() => textareaRef.current?.focus(), 50)
-  }
+    const before = newCommentText.slice(0, mentionTriggerIndex);
+    const after = newCommentText.slice(textareaRef.current?.selectionStart || 0);
+
+    setNewCommentText(before + formattedMention + after);
+    setShowMentionsList(false);
+    setMentionTriggerIndex(-1);
+
+    setTimeout(() => textareaRef.current?.focus(), 50);
+  };
 
   // Filtrer les membres du workspace pour les mentions
-  const filteredMembers = workspaceMembers.filter(m => {
-    const name = m.user.name || m.user.email
-    return name.toLowerCase().includes(mentionSearch.toLowerCase())
-  })
+  const filteredMembers = workspaceMembers.filter((m) => {
+    const name = m.user.name || m.user.email;
+    return name.toLowerCase().includes(mentionSearch.toLowerCase());
+  });
 
   // Envoyer un commentaire
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!newCommentText.trim() && pendingAttachments.length === 0) return
+    e.preventDefault();
+    if (!newCommentText.trim() && pendingAttachments.length === 0) return;
 
     try {
       if (socket) {
-        socket.emit('typing', { taskId, isTyping: false })
+        socket.emit('typing', { taskId, isTyping: false });
       }
       if (typingTimeoutRef.current) {
-        clearTimeout(typingTimeoutRef.current)
+        clearTimeout(typingTimeoutRef.current);
       }
 
-      await addComment(taskId, newCommentText, replyingTo?.id, pendingAttachments)
-      setNewCommentText('')
-      setReplyingTo(null)
-      setPendingAttachments([])
+      await addComment(taskId, newCommentText, replyingTo?.id, pendingAttachments);
+      setNewCommentText('');
+      setReplyingTo(null);
+      setPendingAttachments([]);
     } catch (err: any) {
-      alert(err.message || "Erreur lors de la publication du commentaire.")
+      alert(err.message || 'Erreur lors de la publication du commentaire.');
     }
-  }
+  };
 
   // Supprimer un commentaire
   const handleDelete = async (commentId: string) => {
-    if (window.confirm("Voulez-vous vraiment supprimer ce commentaire ?")) {
+    if (window.confirm('Voulez-vous vraiment supprimer ce commentaire ?')) {
       try {
-        await deleteComment(commentId)
+        await deleteComment(commentId);
       } catch (err: any) {
-        alert(err.message || "Vous n'avez pas les droits pour supprimer ce commentaire.")
+        alert(err.message || "Vous n'avez pas les droits pour supprimer ce commentaire.");
       }
     }
-  }
+  };
 
   const handleStartEdit = (commentId: string, currentContent: string) => {
-    setEditingCommentId(commentId)
-    setEditingText(currentContent)
-  }
+    setEditingCommentId(commentId);
+    setEditingText(currentContent);
+  };
 
   const handleCancelEdit = () => {
-    setEditingCommentId(null)
-    setEditingText('')
-  }
+    setEditingCommentId(null);
+    setEditingText('');
+  };
 
   const handleSaveEdit = async (commentId: string) => {
-    if (!editingText.trim()) return
+    if (!editingText.trim()) return;
     try {
-      await updateComment(commentId, editingText)
-      setEditingCommentId(null)
-      setEditingText('')
+      await updateComment(commentId, editingText);
+      setEditingCommentId(null);
+      setEditingText('');
     } catch (err: any) {
-      alert(err.message || "Erreur lors de la modification du commentaire.")
+      alert(err.message || 'Erreur lors de la modification du commentaire.');
     }
-  }
+  };
 
   // Uploader une pièce jointe pour la Tâche
   const handleTaskFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-    setAttachmentsLoading(true)
-    const reader = new FileReader()
+    setAttachmentsLoading(true);
+    const reader = new FileReader();
     reader.onload = async () => {
-      const fileUrl = reader.result as string
+      const fileUrl = reader.result as string;
       try {
-        await createTaskAttachment(taskId, file.name, fileUrl, file.type, file.size)
+        await createTaskAttachment(taskId, file.name, fileUrl, file.type, file.size);
         // Recharger la liste
-        const list = await getTaskAttachments(taskId)
-        setTaskAttachments(list)
+        const list = await getTaskAttachments(taskId);
+        setTaskAttachments(list);
       } catch (err: any) {
-        alert(err.message || "Erreur lors de l'ajout de la pièce jointe.")
+        alert(err.message || "Erreur lors de l'ajout de la pièce jointe.");
       } finally {
-        setAttachmentsLoading(false)
-        if (taskFileInputRef.current) taskFileInputRef.current.value = ''
+        setAttachmentsLoading(false);
+        if (taskFileInputRef.current) taskFileInputRef.current.value = '';
       }
-    }
-    reader.readAsDataURL(file)
-  }
+    };
+    reader.readAsDataURL(file);
+  };
 
   // Supprimer une pièce jointe de la Tâche
   const handleDeleteTaskAttachment = async (attachmentId: string) => {
-    if (window.confirm("Voulez-vous vraiment supprimer cette pièce jointe ?")) {
-      setAttachmentsLoading(true)
+    if (window.confirm('Voulez-vous vraiment supprimer cette pièce jointe ?')) {
+      setAttachmentsLoading(true);
       try {
-        await deleteTaskAttachment(attachmentId)
-        setTaskAttachments(prev => prev.filter(att => att.id !== attachmentId))
+        await deleteTaskAttachment(attachmentId);
+        setTaskAttachments((prev) => prev.filter((att) => att.id !== attachmentId));
       } catch (err: any) {
-        alert(err.message || "Erreur lors de la suppression de la pièce jointe.")
+        alert(err.message || 'Erreur lors de la suppression de la pièce jointe.');
       } finally {
-        setAttachmentsLoading(false)
+        setAttachmentsLoading(false);
       }
     }
-  }
+  };
 
   // Gérer l'ajout d'une pièce jointe au Commentaire (localement)
   const handleCommentFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-    const reader = new FileReader()
+    const reader = new FileReader();
     reader.onload = () => {
-      const fileUrl = reader.result as string
-      setPendingAttachments(prev => [
+      const fileUrl = reader.result as string;
+      setPendingAttachments((prev) => [
         ...prev,
         {
           fileName: file.name,
           fileUrl,
           fileType: file.type,
-          fileSize: file.size
-        }
-      ])
-      if (commentFileInputRef.current) commentFileInputRef.current.value = ''
-    }
-    reader.readAsDataURL(file)
-  }
+          fileSize: file.size,
+        },
+      ]);
+      if (commentFileInputRef.current) commentFileInputRef.current.value = '';
+    };
+    reader.readAsDataURL(file);
+  };
 
   const handleRemovePendingAttachment = (index: number) => {
-    setPendingAttachments(prev => prev.filter((_, idx) => idx !== index))
-  }
+    setPendingAttachments((prev) => prev.filter((_, idx) => idx !== index));
+  };
 
   // Formatter la date
   const formatDate = (isoString: string) => {
-    const d = new Date(isoString)
+    const d = new Date(isoString);
     return d.toLocaleString('fr-FR', {
       day: 'numeric',
       month: 'short',
       hour: '2-digit',
-      minute: '2-digit'
-    })
-  }
+      minute: '2-digit',
+    });
+  };
 
   // Formater le texte du commentaire pour colorer les mentions @user
   const renderFormattedContent = (content: string) => {
-    const mentionRegex = /(@[a-zA-Z0-9._@-]+)/g
-    const parts = content.split(mentionRegex)
+    const mentionRegex = /(@[a-zA-Z0-9._@-]+)/g;
+    const parts = content.split(mentionRegex);
 
     return parts.map((part, index) => {
       if (part.startsWith('@')) {
@@ -387,38 +404,42 @@ export const TaskCommentsPanel: React.FC<TaskCommentsPanelProps> = ({ taskId, ta
           <span key={index} className="comment-mention-tag">
             {part}
           </span>
-        )
+        );
       }
-      return part
-    })
-  }
+      return part;
+    });
+  };
 
   // Déterminer l'icône de pièce jointe à afficher
   const getAttachmentIcon = (fileType: string) => {
-    if (fileType.startsWith('image/')) return <Image size={14} className="attachment-icon-img" />
+    if (fileType.startsWith('image/')) return <Image size={14} className="attachment-icon-img" />;
     if (fileType.includes('pdf') || fileType.includes('document') || fileType.includes('text')) {
-      return <FileText size={14} className="attachment-icon-doc" />
+      return <FileText size={14} className="attachment-icon-doc" />;
     }
-    return <File size={14} className="attachment-icon-gen" />
-  }
+    return <File size={14} className="attachment-icon-gen" />;
+  };
 
   // Formater la taille du fichier
   const formatFileSize = (bytes: number) => {
-    if (bytes === 0) return '0 B'
-    const k = 1024
-    const sizes = ['B', 'KB', 'MB', 'GB']
-    const i = Math.floor(Math.log(bytes) / Math.log(k))
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
-  }
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  };
 
   // Rendu d'un commentaire avec ses réponses de manière récursive
   const renderComment = (c: any, depth = 0) => {
-    const isMyComment = c.userId === user?.id
-    const initials = (c.user?.name || c.user?.email || 'U').slice(0, 2).toUpperCase()
-    const isEditing = editingCommentId === c.id
+    const isMyComment = c.userId === user?.id;
+    const initials = (c.user?.name || c.user?.email || 'U').slice(0, 2).toUpperCase();
+    const isEditing = editingCommentId === c.id;
 
     return (
-      <div key={c.id} className="comment-thread-wrapper" style={{ marginLeft: `${Math.min(depth * 16, 48)}px` }}>
+      <div
+        key={c.id}
+        className="comment-thread-wrapper"
+        style={{ marginLeft: `${Math.min(depth * 16, 48)}px` }}
+      >
         {depth > 0 && (
           <div className="comment-thread-line-indicator">
             <CornerDownRight size={12} color="var(--text-muted)" />
@@ -426,29 +447,27 @@ export const TaskCommentsPanel: React.FC<TaskCommentsPanelProps> = ({ taskId, ta
         )}
 
         <div className={`comment-bubble-row ${isMyComment ? 'comment-bubble-row--mine' : ''}`}>
-          <div className="comment-avatar">
-            {initials}
-          </div>
-          
+          <div className="comment-avatar">{initials}</div>
+
           {isEditing ? (
             <div className="comment-bubble-content-box comment-bubble-content-box--editing">
               <div className="comment-bubble-meta">
                 <span className="comment-author-name">{c.user?.name || 'Collaborateur'}</span>
                 <span className="comment-date">{formatDate(c.createdAt)}</span>
               </div>
-              
+
               <div className="comment-edit-form">
                 <textarea
                   rows={2}
                   value={editingText}
-                  onChange={e => setEditingText(e.target.value)}
+                  onChange={(e) => setEditingText(e.target.value)}
                   className="comment-edit-textarea"
-                  onKeyDown={e => {
+                  onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault()
-                      handleSaveEdit(c.id)
+                      e.preventDefault();
+                      handleSaveEdit(c.id);
                     } else if (e.key === 'Escape') {
-                      handleCancelEdit()
+                      handleCancelEdit();
                     }
                   }}
                   autoFocus
@@ -461,11 +480,7 @@ export const TaskCommentsPanel: React.FC<TaskCommentsPanelProps> = ({ taskId, ta
                   >
                     <Check size={12} /> Enregistrer
                   </button>
-                  <button
-                    type="button"
-                    onClick={handleCancelEdit}
-                    className="btn-comment-cancel"
-                  >
+                  <button type="button" onClick={handleCancelEdit} className="btn-comment-cancel">
                     Annuler
                   </button>
                 </div>
@@ -477,10 +492,8 @@ export const TaskCommentsPanel: React.FC<TaskCommentsPanelProps> = ({ taskId, ta
                 <span className="comment-author-name">{c.user?.name || 'Collaborateur'}</span>
                 <span className="comment-date">{formatDate(c.createdAt)}</span>
               </div>
-              
-              <div className="comment-bubble-text">
-                {renderFormattedContent(c.content)}
-              </div>
+
+              <div className="comment-bubble-text">{renderFormattedContent(c.content)}</div>
 
               {/* Pièces jointes du commentaire */}
               {c.attachments && c.attachments.length > 0 && (
@@ -543,14 +556,14 @@ export const TaskCommentsPanel: React.FC<TaskCommentsPanelProps> = ({ taskId, ta
           </div>
         )}
       </div>
-    )
-  }
+    );
+  };
 
-  const typingNames = Object.values(typingUsers)
+  const typingNames = Object.values(typingUsers);
 
   return (
     <div className="task-comments-drawer-overlay" onClick={onClose}>
-      <div className="task-comments-drawer" onClick={e => e.stopPropagation()}>
+      <div className="task-comments-drawer" onClick={(e) => e.stopPropagation()}>
         <div className="drawer-header">
           <div className="drawer-header-title">
             <MessageSquare size={18} color="var(--accent-primary)" />
@@ -578,7 +591,7 @@ export const TaskCommentsPanel: React.FC<TaskCommentsPanelProps> = ({ taskId, ta
               />
             </label>
           </div>
-          
+
           {attachmentsLoading && (
             <div className="attachments-mini-loader">
               <span className="spinner-loader spinner-loader--xs"></span>
@@ -588,7 +601,7 @@ export const TaskCommentsPanel: React.FC<TaskCommentsPanelProps> = ({ taskId, ta
 
           {taskAttachments.length > 0 ? (
             <div className="task-attachments-grid">
-              {taskAttachments.map(att => (
+              {taskAttachments.map((att) => (
                 <div key={att.id} className="task-attachment-item">
                   <a
                     href={att.fileUrl}
@@ -627,11 +640,13 @@ export const TaskCommentsPanel: React.FC<TaskCommentsPanelProps> = ({ taskId, ta
             <div className="comments-empty-state">
               <MessageSquare size={36} color="var(--text-muted)" />
               <p>Aucun message sur cette tâche.</p>
-              <p className="empty-subtext">Lancez la discussion en ajoutant le premier commentaire !</p>
+              <p className="empty-subtext">
+                Lancez la discussion en ajoutant le premier commentaire !
+              </p>
             </div>
           ) : (
             <div className="comments-list">
-              {comments.map(c => renderComment(c))}
+              {comments.map((c) => renderComment(c))}
               <div ref={commentsEndRef} />
             </div>
           )}
@@ -643,7 +658,9 @@ export const TaskCommentsPanel: React.FC<TaskCommentsPanelProps> = ({ taskId, ta
           {typingNames.length > 0 && (
             <div className="realtime-typing-container">
               <div className="typing-dots-animation">
-                <span></span><span></span><span></span>
+                <span></span>
+                <span></span>
+                <span></span>
               </div>
               <span className="typing-label-text">
                 {typingNames.join(', ')} {typingNames.length === 1 ? 'écrit...' : 'écrivent...'}
@@ -658,7 +675,7 @@ export const TaskCommentsPanel: React.FC<TaskCommentsPanelProps> = ({ taskId, ta
                 <AtSign size={12} /> Mentionner un membre
               </div>
               <ul className="mentions-list">
-                {filteredMembers.map(m => (
+                {filteredMembers.map((m) => (
                   <li key={m.id} onClick={() => handleSelectMention(m)}>
                     <div className="mention-avatar-mini">
                       {(m.user.name || m.user.email).slice(0, 2).toUpperCase()}
@@ -679,7 +696,9 @@ export const TaskCommentsPanel: React.FC<TaskCommentsPanelProps> = ({ taskId, ta
               {pendingAttachments.map((file, idx) => (
                 <div key={idx} className="pending-attachment-badge">
                   {getAttachmentIcon(file.fileType)}
-                  <span className="pending-attachment-name" title={file.fileName}>{file.fileName}</span>
+                  <span className="pending-attachment-name" title={file.fileName}>
+                    {file.fileName}
+                  </span>
                   <button
                     type="button"
                     onClick={() => handleRemovePendingAttachment(idx)}
@@ -696,7 +715,9 @@ export const TaskCommentsPanel: React.FC<TaskCommentsPanelProps> = ({ taskId, ta
           {replyingTo && (
             <div className="replying-to-indicator">
               <CornerDownRight size={12} />
-              <span>Répondre à <strong>{replyingTo.name}</strong></span>
+              <span>
+                Répondre à <strong>{replyingTo.name}</strong>
+              </span>
               <button
                 type="button"
                 onClick={() => setReplyingTo(null)}
@@ -723,16 +744,20 @@ export const TaskCommentsPanel: React.FC<TaskCommentsPanelProps> = ({ taskId, ta
               rows={2}
               value={newCommentText}
               onChange={handleTextChange}
-              placeholder={replyingTo ? "Écrivez une réponse..." : "Écrivez un commentaire... Utilisez @ pour mentionner."}
+              placeholder={
+                replyingTo
+                  ? 'Écrivez une réponse...'
+                  : 'Écrivez un commentaire... Utilisez @ pour mentionner.'
+              }
               className="comment-textarea"
-              onKeyDown={e => {
+              onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault()
-                  handleSubmit(e)
+                  e.preventDefault();
+                  handleSubmit(e);
                 }
               }}
             />
-            
+
             <button
               type="submit"
               disabled={!newCommentText.trim() && pendingAttachments.length === 0}
@@ -745,6 +770,5 @@ export const TaskCommentsPanel: React.FC<TaskCommentsPanelProps> = ({ taskId, ta
         </div>
       </div>
     </div>
-  )
-}
-
+  );
+};

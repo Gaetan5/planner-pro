@@ -40,7 +40,7 @@ export class NotificationsService {
 
     // Envoi d'email asynchrone si c'est une mention
     if (data.type === 'MENTION') {
-      this.sendMentionEmailAsync(notification).catch(err => {
+      this.sendMentionEmailAsync(notification).catch((err) => {
         console.error("Erreur lors du déclenchement asynchrone de l'email de mention :", err);
       });
     }
@@ -66,8 +66,9 @@ export class NotificationsService {
         if (task) taskTitle = task.title;
       }
 
-      const senderName = notification.sender?.name || notification.sender?.email || 'Un collaborateur';
-      
+      const senderName =
+        notification.sender?.name || notification.sender?.email || 'Un collaborateur';
+
       await this.mailService.sendMentionEmail(
         recipient.email,
         senderName,

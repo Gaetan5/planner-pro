@@ -1,6 +1,6 @@
 ---
 name: graphify
-description: "Use when exploring unfamiliar codebases, before searching for code, or after editing files. Builds a structural AST index (classes, functions, imports, call graph) from 12 languages via tree-sitter. Trigger: /graphify"
+description: 'Use when exploring unfamiliar codebases, before searching for code, or after editing files. Builds a structural AST index (classes, functions, imports, call graph) from 12 languages via tree-sitter. Trigger: /graphify'
 allowed-tools: Bash(graphify:*)
 ---
 
@@ -80,8 +80,17 @@ Saved as `graphify-out/graph.json`:
 
 ```json
 {
-  "nodes": [{ "id": "main::app", "label": "App", "sourceFile": "main.py", "sourceLocation": "main.py:5" }],
-  "edges": [{ "source": "file::main", "target": "main::app", "relation": "contains", "confidence": "EXTRACTED" }],
+  "nodes": [
+    { "id": "main::app", "label": "App", "sourceFile": "main.py", "sourceLocation": "main.py:5" }
+  ],
+  "edges": [
+    {
+      "source": "file::main",
+      "target": "main::app",
+      "relation": "contains",
+      "confidence": "EXTRACTED"
+    }
+  ],
   "metadata": { "files": 10, "nodes": 45, "edges": 62 }
 }
 ```

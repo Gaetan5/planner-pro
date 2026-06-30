@@ -31,10 +31,14 @@ jobs:
           node-version: 18
           cache: pnpm
       - run: pnpm install --no-frozen-lockfile
-      - name: Generate Prisma Client
-        run: pnpm --filter backend exec prisma generate
-      - run: pnpm build
-      - run: pnpm --filter backend test
+      - name: Build
+        run: pnpm build
+      - name: Lint
+        run: pnpm lint
+      - name: Test Frontend
+        run: pnpm --filter frontend test:run
+      - name: Test Backend
+        run: pnpm --filter backend test
         env:
           DATABASE_URL: mysql://root:test_password@localhost:3306/planner_pro_test
           JWT_SECRET: test-jwt-secret-key-32-chars-minimum!

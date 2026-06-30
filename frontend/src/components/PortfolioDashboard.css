@@ -45,7 +45,9 @@
   padding: var(--space-lg);
   position: relative;
   overflow: hidden;
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s ease;
+  transition:
+    transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 0.3s ease;
 }
 
 .portfolio-kpi-card::before {
@@ -133,7 +135,9 @@
   flex-direction: column;
   padding: var(--space-xl);
   position: relative;
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s ease;
+  transition:
+    transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 0.3s ease;
   height: 100%;
 }
 

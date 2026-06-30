@@ -1,6 +1,6 @@
-import React, { useState } from 'react'
-import { useApp, Task, TimeBlock } from '../context/AppContext'
-import { Calendar as CalendarIcon, Clock, Trash2, ChevronLeft, ChevronRight } from 'lucide-react'
+import React, { useState } from 'react';
+import { useApp, Task, TimeBlock } from '../context/AppContext';
+import { Calendar as CalendarIcon, Clock, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import {
   DndContext,
   DragOverlay,
@@ -10,7 +10,7 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
-} from '@dnd-kit/core'
+} from '@dnd-kit/core';
 import {
   addDays,
   format,
@@ -19,9 +19,9 @@ import {
   endOfWeek,
   eachDayOfInterval,
   isToday,
-} from 'date-fns'
-import { fr } from 'date-fns/locale'
-import './CalendarView.css'
+} from 'date-fns';
+import { fr } from 'date-fns/locale';
+import './CalendarView.css';
 
 /* ======== Draggable Card for Unscheduled Tasks ======== */
 function DraggableTaskCard({
@@ -29,18 +29,18 @@ function DraggableTaskCard({
   isSelected,
   onClick,
 }: {
-  task: Task
-  isSelected: boolean
-  onClick: () => void
+  task: Task;
+  isSelected: boolean;
+  onClick: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: task.id,
     data: { task },
-  })
+  });
 
   const style = transform
     ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }
-    : undefined
+    : undefined;
 
   return (
     <div
@@ -54,19 +54,19 @@ function DraggableTaskCard({
       <h5>{task.title}</h5>
       <span>Priorité : {task.priority}</span>
     </div>
-  )
+  );
 }
 
 /* ======== Droppable Slot for Grid Cell ======== */
 interface DroppableSlotProps {
-  slotId: string
-  block?: TimeBlock
-  hour: number
-  date: Date
-  isWeekView: boolean
-  selectedTaskId: string | null
-  onSchedule: (dateStr: string, hour: number) => void
-  onDeleteBlock: (id: string) => void
+  slotId: string;
+  block?: TimeBlock;
+  hour: number;
+  date: Date;
+  isWeekView: boolean;
+  selectedTaskId: string | null;
+  onSchedule: (dateStr: string, hour: number) => void;
+  onDeleteBlock: (id: string) => void;
 }
 
 function DroppableSlot({
@@ -82,15 +82,15 @@ function DroppableSlot({
   const { setNodeRef, isOver } = useDroppable({
     id: slotId,
     disabled: !!block,
-  })
+  });
 
-  const dateStr = format(date, 'yyyy-MM-dd')
+  const dateStr = format(date, 'yyyy-MM-dd');
 
   const handleCellClick = () => {
     if (!block && selectedTaskId) {
-      onSchedule(dateStr, hour)
+      onSchedule(dateStr, hour);
     }
-  }
+  };
 
   return (
     <div
@@ -106,7 +106,15 @@ function DroppableSlot({
       {block ? (
         <div className="time-block-card">
           <div style={{ minWidth: 0, flex: 1, paddingRight: '8px' }}>
-            <h4 style={{ fontSize: isWeekView ? '11px' : '14px', lineHeight: '1.2', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: isWeekView ? 'nowrap' : 'normal' }}>
+            <h4
+              style={{
+                fontSize: isWeekView ? '11px' : '14px',
+                lineHeight: '1.2',
+                textOverflow: 'ellipsis',
+                overflow: 'hidden',
+                whiteSpace: isWeekView ? 'nowrap' : 'normal',
+              }}
+            >
               {block.task?.title || 'Tâche planifiée'}
             </h4>
             {!isWeekView && (
@@ -117,8 +125,8 @@ function DroppableSlot({
           </div>
           <button
             onClick={(e) => {
-              e.stopPropagation()
-              onDeleteBlock(block.id)
+              e.stopPropagation();
+              onDeleteBlock(block.id);
             }}
             className="time-block-delete-btn"
           >
@@ -133,108 +141,104 @@ function DroppableSlot({
         </div>
       )}
     </div>
-  )
+  );
 }
 
 /* ======== Main Component ======== */
 export const CalendarView: React.FC = () => {
-  const { projects, timeBlocks, createTimeBlock, deleteTimeBlock, scheduleReminder } = useApp()
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
-  const [activeDragTaskId, setActiveDragTaskId] = useState<string | null>(null)
-  
+  const { projects, timeBlocks, createTimeBlock, deleteTimeBlock, scheduleReminder } = useApp();
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [activeDragTaskId, setActiveDragTaskId] = useState<string | null>(null);
+
   // Date et mode de vue
-  const [currentDate, setCurrentDate] = useState<Date>(new Date())
-  const [viewMode, setViewMode] = useState<'day' | 'week'>('day')
+  const [currentDate, setCurrentDate] = useState<Date>(new Date());
+  const [viewMode, setViewMode] = useState<'day' | 'week'>('day');
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 8 },
-    })
-  )
+    }),
+  );
 
   // Extraire toutes les tâches de tous les projets
-  const allTasks = projects.flatMap(p => p.tasks || [])
+  const allTasks = projects.flatMap((p) => p.tasks || []);
 
   // Filtrer les tâches non planifiées
-  const unscheduledTasks = allTasks.filter(task =>
-    !timeBlocks.some(tb => tb.taskId === task.id)
-  )
+  const unscheduledTasks = allTasks.filter(
+    (task) => !timeBlocks.some((tb) => tb.taskId === task.id),
+  );
 
   // Plage horaire étendue 6h à 23h
-  const hours = Array.from({ length: 18 }, (_, i) => i + 6)
+  const hours = Array.from({ length: 18 }, (_, i) => i + 6);
 
   // Navigation de date
   const handlePrev = () => {
-    setCurrentDate(d => addDays(d, viewMode === 'day' ? -1 : -7))
-  }
+    setCurrentDate((d) => addDays(d, viewMode === 'day' ? -1 : -7));
+  };
 
   const handleNext = () => {
-    setCurrentDate(d => addDays(d, viewMode === 'day' ? 1 : 7))
-  }
+    setCurrentDate((d) => addDays(d, viewMode === 'day' ? 1 : 7));
+  };
 
   const handleToday = () => {
-    setCurrentDate(new Date())
-  }
+    setCurrentDate(new Date());
+  };
 
   const handleScheduleTask = (dateStr: string, hour: number, taskIdParam?: string) => {
-    const taskId = taskIdParam || selectedTaskId || activeDragTaskId
-    if (!taskId) return
+    const taskId = taskIdParam || selectedTaskId || activeDragTaskId;
+    if (!taskId) return;
 
-    const targetDate = new Date(dateStr)
-    const startTime = new Date(targetDate.setHours(hour, 0, 0, 0)).toISOString()
-    const endTime = new Date(targetDate.setHours(hour + 1, 0, 0, 0)).toISOString()
+    const targetDate = new Date(dateStr);
+    const startTime = new Date(targetDate.setHours(hour, 0, 0, 0)).toISOString();
+    const endTime = new Date(targetDate.setHours(hour + 1, 0, 0, 0)).toISOString();
 
-    createTimeBlock(taskId, startTime, endTime)
+    createTimeBlock(taskId, startTime, endTime);
 
     // Planifier la notification de rappel
-    const allTasks = projects.flatMap((p) => p.tasks || [])
-    const task = allTasks.find((t) => t.id === taskId)
+    const allTasks = projects.flatMap((p) => p.tasks || []);
+    const task = allTasks.find((t) => t.id === taskId);
     if (task) {
-      scheduleReminder(task.title, startTime)
+      scheduleReminder(task.title, startTime);
     }
 
-    setSelectedTaskId(null)
-  }
+    setSelectedTaskId(null);
+  };
 
   // DnD Handlers
   const handleDragStart = (event: any) => {
-    const taskId = event.active.id as string
-    setActiveDragTaskId(taskId)
-    setSelectedTaskId(taskId)
-  }
+    const taskId = event.active.id as string;
+    setActiveDragTaskId(taskId);
+    setSelectedTaskId(taskId);
+  };
 
   const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event
-    setActiveDragTaskId(null)
-    setSelectedTaskId(null)
+    const { active, over } = event;
+    setActiveDragTaskId(null);
+    setSelectedTaskId(null);
 
-    if (!over) return
+    if (!over) return;
 
-    const taskId = active.id as string
-    const overId = over.id as string
-    const match = overId.match(/^slot-(\d{4}-\d{2}-\d{2})-(\d+)$/)
-    
+    const taskId = active.id as string;
+    const overId = over.id as string;
+    const match = overId.match(/^slot-(\d{4}-\d{2}-\d{2})-(\d+)$/);
+
     if (match) {
-      const dateStr = match[1]
-      const hour = parseInt(match[2], 10)
-      handleScheduleTask(dateStr, hour, taskId)
+      const dateStr = match[1];
+      const hour = parseInt(match[2], 10);
+      handleScheduleTask(dateStr, hour, taskId);
     }
-  }
+  };
 
-  const formatHour = (hour: number) => `${hour.toString().padStart(2, '0')}:00`
+  const formatHour = (hour: number) => `${hour.toString().padStart(2, '0')}:00`;
 
   // Calculer les jours de la semaine courante
   const weekDays = eachDayOfInterval({
     start: startOfWeek(currentDate, { weekStartsOn: 1 }),
     end: endOfWeek(currentDate, { weekStartsOn: 1 }),
-  })
+  });
 
   return (
-    <DndContext
-      sensors={sensors}
-      onDragStart={handleDragStart}
-      onDragEnd={handleDragEnd}
-    >
+    <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <div className="calendar-layout">
         {/* Sidebar des tâches non planifiées */}
         <aside className="glass-panel calendar-sidebar">
@@ -253,7 +257,7 @@ export const CalendarView: React.FC = () => {
                 Aucune tâche à planifier. Créez-en dans le Kanban !
               </div>
             ) : (
-              unscheduledTasks.map(task => (
+              unscheduledTasks.map((task) => (
                 <DraggableTaskCard
                   key={task.id}
                   task={task}
@@ -310,12 +314,12 @@ export const CalendarView: React.FC = () => {
           {/* Grille d'emploi du temps */}
           {viewMode === 'day' ? (
             <div className="calendar-grid">
-              {hours.map(hour => {
-                const slotId = `slot-${format(currentDate, 'yyyy-MM-dd')}-${hour}`
-                const block = timeBlocks.find(tb => {
-                  const tbDate = new Date(tb.startTime)
-                  return isSameDay(tbDate, currentDate) && tbDate.getHours() === hour
-                })
+              {hours.map((hour) => {
+                const slotId = `slot-${format(currentDate, 'yyyy-MM-dd')}-${hour}`;
+                const block = timeBlocks.find((tb) => {
+                  const tbDate = new Date(tb.startTime);
+                  return isSameDay(tbDate, currentDate) && tbDate.getHours() === hour;
+                });
 
                 return (
                   <div key={hour} className="calendar-time-row">
@@ -331,14 +335,22 @@ export const CalendarView: React.FC = () => {
                       onDeleteBlock={deleteTimeBlock}
                     />
                   </div>
-                )
+                );
               })}
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflowX: 'auto' }}>
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                flex: 1,
+                minHeight: 0,
+                overflowX: 'auto',
+              }}
+            >
               <div className="calendar-grid-week-header">
                 <div /> {/* Colonne heure */}
-                {weekDays.map(day => (
+                {weekDays.map((day) => (
                   <div
                     key={day.toString()}
                     className={`calendar-week-header-day ${isToday(day) ? 'calendar-week-header-day--today' : ''}`}
@@ -350,17 +362,17 @@ export const CalendarView: React.FC = () => {
               </div>
 
               <div className="calendar-grid-week">
-                {hours.map(hour => (
+                {hours.map((hour) => (
                   <React.Fragment key={hour}>
                     <span className="calendar-time-label" style={{ alignSelf: 'center' }}>
                       {formatHour(hour)}
                     </span>
-                    {weekDays.map(day => {
-                      const slotId = `slot-${format(day, 'yyyy-MM-dd')}-${hour}`
-                      const block = timeBlocks.find(tb => {
-                        const tbDate = new Date(tb.startTime)
-                        return isSameDay(tbDate, day) && tbDate.getHours() === hour
-                      })
+                    {weekDays.map((day) => {
+                      const slotId = `slot-${format(day, 'yyyy-MM-dd')}-${hour}`;
+                      const block = timeBlocks.find((tb) => {
+                        const tbDate = new Date(tb.startTime);
+                        return isSameDay(tbDate, day) && tbDate.getHours() === hour;
+                      });
 
                       return (
                         <DroppableSlot
@@ -374,7 +386,7 @@ export const CalendarView: React.FC = () => {
                           onSchedule={handleScheduleTask}
                           onDeleteBlock={deleteTimeBlock}
                         />
-                      )
+                      );
                     })}
                   </React.Fragment>
                 ))}
@@ -386,17 +398,22 @@ export const CalendarView: React.FC = () => {
 
       {/* Drag Overlay */}
       <DragOverlay>
-        {activeDragTaskId ? (() => {
-          const task = allTasks.find(t => t.id === activeDragTaskId)
-          if (!task) return null
-          return (
-            <div className="calendar-unscheduled-card calendar-unscheduled-card--selected" style={{ opacity: 0.9 }}>
-              <h5>{task.title}</h5>
-              <span>Priorité : {task.priority}</span>
-            </div>
-          )
-        })() : null}
+        {activeDragTaskId
+          ? (() => {
+              const task = allTasks.find((t) => t.id === activeDragTaskId);
+              if (!task) return null;
+              return (
+                <div
+                  className="calendar-unscheduled-card calendar-unscheduled-card--selected"
+                  style={{ opacity: 0.9 }}
+                >
+                  <h5>{task.title}</h5>
+                  <span>Priorité : {task.priority}</span>
+                </div>
+              );
+            })()
+          : null}
       </DragOverlay>
     </DndContext>
-  )
-}
+  );
+};

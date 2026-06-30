@@ -1,80 +1,128 @@
-import React, { useState, useEffect, useRef } from 'react'
-import { useApp } from '../context/AppContext'
-import { Search, LayoutDashboard, Kanban, Calendar, FileText, Timer, Plus, Play, Sparkles } from 'lucide-react'
-import './CommandPalette.css'
+import React, { useState, useEffect, useRef } from 'react';
+import { useApp } from '../context/AppContext';
+import {
+  Search,
+  LayoutDashboard,
+  Kanban,
+  Calendar,
+  FileText,
+  Timer,
+  Plus,
+  Play,
+  Sparkles,
+} from 'lucide-react';
+import './CommandPalette.css';
 
 interface CommandItem {
-  id: string
-  title: string
-  subtitle?: string
-  category: 'Navigation' | 'Actions' | 'Tâches' | 'Projets' | 'Notes'
-  icon: React.ReactNode
-  action: () => void
+  id: string;
+  title: string;
+  subtitle?: string;
+  category: 'Navigation' | 'Actions' | 'Tâches' | 'Projets' | 'Notes';
+  icon: React.ReactNode;
+  action: () => void;
 }
 
 export const CommandPalette: React.FC = () => {
-  const {
-    projects,
-    notes,
-    setActiveTab,
-    createTask,
-    createProject,
-    saveNote,
-    startTimer
-  } = useApp()
+  const { projects, notes, setActiveTab, createTask, createProject, saveNote, startTimer } =
+    useApp();
 
-  const [isOpen, setIsOpen] = useState(false)
-  const [search, setSearch] = useState('')
-  const [selectedIndex, setSelectedIndex] = useState(0)
-  const overlayRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const [isOpen, setIsOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // Écouter le raccourci global Cmd+K / Ctrl+K
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault()
-        setIsOpen((prev) => !prev)
+        e.preventDefault();
+        setIsOpen((prev) => !prev);
       } else if (e.key === 'Escape') {
-        setIsOpen(false)
+        setIsOpen(false);
       }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [])
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // Focus sur l'input à l'ouverture
   useEffect(() => {
     if (isOpen) {
-      setTimeout(() => inputRef.current?.focus(), 50)
-      setSearch('')
-      setSelectedIndex(0)
+      setTimeout(() => inputRef.current?.focus(), 50);
+      setSearch('');
+      setSelectedIndex(0);
     }
-  }, [isOpen])
+  }, [isOpen]);
 
   // Fermer si clic à l'extérieur
   const handleOverlayClick = (e: React.MouseEvent) => {
     if (e.target === overlayRef.current) {
-      setIsOpen(false)
+      setIsOpen(false);
     }
-  }
+  };
 
   // Compiler la liste de toutes les commandes et données indexées
   const getCommands = (): CommandItem[] => {
-    const items: CommandItem[] = []
+    const items: CommandItem[] = [];
 
     // 1. Navigation
     items.push(
-      { id: 'nav-dash', title: 'Aller au Dashboard', category: 'Navigation', icon: <LayoutDashboard size={16} />, action: () => { setActiveTab('dashboard'); setIsOpen(false) } },
-      { id: 'nav-kanban', title: 'Aller au Kanban', category: 'Navigation', icon: <Kanban size={16} />, action: () => { setActiveTab('kanban'); setIsOpen(false) } },
-      { id: 'nav-cal', title: 'Aller au Calendrier', category: 'Navigation', icon: <Calendar size={16} />, action: () => { setActiveTab('calendar'); setIsOpen(false) } },
-      { id: 'nav-notes', title: 'Aller aux Notes', category: 'Navigation', icon: <FileText size={16} />, action: () => { setActiveTab('notes'); setIsOpen(false) } },
-      { id: 'nav-pomo', title: 'Aller au Pomodoro', category: 'Navigation', icon: <Timer size={16} />, action: () => { setActiveTab('pomodoro'); setIsOpen(false) } }
-    )
+      {
+        id: 'nav-dash',
+        title: 'Aller au Dashboard',
+        category: 'Navigation',
+        icon: <LayoutDashboard size={16} />,
+        action: () => {
+          setActiveTab('dashboard');
+          setIsOpen(false);
+        },
+      },
+      {
+        id: 'nav-kanban',
+        title: 'Aller au Kanban',
+        category: 'Navigation',
+        icon: <Kanban size={16} />,
+        action: () => {
+          setActiveTab('kanban');
+          setIsOpen(false);
+        },
+      },
+      {
+        id: 'nav-cal',
+        title: 'Aller au Calendrier',
+        category: 'Navigation',
+        icon: <Calendar size={16} />,
+        action: () => {
+          setActiveTab('calendar');
+          setIsOpen(false);
+        },
+      },
+      {
+        id: 'nav-notes',
+        title: 'Aller aux Notes',
+        category: 'Navigation',
+        icon: <FileText size={16} />,
+        action: () => {
+          setActiveTab('notes');
+          setIsOpen(false);
+        },
+      },
+      {
+        id: 'nav-pomo',
+        title: 'Aller au Pomodoro',
+        category: 'Navigation',
+        icon: <Timer size={16} />,
+        action: () => {
+          setActiveTab('pomodoro');
+          setIsOpen(false);
+        },
+      },
+    );
 
     // 2. Actions Rapides dynamiques basées sur la saisie
     if (search.trim().length > 0) {
-      const trimmed = search.trim()
+      const trimmed = search.trim();
       items.push(
         {
           id: 'action-task',
@@ -84,12 +132,12 @@ export const CommandPalette: React.FC = () => {
           icon: <Plus size={16} />,
           action: async () => {
             if (projects.length > 0) {
-              await createTask(projects[0].id, trimmed)
-              setIsOpen(false)
+              await createTask(projects[0].id, trimmed);
+              setIsOpen(false);
             } else {
-              alert('Veuillez d\'abord créer un projet.')
+              alert("Veuillez d'abord créer un projet.");
             }
-          }
+          },
         },
         {
           id: 'action-project',
@@ -97,9 +145,9 @@ export const CommandPalette: React.FC = () => {
           category: 'Actions',
           icon: <Plus size={16} />,
           action: async () => {
-            await createProject(trimmed)
-            setIsOpen(false)
-          }
+            await createProject(trimmed);
+            setIsOpen(false);
+          },
         },
         {
           id: 'action-note',
@@ -107,12 +155,12 @@ export const CommandPalette: React.FC = () => {
           category: 'Actions',
           icon: <Plus size={16} />,
           action: async () => {
-            await saveNote(trimmed, '')
-            setIsOpen(false)
-            setActiveTab('notes')
-          }
-        }
-      )
+            await saveNote(trimmed, '');
+            setIsOpen(false);
+            setActiveTab('notes');
+          },
+        },
+      );
     }
 
     // 3. Recherche dans les tâches existantes (pour lancer le timer)
@@ -126,13 +174,13 @@ export const CommandPalette: React.FC = () => {
             category: 'Tâches',
             icon: <Play size={16} />,
             action: () => {
-              startTimer(task.id)
-              setIsOpen(false)
-            }
-          })
-        })
+              startTimer(task.id);
+              setIsOpen(false);
+            },
+          });
+        });
       }
-    })
+    });
 
     // 4. Recherche dans les Notes existantes
     notes.forEach((note) => {
@@ -143,11 +191,11 @@ export const CommandPalette: React.FC = () => {
         icon: <FileText size={16} />,
         action: () => {
           // Normalement on ouvre cette note précise
-          setActiveTab('notes')
-          setIsOpen(false)
-        }
-      })
-    })
+          setActiveTab('notes');
+          setIsOpen(false);
+        },
+      });
+    });
 
     // 5. Recherche dans les Projets existants
     projects.forEach((proj) => {
@@ -157,43 +205,43 @@ export const CommandPalette: React.FC = () => {
         category: 'Projets',
         icon: <Kanban size={16} />,
         action: () => {
-          setActiveTab('kanban')
-          setIsOpen(false)
-        }
-      })
-    })
+          setActiveTab('kanban');
+          setIsOpen(false);
+        },
+      });
+    });
 
     // Filtrer par recherche
-    if (!search.trim()) return items.slice(0, 8) // Retourner seulement les premiers items par défaut
-    
-    const query = search.toLowerCase()
+    if (!search.trim()) return items.slice(0, 8); // Retourner seulement les premiers items par défaut
+
+    const query = search.toLowerCase();
     return items.filter(
       (item) =>
         item.title.toLowerCase().includes(query) ||
         (item.subtitle && item.subtitle.toLowerCase().includes(query)) ||
-        item.category.toLowerCase().includes(query)
-    )
-  }
+        item.category.toLowerCase().includes(query),
+    );
+  };
 
-  const filteredCommands = getCommands()
+  const filteredCommands = getCommands();
 
   // Gérer la navigation clavier
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      setSelectedIndex((prev) => (prev + 1) % filteredCommands.length)
+      e.preventDefault();
+      setSelectedIndex((prev) => (prev + 1) % filteredCommands.length);
     } else if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      setSelectedIndex((prev) => (prev - 1 + filteredCommands.length) % filteredCommands.length)
+      e.preventDefault();
+      setSelectedIndex((prev) => (prev - 1 + filteredCommands.length) % filteredCommands.length);
     } else if (e.key === 'Enter') {
-      e.preventDefault()
+      e.preventDefault();
       if (filteredCommands[selectedIndex]) {
-        filteredCommands[selectedIndex].action()
+        filteredCommands[selectedIndex].action();
       }
     }
-  }
+  };
 
-  if (!isOpen) return null
+  if (!isOpen) return null;
 
   return (
     <div className="command-palette-overlay" ref={overlayRef} onClick={handleOverlayClick}>
@@ -208,8 +256,8 @@ export const CommandPalette: React.FC = () => {
             placeholder="Rechercher une tâche, un projet, créer une note ou naviguer..."
             value={search}
             onChange={(e) => {
-              setSearch(e.target.value)
-              setSelectedIndex(0)
+              setSearch(e.target.value);
+              setSelectedIndex(0);
             }}
             onKeyDown={handleKeyDown}
           />
@@ -251,5 +299,5 @@ export const CommandPalette: React.FC = () => {
         </div>
       </div>
     </div>
-  )
-}
+  );
+};

@@ -20,7 +20,11 @@ export class ResourcesService {
     return membership;
   }
 
-  private async assertWorkspaceRole(workspaceId: string, userId: string, allowedRoles: WorkspaceRole[]) {
+  private async assertWorkspaceRole(
+    workspaceId: string,
+    userId: string,
+    allowedRoles: WorkspaceRole[],
+  ) {
     const membership = await this.assertWorkspaceMember(workspaceId, userId);
     if (!allowedRoles.includes(membership.role)) {
       throw new ForbiddenException('Unauthorized: insufficient workspace permissions');
@@ -103,10 +107,7 @@ export class ResourcesService {
       this.prisma.resourceAllocation.findMany({
         where: {
           project: { workspaceId: workspace.id, deletedAt: null },
-          OR: [
-            { endDate: null },
-            { endDate: { gte: windowStart } },
-          ],
+          OR: [{ endDate: null }, { endDate: { gte: windowStart } }],
         },
         include: { project: true },
       }),
@@ -130,19 +131,33 @@ export class ResourcesService {
       );
       const assignedTaskIds = new Set(
         openTasks
-          .filter((task) => task.userId === membership.userId || task.assignees.some((assignee) => assignee.userId === membership.userId))
+          .filter(
+            (task) =>
+              task.userId === membership.userId ||
+              task.assignees.some((assignee) => assignee.userId === membership.userId),
+          )
           .map((task) => task.id),
       );
       const estimatedOpenMinutes = openTasks
         .filter((task) => assignedTaskIds.has(task.id))
         .reduce((total, task) => total + (task.estimatedMinutes ?? 0), 0);
       const plannedMinutes = timeBlocks
-        .filter((block) => block.task.userId === membership.userId || block.task.assignees.some((assignee) => assignee.userId === membership.userId))
-        .reduce((total, block) => total + Math.max(0, Math.round((block.endTime.getTime() - block.startTime.getTime()) / 60000)), 0);
+        .filter(
+          (block) =>
+            block.task.userId === membership.userId ||
+            block.task.assignees.some((assignee) => assignee.userId === membership.userId),
+        )
+        .reduce(
+          (total, block) =>
+            total +
+            Math.max(0, Math.round((block.endTime.getTime() - block.startTime.getTime()) / 60000)),
+          0,
+        );
       const allocationPercent = allocations
         .filter((allocation) => allocation.userId === membership.userId)
         .reduce((total, allocation) => total + allocation.allocationPercent, 0);
-      const loadPercent = weeklyCapacityMinutes > 0 ? Math.round((plannedMinutes / weeklyCapacityMinutes) * 100) : 0;
+      const loadPercent =
+        weeklyCapacityMinutes > 0 ? Math.round((plannedMinutes / weeklyCapacityMinutes) * 100) : 0;
 
       return {
         user: membership.user,
@@ -165,11 +180,21 @@ export class ResourcesService {
   async updateResourceProfile(
     actingUserId: string,
     memberUserId: string,
-    data: { weeklyCapacityMinutes?: number; skills?: string; costRateCents?: number; billingRateCents?: number },
+    data: {
+      weeklyCapacityMinutes?: number;
+      skills?: string;
+      costRateCents?: number;
+      billingRateCents?: number;
+    },
     workspaceId?: string,
   ) {
-    const workspace = workspaceId ? { id: workspaceId } : await this.ensureDefaultWorkspace(actingUserId);
-    await this.assertWorkspaceRole(workspace.id, actingUserId, [WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
+    const workspace = workspaceId
+      ? { id: workspaceId }
+      : await this.ensureDefaultWorkspace(actingUserId);
+    await this.assertWorkspaceRole(workspace.id, actingUserId, [
+      WorkspaceRole.OWNER,
+      WorkspaceRole.ADMIN,
+    ]);
     await this.assertWorkspaceMember(workspace.id, memberUserId);
 
     return this.prisma.resourceProfile.upsert({
@@ -201,7 +226,10 @@ export class ResourcesService {
     if (!project || !project.workspaceId) {
       throw new BadRequestException('Project or workspace not found');
     }
-    await this.assertWorkspaceRole(project.workspaceId, actingUserId, [WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
+    await this.assertWorkspaceRole(project.workspaceId, actingUserId, [
+      WorkspaceRole.OWNER,
+      WorkspaceRole.ADMIN,
+    ]);
     await this.assertWorkspaceMember(project.workspaceId, userId);
 
     return this.prisma.resourceAllocation.create({
@@ -520,7 +548,7 @@ function isPublicHoliday(date: Date): boolean {
   if (month === 11 && day === 25) return true; // 25 Décembre
 
   const easter = getEasterDate(year);
-  
+
   const easterMonday = new Date(easter.getTime() + 1 * 24 * 60 * 60 * 1000);
   if (month === easterMonday.getUTCMonth() && day === easterMonday.getUTCDate()) return true;
 
@@ -532,4 +560,3 @@ function isPublicHoliday(date: Date): boolean {
 
   return false;
 }
-
