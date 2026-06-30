@@ -1,6 +1,6 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { GeminiService, ParsedAiAction } from '../notes/gemini.service';
+import { AiProvider, ParsedAiAction } from '../projects/interfaces/ai-provider.interface';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { ProjectsService } from './projects.service';
 import { TaskPriority, TaskStatus, DependencyType } from '@prisma/client';
@@ -23,7 +23,8 @@ export class AiService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly geminiService: GeminiService,
+    @Inject('AI_PROVIDER')
+    private readonly geminiService: AiProvider,
     private readonly projectsService: ProjectsService,
   ) {}
   /**
