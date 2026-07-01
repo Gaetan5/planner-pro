@@ -61,9 +61,6 @@ export class CopilotService {
       });
     };
 
-    // Indexer les tâches par ID pour faciliter les liaisons
-    const tasksMap = new Map(activeTasks.map((t) => [t.id, t]));
-
     // Liste des IDs des tâches en retard pour la détection des blocages
     const overdueTaskIds = new Set<string>();
     const atRiskTaskIds = new Set<string>();
