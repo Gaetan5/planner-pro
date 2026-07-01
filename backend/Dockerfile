@@ -20,25 +20,25 @@ COPY --chown=node:node package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY --chown=node:node backend/package.json ./backend/
 COPY --chown=node:node frontend/package.json ./frontend/
 
-# Installer les dépendances du monorepo filtrées pour le backend
-RUN --mount=type=cache,id=pnpm,target=/home/node/.local/share/pnpm/store/v3 pnpm install --filter backend... --no-frozen-lockfile --prod=false
-
-# Copier le reste des fichiers du backend
-COPY --chown=node:node backend ./backend/
+# Copier les dossiers node_modules déjà installés et le build du backend depuis l'hôte
+COPY --chown=node:node node_modules ./node_modules
+COPY --chown=node:node backend/node_modules ./backend/node_modules
+COPY --chown=node:node backend/dist ./backend/dist
+COPY --chown=node:node backend/prisma ./backend/prisma
+COPY --chown=node:node backend/wait-for-db.js ./backend/wait-for-db.js
+COPY --chown=node:node backend/prisma.config.ts ./backend/prisma.config.ts
 
 # Se positionner dans le dossier backend pour les étapes suivantes
 WORKDIR /home/node/app/backend
 
-# Générer le client Prisma
+# Régénérer le client Prisma pour garantir la compatibilité binaire musl
 RUN pnpm exec prisma generate
-
-# Compiler l'application NestJS
-RUN pnpm run build
 
 EXPOSE 3001
 
-# Lancer l'attente de MySQL, la génération de Prisma, la synchronisation Prisma puis démarrer l'application
-CMD node wait-for-db.js && (pnpm install --filter backend... --no-frozen-lockfile --prod=false --config.confirmModulesPurge=false || true) && pnpm exec prisma generate && pnpm exec prisma migrate deploy && node dist/main
+# Lancer l'attente de MySQL, s'assurer que les tables sont poussées puis démarrer
+CMD node wait-for-db.js && pnpm exec prisma db push && node dist/main
+
 
 
 

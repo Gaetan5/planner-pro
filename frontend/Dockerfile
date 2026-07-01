@@ -17,10 +17,9 @@ COPY --chown=node:node package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY --chown=node:node frontend/package.json ./frontend/
 COPY --chown=node:node backend/package.json ./backend/
 
-# Installer les dépendances du monorepo filtrées pour le frontend
-RUN --mount=type=cache,id=pnpm,target=/home/node/.local/share/pnpm/store/v3 pnpm install --filter frontend... --no-frozen-lockfile
-
-# Copier le reste des fichiers du frontend
+# Copier les dossiers node_modules déjà installés et le code du frontend depuis l'hôte
+COPY --chown=node:node node_modules ./node_modules
+COPY --chown=node:node frontend/node_modules ./frontend/node_modules
 COPY --chown=node:node frontend ./frontend/
 
 # Se positionner dans le dossier frontend pour les étapes suivantes
@@ -30,6 +29,7 @@ EXPOSE 3000
 
 # Démarrer le serveur de dev Vite sur le port 3000 en écoutant toutes les interfaces réseau
 CMD pnpm exec vite --host 0.0.0.0 --port 3000
+
 
 
 
