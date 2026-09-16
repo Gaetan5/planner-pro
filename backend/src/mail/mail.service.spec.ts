@@ -1,3 +1,5 @@
+/// <reference types="jest" />
+
 import { Test, TestingModule } from '@nestjs/testing';
 import { MailService } from './mail.service';
 import * as nodemailer from 'nodemailer';
