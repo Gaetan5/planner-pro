@@ -1,4 +1,5 @@
 const net = require('net');
+const mariadb = require('mariadb');
 
 // Extraire l'hôte de DATABASE_URL ou utiliser 'db' par défaut
 let host = 'db';
@@ -13,13 +14,23 @@ if (process.env.DATABASE_URL) {
 }
 
 const port = 3306;
+let credentials = { user: undefined, password: undefined, database: undefined };
+try {
+  const url = new URL((process.env.DATABASE_URL || '').replace('mysql://', 'http://'));
+  credentials = {
+    user: decodeURIComponent(url.username),
+    password: decodeURIComponent(url.password),
+    database: url.pathname.slice(1),
+  };
+} catch {
+  console.warn('Impossible de parser les identifiants DATABASE_URL.');
+}
 let retries = 30; // 30 tentatives (environ 60 secondes maximum)
 
 function checkConnection() {
   const client = net.createConnection({ host, port }, () => {
-    console.log('MySQL est prêt et accepte les connexions !');
     client.end();
-    process.exit(0);
+    verifyDatabase();
   });
 
   const onError = () => {
@@ -35,6 +46,32 @@ function checkConnection() {
   };
 
   client.on('error', onError);
+}
+
+async function verifyDatabase() {
+  let connection;
+  try {
+    connection = await mariadb.createConnection({
+      host,
+      port,
+      ...credentials,
+      allowPublicKeyRetrieval: true,
+      connectTimeout: 3000,
+    });
+    await connection.query('SELECT 1');
+    console.log('MySQL est prêt et accepte les connexions !');
+    await connection.end();
+    process.exit(0);
+  } catch {
+    if (connection) await connection.end().catch(() => undefined);
+    retries--;
+    if (retries === 0) {
+      console.error("MySQL n'a pas démarré à temps. Abandon.");
+      process.exit(1);
+    }
+    console.log(`MySQL est joignable mais pas encore prêt... (${retries} tentatives restantes)`);
+    setTimeout(checkConnection, 2000);
+  }
 }
 
 checkConnection();
