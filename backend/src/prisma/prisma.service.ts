@@ -14,6 +14,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
       user: parsed.username,
       password: decodeURIComponent(parsed.password || ''),
       database: parsed.pathname.substring(1),
+      allowPublicKeyRetrieval: true,
     });
     super({ adapter });
   }
