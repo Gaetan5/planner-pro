@@ -1,3 +1,5 @@
+/// <reference types="jest" />
+
 import { Test, TestingModule } from '@nestjs/testing';
 import { TrackingGateway } from './tracking.gateway';
 import { TrackingService } from './tracking.service';

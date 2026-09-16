@@ -15,7 +15,13 @@ module.exports = [
     languageOptions: {
       parser: tsParser,
       parserOptions: {
-        project: ['./backend/tsconfig.json', './frontend/tsconfig.json'],
+        tsconfigRootDir: __dirname,
+        project: [
+          './backend/tsconfig.json',
+          './tsconfig.eslint.json',
+          './backend/tests/tsconfig.json',
+          './frontend/tsconfig.json',
+        ],
       },
     },
     plugins: {
@@ -26,6 +32,27 @@ module.exports = [
       ...tsPlugin.configs.recommended.rules,
       '@typescript-eslint/no-explicit-any': 'warn',
       'prettier/prettier': 'error',
+    },
+  },
+  {
+    files: ['backend/tests/**/*.ts', 'backend/src/**/*.spec.ts'],
+    languageOptions: {
+      parserOptions: {
+        project: false,
+      },
+      globals: {
+        beforeEach: 'readonly',
+        afterEach: 'readonly',
+        describe: 'readonly',
+        expect: 'readonly',
+        it: 'readonly',
+        jest: 'readonly',
+        test: 'readonly',
+      },
+    },
+    rules: {
+      '@typescript-eslint/no-unused-vars': 'off',
+      '@typescript-eslint/ban-ts-comment': 'off',
     },
   },
   prettierConfig,

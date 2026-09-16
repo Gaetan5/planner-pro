@@ -6,7 +6,6 @@ import { ProjectRole } from '@prisma/client';
 
 describe('ProjectPermissionsService', () => {
   let service: ProjectPermissionsService;
-  let prisma: PrismaService;
 
   const mockPrisma = {
     project: {
@@ -15,7 +14,6 @@ describe('ProjectPermissionsService', () => {
     },
     membership: {
       findFirst: jest.fn(),
-      findMany: jest.fn(),
     },
     projectMembership: {
       findUnique: jest.fn(),
@@ -38,7 +36,6 @@ describe('ProjectPermissionsService', () => {
     }).compile();
 
     service = module.get<ProjectPermissionsService>(ProjectPermissionsService);
-    prisma = module.get<PrismaService>(PrismaService);
 
     jest.clearAllMocks();
   });

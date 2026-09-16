@@ -1,3 +1,5 @@
+/// <reference types="jest" />
+
 import { Test, TestingModule } from '@nestjs/testing';
 import { AiService } from './ai.service';
 import { PrismaService } from '../prisma/prisma.service';
