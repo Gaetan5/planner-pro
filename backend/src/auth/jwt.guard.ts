@@ -21,7 +21,7 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     const request = context.switchToHttp().getRequest();
-    const token = this.extractTokenFromCookie(request);
+    const token = this.extractToken(request);
 
     if (!token) {
       throw new UnauthorizedException("Token d'authentification manquant.");
@@ -43,7 +43,15 @@ export class JwtAuthGuard implements CanActivate {
     return true;
   }
 
-  private extractTokenFromCookie(request: Request): string | undefined {
-    return request.cookies?.accessToken;
+  private extractToken(request: Request): string | undefined {
+    const cookieToken = request.cookies?.accessToken;
+    if (cookieToken) return cookieToken;
+
+    const authorization = request.headers.authorization;
+    if (authorization?.startsWith('Bearer ')) {
+      return authorization.slice('Bearer '.length).trim();
+    }
+
+    return undefined;
   }
 }

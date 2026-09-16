@@ -372,7 +372,7 @@ export class CommentsService {
       );
     }
 
-    const membership = await this.assertWorkspaceAccess(workspaceId, userId);
+    await this.assertWorkspaceAccess(workspaceId, userId);
     // Autoriser le créateur/admin/owner
     // Pour simplifier, permettons à tout membre d'écrire/supprimer s'il est ADMIN/OWNER, ou si l'utilisateur y a accès (puisqu'il a accès au workspace).
     // Mais restreignons pour la sécurité : ADMIN, OWNER, ou n'importe quel membre du projet si on ne stocke pas le créateur de l'attachment

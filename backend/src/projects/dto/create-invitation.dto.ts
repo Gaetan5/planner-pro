@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsEnum, IsEmail, IsUUID, IsInt, Min } from 'class-validator';
+import { IsOptional, IsEnum, IsEmail, IsUUID, IsInt, Min } from 'class-validator';
 import { WorkspaceRole } from '@prisma/client';
 import { Type } from 'class-transformer';
 

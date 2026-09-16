@@ -43,7 +43,7 @@ export const CapacityView: React.FC = () => {
     try {
       const token = localStorage.getItem('token') || user?.token;
       const res = await fetch(
-        `${import.meta.env.VITE_API_URL || 'http://localhost:3002'}/projects/workspaces/${activeWorkspaceId}/resources/optimize`,
+        `${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/projects/workspaces/${activeWorkspaceId}/resources/optimize`,
         {
           method: 'POST',
           headers: {

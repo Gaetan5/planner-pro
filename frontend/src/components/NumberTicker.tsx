@@ -16,7 +16,7 @@ export const NumberTicker: React.FC<NumberTickerProps> = ({
   const [count, setCount] = useState(0);
 
   useEffect(() => {
-    let start = 0;
+    const start = 0;
     const end = Math.round(value);
     if (start === end) {
       setCount(end);

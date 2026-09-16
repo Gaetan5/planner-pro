@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { randomUUID } from 'crypto';
@@ -36,6 +36,13 @@ export class NotesService {
   }
 
   async updateNote(userId: string, noteId: string, title: string, content: string) {
+    const existingNote = await this.prisma.note.findFirst({
+      where: { id: noteId, userId, deletedAt: null },
+    });
+    if (!existingNote) {
+      throw new NotFoundException('Note introuvable.');
+    }
+
     const note = await this.prisma.note.update({
       where: { id: noteId },
       data: {
@@ -88,9 +95,9 @@ export class NotesService {
     return notes;
   }
 
-  async getNote(noteId: string) {
+  async getNote(userId: string, noteId: string) {
     return this.prisma.note.findFirst({
-      where: { id: noteId, deletedAt: null },
+      where: { id: noteId, userId, deletedAt: null },
       include: {
         tasks: {
           where: { deletedAt: null },
@@ -99,9 +106,9 @@ export class NotesService {
     });
   }
 
-  async deleteNote(noteId: string) {
+  async deleteNote(userId: string, noteId: string) {
     const note = await this.prisma.note.findFirst({
-      where: { id: noteId, deletedAt: null },
+      where: { id: noteId, userId, deletedAt: null },
     });
 
     if (note) {

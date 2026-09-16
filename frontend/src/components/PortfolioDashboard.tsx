@@ -66,10 +66,9 @@ export function PortfolioDashboard() {
       const healthScore = Math.round(completionScore + overdueScore + riskScore + budgetScore);
 
       // Textes d'analyse IA Mocks locaux très précis
-      let assessment =
-        'Le projet progresse de manière saine et les jalons principaux sont respectés.';
-      let statusClass: 'excellent' | 'good' | 'warning' | 'danger' = 'excellent';
-      let statusText = 'Excellent';
+      let assessment: string;
+      let statusClass: 'excellent' | 'good' | 'warning' | 'danger';
+      let statusText: string;
 
       if (healthScore >= 85) {
         statusClass = 'excellent';

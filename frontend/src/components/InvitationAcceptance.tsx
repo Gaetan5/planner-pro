@@ -56,7 +56,7 @@ export const InvitationAcceptance: React.FC<InvitationAcceptanceProps> = ({ toke
     e.preventDefault();
     try {
       await mockLogin(name || 'Collaborateur');
-    } catch (err) {
+    } catch {
       alert("Erreur d'authentification.");
     }
   };

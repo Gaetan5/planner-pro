@@ -139,7 +139,7 @@ export class FinancesService {
       projects.map(async (project) => {
         try {
           return await this.getProjectFinances(project.id, userId);
-        } catch (e) {
+        } catch {
           return null;
         }
       }),

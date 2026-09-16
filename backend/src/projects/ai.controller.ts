@@ -162,11 +162,14 @@ export class AiController {
    * Retourne les alertes prédictives calculées pour le workspace.
    */
   @Get('copilot/alerts')
-  async getCopilotAlerts(@Query('workspaceId') workspaceId: string) {
+  async getCopilotAlerts(
+    @Req() req: AuthenticatedRequest,
+    @Query('workspaceId') workspaceId: string,
+  ) {
     if (!workspaceId) {
       throw new BadRequestException('workspaceId requis.');
     }
-    return this.copilotService.calculatePredictiveAlerts(workspaceId);
+    return this.copilotService.calculatePredictiveAlerts(workspaceId, req.user.id);
   }
 
   /**

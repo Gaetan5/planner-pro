@@ -78,7 +78,7 @@ export const FinancesView: React.FC = () => {
       } else {
         setError('Erreur lors du chargement des données financières.');
       }
-    } catch (e) {
+    } catch {
       setError('Impossible de contacter le serveur.');
     } finally {
       setLoading(false);

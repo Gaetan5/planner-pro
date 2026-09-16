@@ -75,7 +75,7 @@ graph TD
 
 - **Statut** : Accepté.
 - **Contexte** : Dans un environnement multi-conteneurs Docker Compose, le conteneur MySQL démarre plus lentement que le backend NestJS, provoquant des erreurs de connexion fatales lors des migrations Prisma de démarrage.
-- **Décision** : Développement d'un script Node léger à la racine du backend (`wait-for-db.js`) qui utilise le module `net` natif pour tester le port TCP `3306` en boucle toutes les 2 secondes. Le backend attend que ce port réponde avant de lancer `prisma db push` et de démarrer le serveur.
+- **Décision** : Développement d'un script Node léger à la racine du backend (`wait-for-db.js`) qui utilise le module `net` natif pour tester le port TCP `3306` en boucle toutes les 2 secondes. Le backend attend que ce port réponde avant d'appliquer les migrations Prisma et de démarrer le serveur.
 - **Conséquences** : Éradication totale des crashs liés à l'initialisation asynchrone des services de données.
 
 ### Sécurisation & Robustesse de Production (Audit Technique)
@@ -196,14 +196,14 @@ CMD node wait-for-db.js && (pnpm install --filter backend... --no-frozen-lockfil
 - **MUST HAVE** (Livré & Sécurisé) :
   - Gestion de projet avec colonnes Kanban dynamiques.
   - Prise de notes intelligente avec auto-parsing de tâches markdown.
-  - Authentification unique SSO GitHub + Sécurisation des sessions par JWT.
+  - Authentification SSO GitHub et classique, avec JWT accepté par cookie HTTP-only ou en-tête Bearer.
   - Suivi du temps en temps réel synchronisé par sockets.
 - **SHOULD HAVE** (Prochaines itérations prévues) :
   - Mode hors-ligne avec synchronisation automatique lors de la reconnexion (Service Workers).
-  - Rappels de tâches par notification Web Push pour le calendrier.
+  - Rappels de tâches par notification Web Push pour le calendrier (prévu).
 - **COULD HAVE** (Fonctionnalités avancées bonus) :
   - Analyse sémantique des notes par IA (NLP) pour regrouper automatiquement les idées connexes.
-  - Exportation des rapports de temps sous formats CSV et PDF pour la facturation client.
+  - Exportation des rapports de temps sous formats CSV et PDF pour la facturation client (prévu).
 
 ### Normes de Qualité d'Équipe (DoR & DoD)
 
@@ -227,29 +227,18 @@ CMD node wait-for-db.js && (pnpm install --filter backend... --no-frozen-lockfil
 
 L'application intègre des scripts de validation de bout en bout en ligne de commande pour s'assurer du bon fonctionnement des APIs et de l'alignement des fonctionnalités avec le frontend.
 
-### A. Test de création de projet de base
+### Validation disponible
 
-Pour valider l'authentification mockée, la création de projet, de jalons et de livrables associés :
-
-```bash
-BACKEND_URL=http://localhost:3009 node backend/test_cli_project.js
-```
-
-### B. Test des fonctionnalités avancées (Calendrier, Planification, Notes & Équipes)
-
-Pour valider l'extraction de tâches depuis les notes Markdown, le time-blocking, la planification de dépendances Gantt, et la synchronisation double-sens des cases à cocher :
+Les anciens scripts CLI ne sont plus présents dans le dépôt. Les validations réellement exécutables sont :
 
 ```bash
-BACKEND_URL=http://localhost:3009 node backend/test_cli_features.js
+pnpm --filter backend test
+pnpm --filter frontend test:run
+pnpm build
+pnpm lint
 ```
 
-### C. Test de robustesse (Détection de cycles & RBAC)
-
-Pour valider la détection de dépendances cycliques (DFS), le contrôle d'accès RBAC (rejet des actions d'écriture pour les rôles `MEMBER`/`VIEWER` avec erreur 403), le filtrage du calendrier et l'exclusion des blocs de code Markdown :
-
-```bash
-BACKEND_URL=http://localhost:3009 node backend/test_cli_improvements.js
-```
+Les tests actuels sont principalement unitaires. Les scénarios d'intégration MySQL, Redis, HTTP complet et Docker restent à ajouter.
 
 ---
 
@@ -276,7 +265,7 @@ BACKEND_URL=http://localhost:3009 node backend/test_cli_improvements.js
 docker-compose up --build
 ```
 
-Cette commande automatise l'installation, le démarrage de MySQL, l'attente active du serveur de base de données par le backend, la synchronisation du schéma Prisma, et le lancement du serveur React avec Hot-Reload.
+Cette commande automatise l'installation, le démarrage de MySQL, l'attente active du serveur de base de données par le backend, la synchronisation du schéma Prisma actuel, et le lancement du serveur React avec Hot-Reload.
 
 ### 🏃‍♂️ Démarrage en Mode Développement Local (Hôte)
 
@@ -288,7 +277,7 @@ Si vous développez localement avec un serveur de développement natif pour prof
    pnpm install
    ```
 
-2. Assurez-vous que vos instances MySQL et Redis locales sont actives, puis poussez le schéma de base de données :
+  2. Assurez-vous que vos instances MySQL et Redis locales sont actives, puis appliquez le schéma de développement :
 
    ```bash
    pnpm --filter backend exec prisma db push

@@ -204,8 +204,8 @@ export const GanttView: React.FC = () => {
 
     if (!startStr || !dueStr) return null;
 
-    let startDate = new Date(startStr);
-    let dueDate = new Date(dueStr);
+    const startDate = new Date(startStr);
+    const dueDate = new Date(dueStr);
 
     if (isThisTaskPreview && dragPreview) {
       startDate.setDate(startDate.getDate() + dragPreview.deltaDaysStart);
@@ -422,7 +422,7 @@ export const GanttView: React.FC = () => {
       try {
         await removeTaskDependency(taskId, parentTaskId);
         await refreshData();
-      } catch (err) {
+      } catch {
         alert('Erreur lors de la suppression de la dépendance.');
       }
     }

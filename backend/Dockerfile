@@ -20,23 +20,23 @@ COPY --chown=node:node package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY --chown=node:node backend/package.json ./backend/
 COPY --chown=node:node frontend/package.json ./frontend/
 
-# Copier les dossiers node_modules déjà installés et le build du backend depuis l'hôte
-COPY --chown=node:node node_modules ./node_modules
-COPY --chown=node:node backend/node_modules ./backend/node_modules
-COPY --chown=node:node backend/dist ./backend/dist
-COPY --chown=node:node backend/prisma ./backend/prisma
-COPY --chown=node:node backend/wait-for-db.js ./backend/wait-for-db.js
-COPY --chown=node:node backend/prisma.config.ts ./backend/prisma.config.ts
+# Installer les dépendances à partir du lockfile pour produire une image reproductible
+RUN pnpm install --filter backend... --frozen-lockfile
+
+# Copier uniquement les sources nécessaires au backend
+COPY --chown=node:node backend ./backend
 
 # Se positionner dans le dossier backend pour les étapes suivantes
 WORKDIR /home/node/app/backend
 
-# Régénérer le client Prisma pour garantir la compatibilité binaire musl
+# Générer le client Prisma et compiler le backend dans l'image
 RUN pnpm exec prisma generate
+RUN pnpm --filter backend build
 
 EXPOSE 3001
 
-# Lancer l'attente de MySQL, s'assurer que les tables sont poussées puis démarrer
+# Synchroniser le schéma actuel puis démarrer. La migration historique ne couvre pas encore
+# l'ensemble des modèles du schéma réparti.
 CMD node wait-for-db.js && pnpm exec prisma db push && node dist/main
 
 

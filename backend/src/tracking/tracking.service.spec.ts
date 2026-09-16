@@ -5,7 +5,6 @@ import { BadRequestException } from '@nestjs/common';
 
 describe('TrackingService', () => {
   let service: TrackingService;
-  let prisma: PrismaService;
 
   const mockPrisma = {
     task: {
@@ -26,7 +25,6 @@ describe('TrackingService', () => {
     }).compile();
 
     service = module.get<TrackingService>(TrackingService);
-    prisma = module.get<PrismaService>(PrismaService);
 
     jest.clearAllMocks();
   });

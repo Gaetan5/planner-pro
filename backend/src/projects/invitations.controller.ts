@@ -15,6 +15,7 @@ import { InvitationsService } from './invitations.service';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { Public } from '../auth/public.decorator';
 import { CreateInvitationDto } from './dto/create-invitation.dto';
+import { createHash } from 'crypto';
 
 @Controller('projects')
 @UseGuards(JwtAuthGuard)
@@ -64,7 +65,7 @@ export class InvitationsController {
   async checkInvitation(@Param('token') token: string) {
     // Utiliser la validation interne sans appliquer l'adhésion
     // pour extraire les informations publiques d'affichage
-    const tokenHash = require('crypto').createHash('sha256').update(token).digest('hex');
+    const tokenHash = createHash('sha256').update(token).digest('hex');
 
     // Récupérer l'invitation
     const invitation = await (this.invitationsService as any).prisma.invitation.findUnique({

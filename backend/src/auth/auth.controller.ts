@@ -27,7 +27,7 @@ export class AuthController {
   async loginWithGitHub(@Body() body: { code: string }, @Res({ passthrough: true }) res: Response) {
     const { user, accessToken } = await this.authService.loginWithGitHub(body.code);
     this.setTokenCookie(res, accessToken);
-    return { user };
+    return { user, accessToken };
   }
 
   /**
@@ -42,7 +42,7 @@ export class AuthController {
       registerDto.name,
     );
     this.setTokenCookie(res, accessToken);
-    return { user };
+    return { user, accessToken };
   }
 
   /**
@@ -56,7 +56,7 @@ export class AuthController {
       loginDto.passwordRaw,
     );
     this.setTokenCookie(res, accessToken);
-    return { user };
+    return { user, accessToken };
   }
 
   /**
