@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { GeminiService } from '../notes/gemini.service';
 
@@ -25,8 +25,19 @@ export class CopilotService {
   /**
    * Calcule les alertes prédictives sur le workspace via un moteur de règles heuristiques.
    */
-  async calculatePredictiveAlerts(workspaceId: string): Promise<PredictiveAlert[]> {
+  async calculatePredictiveAlerts(
+    workspaceId: string,
+    userId?: string,
+  ): Promise<PredictiveAlert[]> {
     this.logger.log(`Calcul des alertes prédictives pour le workspace ${workspaceId}`);
+    if (userId) {
+      const membership = await this.prisma.membership.findFirst({
+        where: { workspaceId, userId, workspace: { deletedAt: null } },
+      });
+      if (!membership) {
+        throw new ForbiddenException('Accès non autorisé au workspace');
+      }
+    }
     const alerts: PredictiveAlert[] = [];
 
     // 1. Récupérer tous les projets et tâches actives (non terminées)

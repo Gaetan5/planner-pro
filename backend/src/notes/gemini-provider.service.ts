@@ -65,7 +65,8 @@ ${content}
     }
   }
 
-  async parseCommand(content: string, referenceDate: Date): Promise<ParsedAiAction[]> {
+  async parseCommand(content: string, _referenceDate: Date): Promise<ParsedAiAction[]> {
+    void _referenceDate;
     if (!this.genAI) return [];
 
     try {

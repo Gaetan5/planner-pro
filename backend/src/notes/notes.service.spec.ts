@@ -7,8 +7,6 @@ import { GeminiService } from './gemini.service';
 
 describe('NotesService', () => {
   let service: NotesService;
-  let prisma: PrismaService;
-  let redis: RedisService;
 
   const mockGemini = {
     isAvailable: jest.fn().mockReturnValue(false),
@@ -19,11 +17,13 @@ describe('NotesService', () => {
     note: {
       create: jest.fn(),
       update: jest.fn(),
+      findFirst: jest.fn(),
       findUnique: jest.fn(),
     },
     task: {
       create: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
       findUnique: jest.fn(),
       findFirst: jest.fn(),
     },
@@ -58,9 +58,6 @@ describe('NotesService', () => {
     }).compile();
 
     service = module.get<NotesService>(NotesService);
-    prisma = module.get<PrismaService>(PrismaService);
-    redis = module.get<RedisService>(RedisService);
-
     jest.clearAllMocks();
   });
 
@@ -174,6 +171,31 @@ describe('NotesService', () => {
           }),
         }),
       );
+    });
+  });
+
+  describe('isolation des notes', () => {
+    it("filtre la lecture d'une note par utilisateur", async () => {
+      mockPrisma.note.findFirst.mockResolvedValue(null);
+
+      await service.getNote('user-123', 'note-456');
+
+      expect(mockPrisma.note.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'note-456', userId: 'user-123', deletedAt: null },
+        }),
+      );
+    });
+
+    it("filtre la suppression d'une note par utilisateur", async () => {
+      mockPrisma.note.findFirst.mockResolvedValue(null);
+
+      await service.deleteNote('user-123', 'note-456');
+
+      expect(mockPrisma.note.findFirst).toHaveBeenCalledWith({
+        where: { id: 'note-456', userId: 'user-123', deletedAt: null },
+      });
+      expect(mockPrisma.note.update).not.toHaveBeenCalled();
     });
   });
 });

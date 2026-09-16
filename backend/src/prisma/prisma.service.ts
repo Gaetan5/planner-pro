@@ -25,6 +25,10 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
   }
 
   private async seedDefaultUser() {
+    if (process.env.NODE_ENV === 'production') {
+      return;
+    }
+
     const defaultUserId = 'default-user-id';
     const user = await this.user.findUnique({
       where: { id: defaultUserId },

@@ -13,6 +13,7 @@ global.fetch = vi.fn();
 describe('FinancesView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(global.fetch).mockImplementation(() => new Promise(() => undefined));
     vi.mocked(useApp).mockReturnValue({
       user: { token: 'fake-token' } as unknown as {
         token: string;

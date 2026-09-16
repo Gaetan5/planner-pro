@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotesService } from '../notes/notes.service';
 import { IntegrationService } from './integration.service';
@@ -10,18 +10,15 @@ import { ResourcesService } from './resources.service';
 import { FinancesService } from './finances.service';
 import { ProjectPermissionsService } from './project-permissions.service';
 import {
-  Prisma,
   TaskPriority,
   ProjectStatus,
   DeliverableStatus,
   DependencyType,
   DeliveryStatus,
   WorkspaceRole,
-  TaskStatus,
 } from '@prisma/client';
 import * as crypto from 'crypto';
 import { UpdateTaskDto } from './dto/update-task.dto';
-import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 
 /**
@@ -316,7 +313,7 @@ export class ProjectsService {
   private verifyGitHubSignature(payload: any, signature?: string): boolean {
     const secret = process.env.GITHUB_WEBHOOK_SECRET;
     if (!secret) {
-      return true;
+      return process.env.NODE_ENV === 'test';
     }
     if (!signature) {
       return false;
@@ -329,7 +326,7 @@ export class ProjectsService {
         new Uint8Array(Buffer.from(signature)),
         new Uint8Array(Buffer.from(digest)),
       );
-    } catch (e) {
+    } catch {
       return false;
     }
   }

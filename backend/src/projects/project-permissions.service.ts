@@ -6,6 +6,32 @@ import { ProjectRole } from '@prisma/client';
 export class ProjectPermissionsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async assertWorkspaceAccess(
+    workspaceId: string,
+    userId: string,
+    allowedRoles: Array<'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER'> = [
+      'OWNER',
+      'ADMIN',
+      'MEMBER',
+      'VIEWER',
+    ],
+  ) {
+    const membership = await this.prisma.membership.findFirst({
+      where: {
+        workspaceId,
+        userId,
+        role: { in: allowedRoles },
+        workspace: { deletedAt: null },
+      },
+    });
+
+    if (!membership) {
+      throw new ForbiddenException('Accès non autorisé au workspace');
+    }
+
+    return membership;
+  }
+
   /**
    * Assigne ou met à jour le rôle d'un utilisateur sur un projet.
    * L'appelant doit être OWNER/ADMIN du workspace parent ou MANAGER du projet.
@@ -206,17 +232,32 @@ export class ProjectPermissionsService {
   /**
    * Récupère l'historique d'audit du projet ou global.
    */
-  async getAuditLogs(userId: string, limit = 100) {
-    // Réservé aux admins / owners globaux
-    const defaultWorkspace = await this.prisma.membership.findFirst({
-      where: { userId, role: { in: ['OWNER', 'ADMIN'] } },
+  async getAuditLogs(userId: string, workspaceId: string, limit = 100) {
+    await this.assertWorkspaceAccess(workspaceId, userId, ['OWNER', 'ADMIN']);
+
+    const projects = await this.prisma.projectMembership.findMany({
+      where: { project: { workspaceId, deletedAt: null } },
+      select: { id: true },
+    });
+    const workspaceProjects = await this.prisma.project.findMany({
+      where: { workspaceId, deletedAt: null },
+      select: { id: true },
+    });
+    const projectIds = workspaceProjects.map((project) => project.id);
+    const projectMembershipIds = projects.map((membership) => membership.id);
+    const tasks = await this.prisma.task.findMany({
+      where: { projectId: { in: projectIds }, deletedAt: null },
+      select: { id: true },
     });
 
-    if (!defaultWorkspace) {
-      throw new ForbiddenException("Accès aux logs d'audit refusé");
-    }
+    const entityFilters = [
+      { entityType: 'Project', entityId: { in: projectIds } },
+      { entityType: 'Task', entityId: { in: tasks.map((task) => task.id) } },
+      { entityType: 'ProjectMembership', entityId: { in: projectMembershipIds } },
+    ];
 
     return this.prisma.auditLog.findMany({
+      where: { OR: entityFilters },
       take: limit,
       orderBy: { createdAt: 'desc' },
       include: {

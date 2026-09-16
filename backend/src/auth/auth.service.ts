@@ -329,7 +329,7 @@ export class AuthService {
       },
     });
 
-    const task2 = await this.prisma.task.create({
+    await this.prisma.task.create({
       data: {
         title: '⏱️ Lancer un timer Pomodoro',
         description:
@@ -341,7 +341,7 @@ export class AuthService {
       },
     });
 
-    const task3 = await this.prisma.task.create({
+    await this.prisma.task.create({
       data: {
         title: "🤖 Poser une question à l'Assistant IA",
         description:

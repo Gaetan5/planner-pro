@@ -73,10 +73,15 @@ export class ProjectsController {
   //  PERMISSIONS PROJETS & AUDIT (Lot A)
   // ═══════════════════════════════════════════════════════════════════
 
-  @Get('audit/logs')
-  getAuditLogs(@Req() req: any, @Query('limit') limit?: string) {
+  @Get('workspaces/:workspaceId/audit/logs')
+  getAuditLogs(
+    @Req() req: any,
+    @Param('workspaceId') workspaceId: string,
+    @Query('limit') limit?: string,
+  ) {
     return this.projectPermissionsService.getAuditLogs(
       req.user.id,
+      workspaceId,
       limit ? parseInt(limit, 10) : undefined,
     );
   }
@@ -508,40 +513,67 @@ END:VCALENDAR`;
   }
 
   @Get('workspaces/:workspaceId/integrations')
-  listIntegrations(@Param('workspaceId') workspaceId: string) {
+  async listIntegrations(@Req() req: any, @Param('workspaceId') workspaceId: string) {
+    await this.projectPermissionsService.assertWorkspaceAccess(workspaceId, req.user.id);
     return this.integrationService.listIntegrations(workspaceId);
   }
 
   @Get('workspaces/:workspaceId/integrations/status')
-  getIntegrationsStatus(@Param('workspaceId') workspaceId: string) {
+  async getIntegrationsStatus(@Req() req: any, @Param('workspaceId') workspaceId: string) {
+    await this.projectPermissionsService.assertWorkspaceAccess(workspaceId, req.user.id);
     return this.integrationService.getIntegrationsStatus(workspaceId);
   }
 
   @Post('workspaces/:workspaceId/integrations')
-  createIntegration(@Param('workspaceId') workspaceId: string, @Body() body: IntegrationDto) {
+  async createIntegration(
+    @Req() req: any,
+    @Param('workspaceId') workspaceId: string,
+    @Body() body: IntegrationDto,
+  ) {
+    await this.projectPermissionsService.assertWorkspaceAccess(workspaceId, req.user.id, [
+      'OWNER',
+      'ADMIN',
+    ]);
     return this.integrationService.createIntegration(workspaceId, body);
   }
 
   @Post('integrations/:integrationId/toggle')
-  toggleIntegration(@Param('integrationId') integrationId: string) {
+  async toggleIntegration(@Req() req: any, @Param('integrationId') integrationId: string) {
+    const integration = await this.prisma.integration.findUnique({ where: { id: integrationId } });
+    if (!integration) return this.integrationService.toggleIntegration(integrationId);
+    await this.projectPermissionsService.assertWorkspaceAccess(
+      integration.workspaceId,
+      req.user.id,
+      ['OWNER', 'ADMIN'],
+    );
     return this.integrationService.toggleIntegration(integrationId);
   }
 
   @Delete('integrations/:integrationId')
-  deleteIntegration(@Param('integrationId') integrationId: string) {
+  async deleteIntegration(@Req() req: any, @Param('integrationId') integrationId: string) {
+    const integration = await this.prisma.integration.findUnique({ where: { id: integrationId } });
+    if (!integration) return this.integrationService.deleteIntegration(integrationId);
+    await this.projectPermissionsService.assertWorkspaceAccess(
+      integration.workspaceId,
+      req.user.id,
+      ['OWNER', 'ADMIN'],
+    );
     return this.integrationService.deleteIntegration(integrationId);
   }
 
   @Post('workspaces/:workspaceId/integrations/:integrationId/export')
-  exportToCalendar(
+  async exportToCalendar(
+    @Req() req: any,
     @Param('workspaceId') workspaceId: string,
     @Param('integrationId') integrationId: string,
   ) {
+    await this.projectPermissionsService.assertWorkspaceAccess(workspaceId, req.user.id);
     return this.calendarSyncService.exportToCalendar(workspaceId, integrationId);
   }
 
   @Get('workspaces/:workspaceId/calendar-conflicts')
-  getCalendarConflicts(@Param('workspaceId') workspaceId: string) {
+  async getCalendarConflicts(@Req() req: any, @Param('workspaceId') workspaceId: string) {
+    await this.projectPermissionsService.assertWorkspaceAccess(workspaceId, req.user.id);
     return this.calendarSyncService.detectCalendarConflicts(workspaceId);
   }
 
@@ -550,30 +582,43 @@ END:VCALENDAR`;
   // ═══════════════════════════════════════════════════════════════════
 
   @Get('workspaces/:workspaceId/calendar/oauth/google/auth-url')
-  getGoogleAuthUrl(@Param('workspaceId') workspaceId: string) {
+  async getGoogleAuthUrl(@Req() req: any, @Param('workspaceId') workspaceId: string) {
+    await this.projectPermissionsService.assertWorkspaceAccess(workspaceId, req.user.id);
     return { url: this.calendarSyncService.generateAuthUrl('GOOGLE_CALENDAR', workspaceId) };
   }
 
   @Get('workspaces/:workspaceId/calendar/oauth/outlook/auth-url')
-  getOutlookAuthUrl(@Param('workspaceId') workspaceId: string) {
+  async getOutlookAuthUrl(@Req() req: any, @Param('workspaceId') workspaceId: string) {
+    await this.projectPermissionsService.assertWorkspaceAccess(workspaceId, req.user.id);
     return { url: this.calendarSyncService.generateAuthUrl('OUTLOOK', workspaceId) };
   }
 
   @Post('workspaces/:workspaceId/calendar/oauth/callback')
-  handleOAuthCallback(
+  async handleOAuthCallback(
+    @Req() req: any,
     @Param('workspaceId') workspaceId: string,
     @Body() body: { provider: 'GOOGLE_CALENDAR' | 'OUTLOOK'; code: string },
   ) {
+    await this.projectPermissionsService.assertWorkspaceAccess(workspaceId, req.user.id, [
+      'OWNER',
+      'ADMIN',
+    ]);
     return this.calendarSyncService.handleOAuthCallback(workspaceId, body.provider, body.code);
   }
 
   @Post('workspaces/:workspaceId/calendar/sync')
-  syncCalendarEvents(@Param('workspaceId') workspaceId: string) {
+  async syncCalendarEvents(@Req() req: any, @Param('workspaceId') workspaceId: string) {
+    await this.projectPermissionsService.assertWorkspaceAccess(workspaceId, req.user.id);
     return this.calendarSyncService.syncCalendarEvents(workspaceId);
   }
 
   @Post('workspaces/:workspaceId/auto-schedule')
-  autoScheduleWorkspace(@Param('workspaceId') workspaceId: string) {
+  async autoScheduleWorkspace(@Req() req: any, @Param('workspaceId') workspaceId: string) {
+    await this.projectPermissionsService.assertWorkspaceAccess(workspaceId, req.user.id, [
+      'OWNER',
+      'ADMIN',
+      'MEMBER',
+    ]);
     return this.proactiveSchedulerService.autoScheduleWorkspace(workspaceId);
   }
 

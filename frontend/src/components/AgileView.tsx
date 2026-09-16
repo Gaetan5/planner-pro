@@ -65,7 +65,7 @@ export const AgileView: React.FC = () => {
 
       // Charger les sprints
       const res = await fetch(
-        `${import.meta.env.VITE_API_URL || 'http://localhost:3002'}/projects/workspaces/${activeWorkspaceId}/sprints`,
+        `${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/projects/workspaces/${activeWorkspaceId}/sprints`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -120,7 +120,7 @@ export const AgileView: React.FC = () => {
       setNewSprintEnd('');
       setShowCreateModal(false);
       await loadWorkspaceAgileData();
-    } catch (err) {
+    } catch {
       alert('Erreur lors de la création du sprint');
     }
   };
@@ -131,7 +131,7 @@ export const AgileView: React.FC = () => {
       await updateSprintStatus(sprintId, status);
       await loadWorkspaceAgileData();
       await refreshData();
-    } catch (err) {
+    } catch {
       alert('Erreur lors du changement de statut du sprint');
     }
   };
@@ -148,7 +148,7 @@ export const AgileView: React.FC = () => {
       setEditingTaskId(null);
       await loadWorkspaceAgileData();
       await refreshData();
-    } catch (err) {
+    } catch {
       alert('Erreur lors de la mise à jour des points de story.');
     }
   };
@@ -159,7 +159,7 @@ export const AgileView: React.FC = () => {
       await associateTasksToSprint(targetSprintId, [taskId]);
       await loadWorkspaceAgileData();
       await refreshData();
-    } catch (err) {
+    } catch {
       alert('Erreur lors du transfert de la tâche.');
     }
   };

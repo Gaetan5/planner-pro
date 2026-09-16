@@ -288,12 +288,10 @@ export class SprintService {
       const remainingReal = Math.max(0, totalPoints - completedPoints);
 
       // Ligne idéale (burndown théorique)
-      let remainingIdeal = totalPoints;
-      if (dates.length > 1) {
-        remainingIdeal = Math.max(0, totalPoints - (totalPoints / (dates.length - 1)) * index);
-      } else {
-        remainingIdeal = 0;
-      }
+      const remainingIdeal =
+        dates.length > 1
+          ? Math.max(0, totalPoints - (totalPoints / (dates.length - 1)) * index)
+          : 0;
 
       return {
         date: dateStr,

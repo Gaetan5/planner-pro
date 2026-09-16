@@ -17,9 +17,10 @@ COPY --chown=node:node package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY --chown=node:node frontend/package.json ./frontend/
 COPY --chown=node:node backend/package.json ./backend/
 
-# Copier les dossiers node_modules déjà installés et le code du frontend depuis l'hôte
-COPY --chown=node:node node_modules ./node_modules
-COPY --chown=node:node frontend/node_modules ./frontend/node_modules
+# Installer les dépendances depuis le lockfile pour produire une image reproductible
+RUN pnpm install --filter frontend... --frozen-lockfile
+
+# Copier le code source du frontend
 COPY --chown=node:node frontend ./frontend/
 
 # Se positionner dans le dossier frontend pour les étapes suivantes

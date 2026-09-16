@@ -28,12 +28,12 @@ export class NotesController {
   }
 
   @Get(':id')
-  getNote(@Param('id') id: string) {
-    return this.notesService.getNote(id);
+  getNote(@User() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.notesService.getNote(user.id, id);
   }
 
   @Delete(':id')
-  deleteNote(@Param('id') id: string) {
-    return this.notesService.deleteNote(id);
+  deleteNote(@User() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.notesService.deleteNote(user.id, id);
   }
 }

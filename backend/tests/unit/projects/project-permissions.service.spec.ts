@@ -11,9 +11,11 @@ describe('ProjectPermissionsService', () => {
   const mockPrisma = {
     project: {
       findFirst: jest.fn(),
+      findMany: jest.fn(),
     },
     membership: {
       findFirst: jest.fn(),
+      findMany: jest.fn(),
     },
     projectMembership: {
       findUnique: jest.fn(),
@@ -23,6 +25,9 @@ describe('ProjectPermissionsService', () => {
     },
     auditLog: {
       create: jest.fn(),
+      findMany: jest.fn(),
+    },
+    task: {
       findMany: jest.fn(),
     },
   };
@@ -169,6 +174,31 @@ describe('ProjectPermissionsService', () => {
             action: 'PROJECT_ROLE_ASSIGN',
             entityType: 'ProjectMembership',
           }),
+        }),
+      );
+    });
+  });
+
+  describe('getAuditLogs', () => {
+    it('filtre les logs sur les entités du workspace autorisé', async () => {
+      mockPrisma.membership.findFirst.mockResolvedValue({ role: 'ADMIN' });
+      mockPrisma.project.findMany.mockResolvedValue([{ id: 'project-1' }]);
+      mockPrisma.projectMembership.findMany.mockResolvedValue([{ id: 'project-member-1' }]);
+      mockPrisma.task.findMany.mockResolvedValue([{ id: 'task-1' }]);
+      mockPrisma.auditLog.findMany.mockResolvedValue([]);
+
+      await service.getAuditLogs('admin-1', 'workspace-1', 25);
+
+      expect(mockPrisma.auditLog.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            OR: [
+              { entityType: 'Project', entityId: { in: ['project-1'] } },
+              { entityType: 'Task', entityId: { in: ['task-1'] } },
+              { entityType: 'ProjectMembership', entityId: { in: ['project-member-1'] } },
+            ],
+          },
+          take: 25,
         }),
       );
     });
