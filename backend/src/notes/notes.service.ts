@@ -30,9 +30,9 @@ export class NotesService {
     await this.redis.del(this.getCacheKey(userId));
 
     // Analyser le contenu pour extraire et automatiser les tâches
-    await this.parseTasksFromContent(userId, content, note.id);
+    const updatedContent = await this.parseTasksFromContent(userId, content, note.id);
 
-    return note;
+    return { ...note, content: updatedContent };
   }
 
   async updateNote(userId: string, noteId: string, title: string, content: string) {
@@ -55,9 +55,9 @@ export class NotesService {
     await this.redis.del(this.getCacheKey(userId));
 
     // Analyser à nouveau le contenu pour voir s'il y a de nouvelles tâches
-    await this.parseTasksFromContent(userId, content, noteId);
+    const updatedContent = await this.parseTasksFromContent(userId, content, noteId);
 
-    return note;
+    return { ...note, content: updatedContent };
   }
 
   async getNotes(userId: string) {
@@ -192,7 +192,11 @@ export class NotesService {
    * Analyse le contenu Markdown d'une note pour extraire les lignes de type "- [ ] Tâche"
    * et les transformer automatiquement en tâches réelles en base de données.
    */
-  private async parseTasksFromContent(userId: string, content: string, noteId: string) {
+  private async parseTasksFromContent(
+    userId: string,
+    content: string,
+    noteId: string,
+  ): Promise<string> {
     const lines = content.split('\n');
     let hasChanges = false;
     const updatedLines = [];
@@ -302,9 +306,9 @@ export class NotesService {
         const taskStatus = isDone ? 'DONE' : 'TODO';
 
         if (taskId) {
-          // Si un identifiant existe déjà, on vérifie la tâche correspondante active
+          // Vérifier que l'identifiant appartient bien à cette note et à cet utilisateur.
           const existingTask = await this.prisma.task.findFirst({
-            where: { id: taskId, deletedAt: null },
+            where: { id: taskId, userId, noteId },
           });
 
           if (existingTask) {
@@ -324,14 +328,21 @@ export class NotesService {
                 : true
               : false;
 
-            if (statusChanged || titleChanged || projectChanged || dateChanged) {
+            if (
+              existingTask.deletedAt ||
+              statusChanged ||
+              titleChanged ||
+              projectChanged ||
+              dateChanged
+            ) {
               await this.prisma.task.update({
                 where: { id: taskId },
                 data: {
                   title: taskText,
-                  status: statusChanged || (existingTask.status as any),
+                  status: statusChanged ?? existingTask.status,
                   projectId: project.id,
                   dueDate: dueDate || undefined,
+                  deletedAt: null,
                 },
               });
               console.log(`Tâche "${taskId}" mise à jour depuis la note.`);
@@ -351,10 +362,11 @@ export class NotesService {
 
             updatedLines.push(line);
           } else {
-            // Recréer la tâche si elle a été supprimée accidentellement
+            // Ne pas réutiliser l'identifiant d'un marqueur périmé ou étranger.
+            const newTaskId = randomUUID();
             await this.prisma.task.create({
               data: {
-                id: taskId,
+                id: newTaskId,
                 title: taskText,
                 status: taskStatus,
                 projectId: project.id,
@@ -365,11 +377,15 @@ export class NotesService {
             });
             if (assigneeId) {
               await this.prisma.taskAssignee.create({
-                data: { taskId, userId: assigneeId },
+                data: { taskId: newTaskId, userId: assigneeId },
               });
             }
-            console.log(`Tâche "${taskId}" recréée avec l'ID de la note.`);
-            updatedLines.push(line);
+            console.log(`Tâche recréée avec un nouvel ID après un marqueur invalide.`);
+            const projectSuffix = tagMatch ? ` #${targetProjectName}` : '';
+            updatedLines.push(
+              `${prefix}${taskText}${projectSuffix} <!-- task:${newTaskId} -->`,
+            );
+            hasChanges = true;
           }
         } else {
           // Aucun identifiant présent : création d'une nouvelle tâche et injection du tag dans la note
@@ -413,6 +429,9 @@ export class NotesService {
       });
       // Invalider le cache de l'utilisateur
       await this.redis.del(this.getCacheKey(userId));
+      return newContent;
     }
+
+    return content;
   }
 }
