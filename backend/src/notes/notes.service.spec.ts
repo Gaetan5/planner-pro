@@ -83,7 +83,7 @@ describe('NotesService', () => {
         status: 'TODO',
       });
 
-      await service.createNote(userId, noteTitle, noteContent);
+      const createdNote = await service.createNote(userId, noteTitle, noteContent);
 
       // Devrait insérer la tâche en base de données
       expect(mockPrisma.task.create).toHaveBeenCalledWith(
@@ -108,6 +108,9 @@ describe('NotesService', () => {
             ),
           }),
         }),
+      );
+      expect(createdNote.content).toMatch(
+        /- \[ \] Acheter du lait #Inbox <!-- task:[a-f0-9-]+ -->/,
       );
     });
 
@@ -144,6 +147,74 @@ describe('NotesService', () => {
           data: expect.objectContaining({
             title: 'Nettoyer le code',
           }),
+        }),
+      );
+      expect(mockPrisma.task.findFirst).toHaveBeenCalledWith({
+        where: { id: taskId, userId, noteId },
+      });
+    });
+
+    it("ne réutilise pas l'identifiant d'une tâche étrangère à la note", async () => {
+      const userId = 'user-123';
+      const noteId = 'note-456';
+      const foreignTaskId = 'task-owned-by-another-note';
+      const noteContent = `- [ ] Tâche importée <!-- task:${foreignTaskId} -->`;
+
+      mockPrisma.note.create.mockResolvedValue({
+        id: noteId,
+        title: 'Ma Note',
+        content: noteContent,
+        userId,
+      });
+      mockPrisma.project.findFirst.mockResolvedValue({ id: 'project-inbox', name: 'Inbox' });
+      mockPrisma.task.findFirst.mockResolvedValue(null);
+
+      const createdNote = await service.createNote(userId, 'Ma Note', noteContent);
+
+      expect(mockPrisma.task.findFirst).toHaveBeenCalledWith({
+        where: { id: foreignTaskId, userId, noteId },
+      });
+      expect(mockPrisma.task.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            userId,
+            noteId,
+            id: expect.not.stringMatching(new RegExp(`^${foreignTaskId}$`)),
+          }),
+        }),
+      );
+      expect(createdNote.content).toMatch(/- \[ \] Tâche importée <!-- task:[a-f0-9-]+ -->/);
+      expect(createdNote.content).not.toContain(foreignTaskId);
+    });
+
+    it('restaure une tâche supprimée logiquement appartenant à la note', async () => {
+      const userId = 'user-123';
+      const noteId = 'note-456';
+      const taskId = 'task-soft-deleted';
+
+      mockPrisma.note.create.mockResolvedValue({
+        id: noteId,
+        title: 'Ma Note',
+        content: `- [ ] Tâche existante <!-- task:${taskId} -->`,
+        userId,
+      });
+      mockPrisma.project.findFirst.mockResolvedValue({ id: 'project-inbox', name: 'Inbox' });
+      mockPrisma.task.findFirst.mockResolvedValue({
+        id: taskId,
+        title: 'Tâche existante',
+        status: 'TODO',
+        projectId: 'project-inbox',
+        dueDate: null,
+        deletedAt: new Date(),
+      });
+
+      await service.createNote(userId, 'Ma Note', `- [ ] Tâche existante <!-- task:${taskId} -->`);
+
+      expect(mockPrisma.task.create).not.toHaveBeenCalled();
+      expect(mockPrisma.task.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: taskId },
+          data: expect.objectContaining({ deletedAt: null }),
         }),
       );
     });
