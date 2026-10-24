@@ -277,7 +277,7 @@ Si vous développez localement avec un serveur de développement natif pour prof
    pnpm install
    ```
 
-  2. Assurez-vous que vos instances MySQL et Redis locales sont actives, puis appliquez le schéma de développement :
+2. Assurez-vous que vos instances MySQL et Redis locales sont actives, puis appliquez le schéma de développement :
 
    ```bash
    pnpm --filter backend exec prisma db push
