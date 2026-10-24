@@ -1,3 +1,4 @@
+import { ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
 import {
   WebSocketGateway,
   WebSocketServer,
@@ -26,6 +27,8 @@ import { PrismaService } from '../prisma/prisma.service';
   },
 })
 export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit {
+  private readonly logger = new Logger(TrackingGateway.name);
+
   @WebSocketServer()
   server!: Server;
 
@@ -83,8 +86,11 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
 
       const activeTracking = await this.trackingService.getActiveTracking(client.data.userId);
       client.emit('active-timer-state', activeTracking);
-    } catch {
-      console.log("Accès WebSocket refusé : Validation de l'identité échouée.");
+    } catch (error: unknown) {
+      this.logger.error(
+        `WebSocket authentication or initialization failed for socket ${client.id}.`,
+        error instanceof Error ? error.stack : String(error),
+      );
       client.disconnect(true);
     }
   }
@@ -166,8 +172,22 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
       client.join(`task:${data.taskId}`);
       console.log(`Socket ${client.id} a rejoint la room task:${data.taskId}`);
       return { status: 'success' };
-    } catch {
-      return { status: 'error', message: 'Accès au projet non autorisé.' };
+    } catch (error: unknown) {
+      if (error instanceof NotFoundException) {
+        return { status: 'error', message: 'Projet introuvable.' };
+      }
+      if (error instanceof ForbiddenException) {
+        return { status: 'error', message: 'Accès au projet non autorisé.' };
+      }
+
+      this.logger.error(
+        `Unable to authorize socket ${client.id} for task ${data.taskId}.`,
+        error instanceof Error ? error.stack : String(error),
+      );
+      return {
+        status: 'error',
+        message: "Impossible de vérifier l'accès à cette tâche. Réessayez ultérieurement.",
+      };
     }
   }
 

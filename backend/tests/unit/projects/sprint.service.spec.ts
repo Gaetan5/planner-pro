@@ -127,6 +127,36 @@ describe('SprintService', () => {
         },
       });
     });
+
+    it('devrait rejeter un début qui dépasse la fin existante', async () => {
+      mockPrisma.sprint.findUnique.mockResolvedValue({
+        id: sprintId,
+        startDate: new Date('2026-06-01T00:00:00.000Z'),
+        endDate: new Date('2026-06-14T00:00:00.000Z'),
+        workspaceId: 'ws-123',
+      });
+      mockPrisma.membership.findFirst.mockResolvedValue({ id: 'mem-1' });
+
+      await expect(
+        service.updateSprint(sprintId, userId, { startDate: '2026-06-15T00:00:00.000Z' }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.sprint.update).not.toHaveBeenCalled();
+    });
+
+    it('devrait rejeter une fin antérieure au début existant', async () => {
+      mockPrisma.sprint.findUnique.mockResolvedValue({
+        id: sprintId,
+        startDate: new Date('2026-06-01T00:00:00.000Z'),
+        endDate: new Date('2026-06-14T00:00:00.000Z'),
+        workspaceId: 'ws-123',
+      });
+      mockPrisma.membership.findFirst.mockResolvedValue({ id: 'mem-1' });
+
+      await expect(
+        service.updateSprint(sprintId, userId, { endDate: '2026-05-31T00:00:00.000Z' }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.sprint.update).not.toHaveBeenCalled();
+    });
   });
 
   describe('associateTasksToSprint', () => {

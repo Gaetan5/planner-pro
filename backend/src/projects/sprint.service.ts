@@ -67,11 +67,11 @@ export class SprintService {
     if (data.startDate !== undefined) updateData.startDate = new Date(data.startDate);
     if (data.endDate !== undefined) updateData.endDate = new Date(data.endDate);
 
-    if (
-      updateData.startDate &&
-      updateData.endDate &&
-      (updateData.startDate as Date) >= (updateData.endDate as Date)
-    ) {
+    const startDate =
+      updateData.startDate instanceof Date ? updateData.startDate : sprint.startDate;
+    const endDate = updateData.endDate instanceof Date ? updateData.endDate : sprint.endDate;
+
+    if (startDate >= endDate) {
       throw new BadRequestException(
         'La date de début doit être strictement antérieure à la date de fin.',
       );

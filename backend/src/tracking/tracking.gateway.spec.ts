@@ -8,6 +8,7 @@ import { AiService } from '../projects/ai.service';
 import { ProjectPermissionsService } from '../projects/project-permissions.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { Socket } from 'socket.io';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 
 describe('TrackingGateway', () => {
   let gateway: TrackingGateway;
@@ -135,6 +136,50 @@ describe('TrackingGateway', () => {
       expect(res.status).toBe('error');
       expect(res.message).toContain('Aucun morceau audio reçu');
       expect(mockAiService.transcribeAndAnalyzeVoice).not.toHaveBeenCalled();
+    });
+
+    describe('join-task authorization failures', () => {
+      const mockClient = {
+        id: 'socket-id-123',
+        data: { userId: 'user-id-123' },
+        join: jest.fn(),
+      };
+
+      beforeEach(() => {
+        jest.clearAllMocks();
+      });
+
+      it('retourne une erreur spécifique lorsque le projet est introuvable', async () => {
+        mockPrismaService.task.findUnique.mockResolvedValue({ projectId: 'project-1' });
+        mockProjectPermissionsService.assertProjectRole.mockRejectedValue(
+          new NotFoundException('Projet introuvable'),
+        );
+
+        await expect(
+          gateway.handleJoinTask({ taskId: 'task-1' }, mockClient as unknown as Socket),
+        ).resolves.toEqual({ status: 'error', message: 'Projet introuvable.' });
+      });
+
+      it('distingue un refus d’accès d’une erreur interne', async () => {
+        mockPrismaService.task.findUnique.mockResolvedValue({ projectId: 'project-1' });
+        mockProjectPermissionsService.assertProjectRole.mockRejectedValue(
+          new ForbiddenException('Forbidden'),
+        );
+
+        await expect(
+          gateway.handleJoinTask({ taskId: 'task-1' }, mockClient as unknown as Socket),
+        ).resolves.toEqual({ status: 'error', message: 'Accès au projet non autorisé.' });
+
+        mockProjectPermissionsService.assertProjectRole.mockRejectedValue(
+          new Error('Database unavailable'),
+        );
+        await expect(
+          gateway.handleJoinTask({ taskId: 'task-1' }, mockClient as unknown as Socket),
+        ).resolves.toEqual({
+          status: 'error',
+          message: "Impossible de vérifier l'accès à cette tâche. Réessayez ultérieurement.",
+        });
+      });
     });
   });
 });

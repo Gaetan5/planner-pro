@@ -3,7 +3,10 @@ import { useApp } from '../context/AppContext';
 import logo from '../logo.png';
 import './Login.css';
 
-export const Login: React.FC = () => {
+export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> = ({
+  oauthError,
+  isLoadingOAuth = false,
+}) => {
   const { mockLogin, classicLogin, classicRegister } = useApp();
   const [isRegisterMode, setIsRegisterMode] = useState(false);
 
@@ -20,7 +23,7 @@ export const Login: React.FC = () => {
   const [bypassName, setBypassName] = useState('');
 
   // UI states
-  const [errorMsg, setErrorMsg] = useState('');
+  const [errorMsg, setErrorMsg] = useState(oauthError ?? '');
   const [loading, setLoading] = useState(false);
 
   const handleGitHubLogin = () => {
@@ -132,6 +135,7 @@ export const Login: React.FC = () => {
             <span className="auth-error-text">{errorMsg}</span>
           </div>
         )}
+        {isLoadingOAuth && <p role="status">Connexion à GitHub en cours…</p>}
 
         {/* Forms Container */}
         <div className="auth-forms-wrapper">

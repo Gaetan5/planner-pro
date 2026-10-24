@@ -36,12 +36,41 @@ import logo from './logo.png';
 import './App.css';
 
 function AppWithSession() {
-  const { user, logout, activeTab, setActiveTab, isConnected, theme, toggleTheme } = useApp();
+  const { user, login, logout, activeTab, setActiveTab, isConnected, theme, toggleTheme } =
+    useApp();
   const [inviteToken, setInviteToken] = useState<string | null>(() => {
     const params = new URLSearchParams(window.location.search);
     return params.get('token');
   });
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [oauthError, setOauthError] = useState<string | null>(null);
+  const [handlingOAuth, setHandlingOAuth] = useState(false);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const code = url.searchParams.get('code');
+    const providerError = url.searchParams.get('error');
+    if (!code && !providerError) return;
+
+    url.searchParams.delete('code');
+    url.searchParams.delete('state');
+    url.searchParams.delete('error');
+    url.searchParams.delete('error_description');
+    window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
+
+    if (providerError) {
+      setOauthError('La connexion GitHub a été annulée ou refusée.');
+      return;
+    }
+
+    setHandlingOAuth(true);
+    setOauthError(null);
+    login(code!)
+      .catch((error: unknown) => {
+        setOauthError(error instanceof Error ? error.message : 'Échec de la connexion GitHub.');
+      })
+      .finally(() => setHandlingOAuth(false));
+  }, [login]);
 
   useEffect(() => {
     if (user) {
@@ -56,8 +85,12 @@ function AppWithSession() {
     return <InvitationAcceptance token={inviteToken} onClose={() => setInviteToken(null)} />;
   }
 
+  if (handlingOAuth) {
+    return <Login isLoadingOAuth />;
+  }
+
   if (!user) {
-    return <Login />;
+    return <Login oauthError={oauthError ?? undefined} />;
   }
 
   const renderActiveTab = () => {

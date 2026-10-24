@@ -1,6 +1,7 @@
 import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
+import { Prisma } from '@prisma/client';
 import { encrypt, decrypt, hashPassword, verifyPassword } from './encryption.util';
 
 @Injectable()
@@ -212,20 +213,23 @@ export class AuthService {
 
     const hashedPassword = await hashPassword(passwordRaw);
 
-    const user = await this.prisma.user.create({
-      data: {
-        email: emailLower,
-        name: name.trim(),
-        passwordHash: hashedPassword,
-      },
-    });
+    const user = await this.prisma.$transaction(async (transaction) => {
+      const createdUser = await transaction.user.create({
+        data: {
+          email: emailLower,
+          name: name.trim(),
+          passwordHash: hashedPassword,
+        },
+      });
 
-    // Création des données d'onboarding par défaut
-    try {
-      await this.createOnboardingData(user.id, user.name || 'Nouvel Utilisateur');
-    } catch (err: unknown) {
-      console.error("Erreur lors de la création des données d'onboarding :", err);
-    }
+      await this.createOnboardingData(
+        transaction,
+        createdUser.id,
+        createdUser.name || 'Nouvel Utilisateur',
+      );
+
+      return createdUser;
+    });
 
     const payload = { sub: user.id, email: user.email, name: user.name };
     const jwt = this.jwtService.sign(payload);
@@ -286,9 +290,13 @@ export class AuthService {
   /**
    * Crée des données de démonstration pour guider le nouvel utilisateur.
    */
-  private async createOnboardingData(userId: string, name: string) {
+  private async createOnboardingData(
+    transaction: Prisma.TransactionClient,
+    userId: string,
+    name: string,
+  ) {
     // 1. Créer un Workspace par défaut
-    const workspace = await this.prisma.workspace.create({
+    const workspace = await transaction.workspace.create({
       data: {
         name: `Espace de ${name}`,
         ownerId: userId,
@@ -296,7 +304,7 @@ export class AuthService {
     });
 
     // Ajouter la relation de membre (Membership)
-    await this.prisma.membership.create({
+    await transaction.membership.create({
       data: {
         workspaceId: workspace.id,
         userId: userId,
@@ -305,7 +313,7 @@ export class AuthService {
     });
 
     // 2. Créer un projet d'onboarding
-    const project = await this.prisma.project.create({
+    const project = await transaction.project.create({
       data: {
         name: '🚀 Démarrage Planner-Pro',
         description:
@@ -317,7 +325,7 @@ export class AuthService {
     });
 
     // 3. Créer des tâches de démonstration
-    const task1 = await this.prisma.task.create({
+    const task1 = await transaction.task.create({
       data: {
         title: '📖 Découvrir le Kanban',
         description:
@@ -329,7 +337,7 @@ export class AuthService {
       },
     });
 
-    await this.prisma.task.create({
+    await transaction.task.create({
       data: {
         title: '⏱️ Lancer un timer Pomodoro',
         description:
@@ -341,7 +349,7 @@ export class AuthService {
       },
     });
 
-    await this.prisma.task.create({
+    await transaction.task.create({
       data: {
         title: "🤖 Poser une question à l'Assistant IA",
         description:
@@ -353,7 +361,7 @@ export class AuthService {
       },
     });
 
-    const task4 = await this.prisma.task.create({
+    const task4 = await transaction.task.create({
       data: {
         title: '📊 Voir le chemin critique sur Gantt',
         description:
@@ -366,7 +374,7 @@ export class AuthService {
     });
 
     // Créer la dépendance
-    await this.prisma.taskDependency.create({
+    await transaction.taskDependency.create({
       data: {
         taskId: task4.id,
         dependsOnTaskId: task1.id,
