@@ -26,6 +26,7 @@ export class TrackingService {
       data: {
         startTime: new Date(),
         taskId,
+        userId,
       },
       include: {
         task: true,
@@ -38,9 +39,7 @@ export class TrackingService {
     const activeLog = await this.prisma.timeLog.findFirst({
       where: {
         endTime: null,
-        task: {
-          userId,
-        },
+        OR: [{ userId }, { userId: null, task: { userId } }],
       },
     });
 
@@ -67,9 +66,7 @@ export class TrackingService {
     return this.prisma.timeLog.findFirst({
       where: {
         endTime: null,
-        task: {
-          userId,
-        },
+        OR: [{ userId }, { userId: null, task: { userId } }],
       },
       include: {
         task: true,
@@ -98,9 +95,7 @@ export class TrackingService {
   async getUserTimeLogs(userId: string) {
     return this.prisma.timeLog.findMany({
       where: {
-        task: {
-          userId,
-        },
+        OR: [{ userId }, { userId: null, task: { userId } }],
       },
       include: {
         task: true,

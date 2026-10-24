@@ -1,29 +1,78 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { AiProvider } from '../projects/interfaces/ai-provider.interface';
+import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
+import type {
+  AiProvider,
+  ExtractedTask,
+  ParsedAiAction,
+} from '../projects/interfaces/ai-provider.interface';
 
-export interface ExtractedTask {
-  title: string;
-  projectTag: string;
-  isDone: boolean;
-  dueDate?: string; // YYYY-MM-DD
-  assigneeName?: string;
+const AI_ACTION_TYPES: readonly ParsedAiAction['type'][] = [
+  'CREATE_TASK',
+  'ASSIGN_TASK',
+  'CREATE_DEPENDENCY',
+  'CREATE_TIMEBLOCK',
+  'UPDATE_TASK_STATUS',
+];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-export interface ParsedAiAction {
-  type:
-    'CREATE_TASK' | 'ASSIGN_TASK' | 'CREATE_DEPENDENCY' | 'CREATE_TIMEBLOCK' | 'UPDATE_TASK_STATUS';
-  taskTitle?: string;
-  taskDescription?: string;
-  priority?: 'LOW' | 'MEDIUM' | 'HIGH';
-  dueDate?: string; // YYYY-MM-DD
-  estimatedMinutes?: number;
-  assigneeName?: string;
-  dependsOnTaskTitle?: string;
-  dependencyType?: 'FINISH_TO_START' | 'START_TO_START' | 'FINISH_TO_FINISH';
-  timeBlockStart?: string; // ISO
-  timeBlockEnd?: string; // ISO
-  status?: 'TODO' | 'IN_PROGRESS' | 'DONE';
+function isExtractedTask(value: unknown): value is ExtractedTask {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.title === 'string' &&
+    typeof value.projectTag === 'string' &&
+    typeof value.isDone === 'boolean' &&
+    (value.dueDate === undefined || value.dueDate === null || typeof value.dueDate === 'string') &&
+    (value.assigneeName === undefined ||
+      value.assigneeName === null ||
+      typeof value.assigneeName === 'string')
+  );
+}
+
+function isParsedAiAction(value: unknown): value is ParsedAiAction {
+  if (!isRecord(value) || !AI_ACTION_TYPES.some((actionType) => actionType === value.type)) {
+    return false;
+  }
+
+  const stringFields = [
+    'taskTitle',
+    'taskDescription',
+    'priority',
+    'dueDate',
+    'assigneeName',
+    'dependsOnTaskTitle',
+    'dependencyType',
+    'timeBlockStart',
+    'timeBlockEnd',
+    'status',
+  ];
+
+  return (
+    stringFields.every((field) => value[field] === undefined || typeof value[field] === 'string') &&
+    (value.estimatedMinutes === undefined || typeof value.estimatedMinutes === 'number')
+  );
+}
+
+function parseExtractedTasks(responseText: string): ExtractedTask[] {
+  const parsed: unknown = JSON.parse(responseText);
+  if (!Array.isArray(parsed) || !parsed.every(isExtractedTask)) {
+    throw new Error('Gemini returned an invalid extracted-task response.');
+  }
+  return parsed;
+}
+
+function parseActions(responseText: string): ParsedAiAction[] {
+  const parsed: unknown = JSON.parse(responseText);
+  if (
+    !isRecord(parsed) ||
+    !Array.isArray(parsed.actions) ||
+    !parsed.actions.every(isParsedAiAction)
+  ) {
+    throw new Error('Gemini returned an invalid AI-action response.');
+  }
+  return parsed.actions;
 }
 
 @Injectable()
@@ -74,33 +123,33 @@ export class GeminiService implements AiProvider {
         generationConfig: {
           responseMimeType: 'application/json',
           responseSchema: {
-            type: 'array' as any,
+            type: SchemaType.ARRAY,
             description: 'Liste des tâches extraites du texte',
             items: {
-              type: 'object' as any,
+              type: SchemaType.OBJECT,
               properties: {
                 title: {
-                  type: 'string' as any,
+                  type: SchemaType.STRING,
                   description:
                     "Titre propre de la tâche sans hashtags, sans tags de date ni mentions d'assignation.",
                 },
                 projectTag: {
-                  type: 'string' as any,
+                  type: SchemaType.STRING,
                   description:
                     "Nom du projet associé (taggé avec '#' dans le texte). Sans le symbole '#'. Si aucun tag n'est spécifié, utiliser 'Inbox'.",
                 },
                 isDone: {
-                  type: 'boolean' as any,
+                  type: SchemaType.BOOLEAN,
                   description:
                     'true si la tâche est cochée (ex: - [x] ou - [X]), false sinon (ex: - [ ]).',
                 },
                 dueDate: {
-                  type: 'string' as any,
+                  type: SchemaType.STRING,
                   description:
                     "Date limite de la tâche calculée au format YYYY-MM-DD en fonction du contexte de date de référence (ex: 'mardi prochain' ou '25 juin'). Laisser vide ou nul si aucune date n'est mentionnée.",
                 },
                 assigneeName: {
-                  type: 'string' as any,
+                  type: SchemaType.STRING,
                   description:
                     "Le nom d'utilisateur associé au tag @Nom (ex: 'gaetan' pour '@gaetan'). Sans le symbole '@'. Laisser vide ou nul si aucune assignation.",
                 },
@@ -132,8 +181,7 @@ ${content}
       const responseText = result.response.text();
       this.logger.debug(`Réponse brute de Gemini: ${responseText}`);
 
-      const tasks: ExtractedTask[] = JSON.parse(responseText);
-      return tasks;
+      return parseExtractedTasks(responseText);
     } catch (error: unknown) {
       this.logger.error(
         `Erreur lors de l'extraction des tâches via Gemini: ${error instanceof Error ? error.message : String(error)}`,
@@ -157,17 +205,18 @@ ${content}
         generationConfig: {
           responseMimeType: 'application/json',
           responseSchema: {
-            type: 'object' as any,
+            type: SchemaType.OBJECT,
             properties: {
               actions: {
-                type: 'array' as any,
+                type: SchemaType.ARRAY,
                 description:
                   "Liste des actions d'automatisation identifiées à partir de la commande en langage naturel.",
                 items: {
-                  type: 'object' as any,
+                  type: SchemaType.OBJECT,
                   properties: {
                     type: {
-                      type: 'string' as any,
+                      type: SchemaType.STRING,
+                      format: 'enum',
                       enum: [
                         'CREATE_TASK',
                         'ASSIGN_TASK',
@@ -178,57 +227,60 @@ ${content}
                       description: "Le type de l'action à exécuter.",
                     },
                     taskTitle: {
-                      type: 'string' as any,
+                      type: SchemaType.STRING,
                       description:
                         "Le titre de la tâche ciblée. Requis pour toutes les actions sauf CREATE_TASK si aucun titre n'est défini. Pour CREATE_TASK, c'est le titre de la nouvelle tâche.",
                     },
                     taskDescription: {
-                      type: 'string' as any,
+                      type: SchemaType.STRING,
                       description: 'Description de la tâche (optionnel, utilisé pour CREATE_TASK).',
                     },
                     priority: {
-                      type: 'string' as any,
+                      type: SchemaType.STRING,
+                      format: 'enum',
                       enum: ['LOW', 'MEDIUM', 'HIGH'],
                       description: 'La priorité de la tâche (pour CREATE_TASK).',
                     },
                     dueDate: {
-                      type: 'string' as any,
+                      type: SchemaType.STRING,
                       description:
                         "Date d'échéance calculée au format YYYY-MM-DD en se basant sur la date de référence. (pour CREATE_TASK).",
                     },
                     estimatedMinutes: {
-                      type: 'number' as any,
+                      type: SchemaType.NUMBER,
                       description:
                         'Temps estimé pour faire la tâche, en minutes (pour CREATE_TASK).',
                     },
                     assigneeName: {
-                      type: 'string' as any,
+                      type: SchemaType.STRING,
                       description:
                         "Nom, prénom ou email de l'utilisateur à assigner à la tâche (pour ASSIGN_TASK ou CREATE_TASK).",
                     },
                     dependsOnTaskTitle: {
-                      type: 'string' as any,
+                      type: SchemaType.STRING,
                       description:
                         'Le titre de la tâche dont dépend la tâche cible (requis pour CREATE_DEPENDENCY).',
                     },
                     dependencyType: {
-                      type: 'string' as any,
+                      type: SchemaType.STRING,
+                      format: 'enum',
                       enum: ['FINISH_TO_START', 'START_TO_START', 'FINISH_TO_FINISH'],
                       description:
                         "Le type de dépendance (pour CREATE_DEPENDENCY). Par défaut 'FINISH_TO_START'.",
                     },
                     timeBlockStart: {
-                      type: 'string' as any,
+                      type: SchemaType.STRING,
                       description:
                         'Date et heure de début du créneau horaire au format ISO (ex: YYYY-MM-DDTHH:mm:ss) (pour CREATE_TIMEBLOCK).',
                     },
                     timeBlockEnd: {
-                      type: 'string' as any,
+                      type: SchemaType.STRING,
                       description:
                         'Date et heure de fin du créneau horaire au format ISO (ex: YYYY-MM-DDTHH:mm:ss) (pour CREATE_TIMEBLOCK).',
                     },
                     status: {
-                      type: 'string' as any,
+                      type: SchemaType.STRING,
+                      format: 'enum',
                       enum: ['TODO', 'IN_PROGRESS', 'DONE'],
                       description: 'Le nouveau statut de la tâche (pour UPDATE_TASK_STATUS).',
                     },
@@ -270,8 +322,7 @@ ${content}
       const responseText = result.response.text();
       this.logger.debug(`Réponse commande IA brute: ${responseText}`);
 
-      const parsed = JSON.parse(responseText);
-      return parsed.actions || [];
+      return parseActions(responseText);
     } catch (error: unknown) {
       this.logger.error(
         `Erreur lors de l'analyse de la commande IA via Gemini: ${error instanceof Error ? error.message : String(error)}`,
@@ -336,16 +387,17 @@ ${content}
         generationConfig: {
           responseMimeType: 'application/json',
           responseSchema: {
-            type: 'object' as any,
+            type: SchemaType.OBJECT,
             properties: {
               actions: {
-                type: 'array' as any,
+                type: SchemaType.ARRAY,
                 description: "Liste des actions d'automatisation identifiées à partir de l'image.",
                 items: {
-                  type: 'object' as any,
+                  type: SchemaType.OBJECT,
                   properties: {
                     type: {
-                      type: 'string' as any,
+                      type: SchemaType.STRING,
+                      format: 'enum',
                       enum: [
                         'CREATE_TASK',
                         'ASSIGN_TASK',
@@ -356,49 +408,52 @@ ${content}
                       description: "Le type de l'action à exécuter.",
                     },
                     taskTitle: {
-                      type: 'string' as any,
+                      type: SchemaType.STRING,
                       description: 'Le titre de la tâche ciblée ou créée.',
                     },
                     taskDescription: {
-                      type: 'string' as any,
+                      type: SchemaType.STRING,
                       description: 'Description optionnelle.',
                     },
                     priority: {
-                      type: 'string' as any,
+                      type: SchemaType.STRING,
+                      format: 'enum',
                       enum: ['LOW', 'MEDIUM', 'HIGH'],
                       description: 'La priorité (optionnel).',
                     },
                     dueDate: {
-                      type: 'string' as any,
+                      type: SchemaType.STRING,
                       description: "Date d'échéance calculée au format YYYY-MM-DD (optionnel).",
                     },
                     estimatedMinutes: {
-                      type: 'number' as any,
+                      type: SchemaType.NUMBER,
                       description: 'Estimation en minutes (optionnel).',
                     },
                     assigneeName: {
-                      type: 'string' as any,
+                      type: SchemaType.STRING,
                       description: 'Nom de la personne à assigner (optionnel).',
                     },
                     dependsOnTaskTitle: {
-                      type: 'string' as any,
+                      type: SchemaType.STRING,
                       description: 'Titre de la tâche dont dépend la tâche cible (optionnel).',
                     },
                     dependencyType: {
-                      type: 'string' as any,
+                      type: SchemaType.STRING,
+                      format: 'enum',
                       enum: ['FINISH_TO_START', 'START_TO_START', 'FINISH_TO_FINISH'],
                       description: 'Le type de dépendance (optionnel).',
                     },
                     timeBlockStart: {
-                      type: 'string' as any,
+                      type: SchemaType.STRING,
                       description: 'Début du créneau au format ISO (optionnel).',
                     },
                     timeBlockEnd: {
-                      type: 'string' as any,
+                      type: SchemaType.STRING,
                       description: 'Fin du créneau au format ISO (optionnel).',
                     },
                     status: {
-                      type: 'string' as any,
+                      type: SchemaType.STRING,
+                      format: 'enum',
                       enum: ['TODO', 'IN_PROGRESS', 'DONE'],
                       description: 'Nouveau statut (optionnel).',
                     },
@@ -425,8 +480,7 @@ ${content}
       const responseText = response.response.text();
       this.logger.debug(`Réponse vision brute de Gemini: ${responseText}`);
 
-      const parsed = JSON.parse(responseText);
-      return parsed.actions || [];
+      return parseActions(responseText);
     } catch (error: unknown) {
       this.logger.error(
         `Erreur lors de l'analyse d'image via Gemini: ${error instanceof Error ? error.message : String(error)}`,

@@ -48,6 +48,7 @@ function DraggableCard({
   deleteTask,
   moveTaskStatus,
   getPriorityClass,
+  isReadOnly,
   onOpenComments,
 }: {
   task: Task;
@@ -58,9 +59,9 @@ function DraggableCard({
   deleteTask: (id: string) => void;
   moveTaskStatus: (id: string, status: string) => void;
   getPriorityClass: (priority: string) => string;
+  isReadOnly: boolean;
   onOpenComments: (task: Task) => void;
 }) {
-  const { isReadOnly } = useApp();
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: task.id,
     data: { task },
@@ -195,6 +196,7 @@ export const KanbanBoard: React.FC = () => {
   const {
     projects,
     workspaceMembers,
+    workspaces,
     createTask,
     updateTask,
     deleteTask,
@@ -205,6 +207,7 @@ export const KanbanBoard: React.FC = () => {
     stopTimer,
     addTaskDependency,
     isReadOnly,
+    isReadOnlyForWorkspace,
   } = useApp();
 
   const [selectedProjId, setSelectedProjId] = useState<string>(projects[0]?.id || '');
@@ -228,6 +231,12 @@ export const KanbanBoard: React.FC = () => {
   const [commentingTask, setCommentingTask] = useState<Task | null>(null);
 
   const activeProject = projects.find((p) => p.id === selectedProjId) || projects[0];
+  const activeProjectReadOnly = activeProject?.workspaceId
+    ? isReadOnlyForWorkspace(activeProject.workspaceId)
+    : isReadOnly;
+  const activeWorkspaceMembers =
+    workspaces.find((workspace) => workspace.id === activeProject?.workspaceId)?.memberships ??
+    workspaceMembers;
 
   // DnD sensor with activation constraint to distinguish click from drag
   const sensors = useSensors(
@@ -295,7 +304,7 @@ export const KanbanBoard: React.FC = () => {
     setActiveDragTask(null);
     setOverColumnId(null);
 
-    if (!over) return;
+    if (!over || activeProjectReadOnly) return;
 
     const taskId = active.id as string;
     const newStatus = over.id as Task['status'];
@@ -363,17 +372,18 @@ export const KanbanBoard: React.FC = () => {
               className={`kanban-project-item ${activeProject?.id === proj.id ? 'kanban-project-item--active' : ''}`}
             >
               <span>{proj.name}</span>
-              {proj.name !== 'Inbox' && !isReadOnly && (
-                <button
-                  className="kanban-project-delete-btn"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    deleteProject(proj.id);
-                  }}
-                >
-                  <Trash2 size={13} />
-                </button>
-              )}
+              {proj.name !== 'Inbox' &&
+                !(proj.workspaceId ? isReadOnlyForWorkspace(proj.workspaceId) : isReadOnly) && (
+                  <button
+                    className="kanban-project-delete-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteProject(proj.id);
+                    }}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                )}
             </li>
           ))}
         </ul>
@@ -392,7 +402,7 @@ export const KanbanBoard: React.FC = () => {
             </p>
           </div>
 
-          {!isReadOnly && (
+          {!activeProjectReadOnly && (
             <button onClick={() => setShowNewTaskForm(true)} className="btn-primary">
               <Plus size={18} /> Ajouter une tâche
             </button>
@@ -400,7 +410,7 @@ export const KanbanBoard: React.FC = () => {
         </div>
 
         {/* Modal de création de tâche */}
-        {showNewTaskForm && (
+        {showNewTaskForm && !activeProjectReadOnly && (
           <div className="modal-overlay" onClick={() => setShowNewTaskForm(false)}>
             <form
               onSubmit={handleCreateTask}
@@ -487,7 +497,7 @@ export const KanbanBoard: React.FC = () => {
                   }
                   className="form-select"
                 >
-                  {workspaceMembers.map((member) => (
+                  {activeWorkspaceMembers.map((member) => (
                     <option key={member.user.id} value={member.user.id}>
                       {member.user.name || member.user.email} - {member.role}
                     </option>
@@ -565,6 +575,7 @@ export const KanbanBoard: React.FC = () => {
                       <DraggableCard
                         key={task.id}
                         task={task}
+                        isReadOnly={activeProjectReadOnly}
                         col={col}
                         activeTimer={activeTimer}
                         startTimer={startTimer}

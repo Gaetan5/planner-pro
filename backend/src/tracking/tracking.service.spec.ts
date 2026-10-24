@@ -58,7 +58,30 @@ describe('TrackingService', () => {
       const result = await service.startTracking('user-123', 'task-456');
 
       expect(result).toEqual({ id: 'log-789', taskId: 'task-456' });
-      expect(mockPrisma.timeLog.create).toHaveBeenCalled();
+      expect(mockPrisma.timeLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          taskId: 'task-456',
+          userId: 'user-123',
+        }),
+        include: { task: true },
+      });
+    });
+
+    it("rattache le suivi à l'utilisateur courant même pour une tâche partagée", async () => {
+      mockPrisma.task.findFirst.mockResolvedValue({ id: 'task-shared', userId: 'owner-456' });
+      mockPrisma.timeLog.findFirst.mockResolvedValue(null);
+      mockPrisma.timeLog.create.mockResolvedValue({ id: 'log-789', taskId: 'task-shared' });
+
+      await service.startTracking('member-123', 'task-shared');
+
+      expect(mockPrisma.timeLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            taskId: 'task-shared',
+            userId: 'member-123',
+          }),
+        }),
+      );
     });
   });
 

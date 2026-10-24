@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { CalendarSyncService } from '../../../src/projects/calendar-sync.service';
 import { PrismaService } from '../../../src/prisma/prisma.service';
-import { NotFoundException } from '@nestjs/common';
+import { BadGatewayException, NotFoundException } from '@nestjs/common';
 
 describe('CalendarSyncService', () => {
   let service: CalendarSyncService;
@@ -31,6 +31,10 @@ describe('CalendarSyncService', () => {
       findFirst: jest.fn(),
     },
   };
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
 
   beforeEach(async () => {
     process.env.ENCRYPTION_KEY = 'a'.repeat(32); // Clé de chiffrement de 32 octets requise par l'utilitaire
@@ -167,6 +171,51 @@ describe('CalendarSyncService', () => {
       const result = await service.detectCalendarConflicts('workspace-123');
 
       expect(result.length).toBe(0);
+    });
+
+    it('propage une erreur claire quand un flux de calendrier externe est indisponible', async () => {
+      mockPrisma.integration.findMany.mockResolvedValue([
+        { id: 'int-calendar', type: 'GOOGLE_CALENDAR', url: 'https://calendar.example/feed.ics' },
+      ]);
+      mockPrisma.timeBlock.findMany.mockResolvedValue([
+        {
+          id: 'block-1',
+          startTime: new Date('2026-06-01T11:00:00Z'),
+          endTime: new Date('2026-06-01T13:00:00Z'),
+          task: { title: 'Tâche', assignees: [] },
+        },
+      ]);
+      jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: false,
+        status: 503,
+        statusText: 'Service Unavailable',
+      } as Response);
+
+      await expect(service.detectCalendarConflicts('workspace-123')).rejects.toThrow(
+        BadGatewayException,
+      );
+    });
+
+    it('propage une erreur claire quand le flux externe renvoie un format invalide', async () => {
+      mockPrisma.integration.findMany.mockResolvedValue([
+        { id: 'int-calendar', type: 'GOOGLE_CALENDAR', url: 'https://calendar.example/feed.ics' },
+      ]);
+      mockPrisma.timeBlock.findMany.mockResolvedValue([
+        {
+          id: 'block-1',
+          startTime: new Date('2026-06-01T11:00:00Z'),
+          endTime: new Date('2026-06-01T13:00:00Z'),
+          task: { title: 'Tâche', assignees: [] },
+        },
+      ]);
+      jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        text: async () => 'unsupported response',
+      } as Response);
+
+      await expect(service.detectCalendarConflicts('workspace-123')).rejects.toThrow(
+        BadGatewayException,
+      );
     });
   });
 

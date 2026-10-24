@@ -114,6 +114,37 @@ describe('NotesService', () => {
       );
     });
 
+    it('accepte les tags de projet avec tirets dans le titre de la note', async () => {
+      const userId = 'user-123';
+      const noteId = 'note-456';
+      const noteTitle = 'Ma Note';
+      const noteContent = '- [ ] Livrer la v2 #Road-Map';
+
+      mockPrisma.note.create.mockResolvedValue({
+        id: noteId,
+        title: noteTitle,
+        content: noteContent,
+        userId,
+      });
+      mockPrisma.project.findFirst.mockResolvedValue({ id: 'project-road-map', name: 'Road-Map' });
+
+      const createdNote = await service.createNote(userId, noteTitle, noteContent);
+
+      expect(mockPrisma.task.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            title: 'Livrer la v2',
+            projectId: 'project-road-map',
+            userId,
+            noteId,
+          }),
+        }),
+      );
+      expect(createdNote.content).toMatch(
+        /- \[ \] Livrer la v2 #Road-Map <!-- task:[a-f0-9-]+ -->/,
+      );
+    });
+
     it('devrait mettre à jour une tâche existante si le tag est présent', async () => {
       const userId = 'user-123';
       const noteId = 'note-456';

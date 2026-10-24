@@ -4,6 +4,7 @@ import { RedisService } from '../redis/redis.service';
 import { randomUUID } from 'crypto';
 
 import { GeminiService } from './gemini.service';
+import type { ExtractedTask } from '../projects/interfaces/ai-provider.interface';
 
 @Injectable()
 export class NotesService {
@@ -15,6 +16,32 @@ export class NotesService {
 
   private getCacheKey(userId: string): string {
     return `notes:${userId}`;
+  }
+
+  private getProjectTagMatch(taskText: string): { projectName: string; taskText: string } {
+    const tagMatch = taskText.match(/(?:^|\s)#([^\s#]+)/u);
+
+    if (!tagMatch) {
+      return { projectName: 'Inbox', taskText };
+    }
+
+    const projectName = tagMatch[1];
+    const sanitizedTaskText = taskText
+      .replace(new RegExp(`#${this.escapeRegExp(projectName)}`, 'gu'), '')
+      .trim();
+
+    return { projectName, taskText: sanitizedTaskText };
+  }
+
+  private escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  private normalizeDueDate(value: string | Date | null | undefined): Date | null {
+    if (!value) return null;
+
+    const date = value instanceof Date ? value : new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
   }
 
   async createNote(userId: string, title: string, content: string) {
@@ -150,12 +177,12 @@ export class NotesService {
     let lineIndex = -1;
     let match: RegExpMatchArray | null = null;
     const staticRegex =
-      /^(\s*-\s*\[[ xX]?\]\s+)(.*?)(?:\s+#\w+)?\s*<!--\s*task:([a-zA-Z0-9-]+)\s*-->\s*$/;
+      /^(\s*-\s*\[[ xX]?\]\s+)(.*?)(?:\s+#([^\s]+))?\s*<!--\s*task:([a-zA-Z0-9-]+)\s*-->\s*$/u;
 
     let currentIndex = 0;
     for (const line of lines) {
       const m = line.match(staticRegex);
-      if (m && m[3] === taskId) {
+      if (m && m[4] === taskId) {
         lineIndex = currentIndex;
         match = m;
         break;
@@ -205,7 +232,7 @@ export class NotesService {
     const taskLineRegex = /^(\s*-\s*\[([ xX])\]\s+)(.+)$/;
 
     // Appel à Gemini si disponible pour enrichir l'extraction (NLP)
-    let aiTasks: any[] = [];
+    let aiTasks: ExtractedTask[] = [];
     if (this.gemini.isAvailable()) {
       try {
         aiTasks = await this.gemini.extractTasksFromText(content, new Date());
@@ -248,7 +275,7 @@ export class NotesService {
         }
 
         // Nettoyer le titre du hashtag de projet éventuel pour chercher dans les tâches IA
-        const cleanText = taskText.replace(/#\w+/g, '').trim();
+        const cleanText = taskText.replace(/#[^\s#]+/gu, '').trim();
         const aiTask = aiTasks.find((t) => {
           const aiCleanTitle = t.title.toLowerCase().trim();
           const localCleanTitle = cleanText.toLowerCase().trim();
@@ -256,7 +283,7 @@ export class NotesService {
         });
 
         // Déterminer la date limite (dueDate) et l'assigné si trouvés par l'IA
-        const dueDate = aiTask && aiTask.dueDate ? new Date(aiTask.dueDate) : null;
+        const dueDate = this.normalizeDueDate(aiTask?.dueDate);
         let assigneeId: string | null = null;
 
         if (aiTask && aiTask.assigneeName) {
@@ -273,12 +300,13 @@ export class NotesService {
           }
         }
 
-        // Extraire un tag de projet (ex: #ProjetA ou #Startup)
+        // Extraire un tag de projet (ex: #ProjetA ou #Startup-Pro)
+        const hasProjectTag = /#[^\s#]+/u.test(taskText);
         let targetProjectName = 'Inbox';
-        const tagMatch = taskText.match(/#(\w+)/);
-        if (tagMatch) {
-          targetProjectName = tagMatch[1];
-          taskText = taskText.replace(`#${targetProjectName}`, '').trim();
+        if (hasProjectTag) {
+          const projectTagMatch = this.getProjectTagMatch(taskText);
+          targetProjectName = projectTagMatch.projectName;
+          taskText = projectTagMatch.taskText;
         }
 
         // 1. Récupérer ou créer le projet cible actif
@@ -381,10 +409,8 @@ export class NotesService {
               });
             }
             console.log(`Tâche recréée avec un nouvel ID après un marqueur invalide.`);
-            const projectSuffix = tagMatch ? ` #${targetProjectName}` : '';
-            updatedLines.push(
-              `${prefix}${taskText}${projectSuffix} <!-- task:${newTaskId} -->`,
-            );
+            const projectSuffix = hasProjectTag ? ` #${targetProjectName}` : '';
+            updatedLines.push(`${prefix}${taskText}${projectSuffix} <!-- task:${newTaskId} -->`);
             hasChanges = true;
           }
         } else {
@@ -411,7 +437,7 @@ export class NotesService {
 
           console.log(`Tâche créée automatiquement : "${taskText}" avec l'ID "${newTaskId}"`);
 
-          const projectSuffix = tagMatch ? ` #${targetProjectName}` : '';
+          const projectSuffix = hasProjectTag ? ` #${targetProjectName}` : '';
           const newLine = `${prefix}${taskText}${projectSuffix} <!-- task:${newTaskId} -->`;
           updatedLines.push(newLine);
           hasChanges = true;

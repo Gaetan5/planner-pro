@@ -2,8 +2,8 @@ export interface ExtractedTask {
   title: string;
   projectTag: string;
   isDone: boolean;
-  dueDate?: string;
-  assigneeName?: string;
+  dueDate?: string | null;
+  assigneeName?: string | null;
 }
 
 export interface ParsedAiAction {

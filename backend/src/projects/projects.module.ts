@@ -6,7 +6,7 @@ import { InvitationsController } from './invitations.controller';
 import { CommentsService } from './comments.service';
 import { CommentsController } from './comments.controller';
 import { AiService } from './ai.service';
-import { GeminiProvider } from '../notes/gemini-provider.service';
+import { GeminiService } from '../notes/gemini.service';
 import { AiController } from './ai.controller';
 import { CopilotService } from './copilot.service';
 import { IntegrationService } from './integration.service';
@@ -44,7 +44,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     CommentsService,
     {
       provide: 'AI_PROVIDER',
-      useClass: GeminiProvider,
+      useExisting: GeminiService,
     },
     AiService,
     CopilotService,

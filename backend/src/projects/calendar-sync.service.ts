@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadGatewayException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { encrypt, decrypt } from '../auth/encryption.util';
 
@@ -303,8 +303,10 @@ export class CalendarSyncService {
       this.logger.log(`Fetching external calendar from URL: ${url}`);
       const response = await fetch(url);
       if (!response.ok) {
-        this.logger.warn(`Failed to fetch external calendar from ${url}: ${response.statusText}`);
-        return [];
+        this.logger.warn(`External calendar request failed with status ${response.status}.`);
+        throw new BadGatewayException(
+          'Un agenda externe est indisponible. Vérifiez son URL ou réessayez ultérieurement.',
+        );
       }
       const text = await response.text();
       const trimmedText = text.trim();
@@ -331,13 +333,20 @@ export class CalendarSyncService {
         return this.parseICS(text, userEmail, userName);
       }
 
-      this.logger.warn(`Unsupported calendar format from URL: ${url}`);
-      return [];
-    } catch (err: unknown) {
-      this.logger.error(
-        `Error fetching external calendar from ${url}: ${err instanceof Error ? err.message : String(err)}`,
+      this.logger.warn('External calendar returned an unsupported format.');
+      throw new BadGatewayException(
+        'Le format de réponse de l’agenda externe n’est pas pris en charge.',
       );
-      return [];
+    } catch (err: unknown) {
+      if (err instanceof BadGatewayException) {
+        throw err;
+      }
+      this.logger.error(
+        `Unable to fetch external calendar: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      throw new BadGatewayException(
+        'Impossible de charger un agenda externe. Réessayez ultérieurement.',
+      );
     }
   }
 

@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import {
   WebSocketGateway,
   WebSocketServer,
@@ -22,6 +23,8 @@ import { PrismaService } from '../prisma/prisma.service';
 export class NotificationsGateway
   implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit
 {
+  private readonly logger = new Logger(NotificationsGateway.name);
+
   @WebSocketServer()
   server!: Server;
 
@@ -54,6 +57,7 @@ export class NotificationsGateway
     }
 
     if (!token) {
+      this.logger.warn(`Disconnecting socket ${client.id}: no authentication token provided.`);
       client.disconnect(true);
       return;
     }
@@ -77,7 +81,11 @@ export class NotificationsGateway
           `Notifications Gateway: Socket ${client.id} a rejoint la room workspace:${membership.workspaceId}`,
         );
       }
-    } catch {
+    } catch (error: unknown) {
+      this.logger.error(
+        `Socket ${client.id} authentication or workspace initialization failed.`,
+        error instanceof Error ? error.stack : String(error),
+      );
       client.disconnect(true);
     }
   }

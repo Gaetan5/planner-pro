@@ -135,17 +135,9 @@ export class FinancesService {
       where: { workspaceId, deletedAt: null },
     });
 
-    const projectSummaries = await Promise.all(
-      projects.map(async (project) => {
-        try {
-          return await this.getProjectFinances(project.id, userId);
-        } catch {
-          return null;
-        }
-      }),
+    const validSummaries = await Promise.all(
+      projects.map((project) => this.getProjectFinances(project.id, userId)),
     );
-
-    const validSummaries = projectSummaries.filter((s): s is ProjectFinance => s !== null);
 
     const totalBudget = validSummaries.reduce((sum, s) => sum + (s.budgetCents || 0), 0);
     const totalCost = validSummaries.reduce((sum, s) => sum + s.actualCostCents, 0);

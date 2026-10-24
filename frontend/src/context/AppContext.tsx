@@ -374,6 +374,8 @@ interface AppContextType {
   associateTasksToSprint: (sprintId: string | null, taskIds: string[]) => Promise<void>;
   getBurndownData: (sprintId: string) => Promise<unknown>;
   getVelocityData: (workspaceId: string) => Promise<number>;
+  getWorkspaceRole: (workspaceId: string) => WorkspaceMember['role'] | null;
+  isReadOnlyForWorkspace: (workspaceId: string) => boolean;
   currentUserRole: 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER' | null;
   isReadOnly: boolean;
 }
@@ -386,6 +388,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [projects, setProjects] = useState<Project[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [workspaceRoles, setWorkspaceRoles] = useState<Record<string, WorkspaceMember['role']>>({});
   const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMember[]>([]);
   const [resourceCapacity, setResourceCapacity] = useState<ResourceCapacityReportItem[]>([]);
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
@@ -623,7 +626,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (noteRes.ok) setNotes(await noteRes.json());
         if (membersRes.ok) setWorkspaceMembers(await membersRes.json());
         if (tbRes.ok) setTimeBlocks(await tbRes.json());
-        if (workspacesRes.ok) setWorkspaces(await workspacesRes.json());
+        if (workspacesRes.ok) {
+          const workspaceData: Workspace[] = await workspacesRes.json();
+          setWorkspaces(workspaceData);
+          setWorkspaceRoles(
+            Object.fromEntries(
+              workspaceData.flatMap((workspace) => {
+                const membership = workspace.memberships?.find((item) => item.user.id === user.id);
+                return membership ? [[workspace.id, membership.role]] : [];
+              }),
+            ),
+          );
+        }
         if (capacityRes.ok) setResourceCapacity(await capacityRes.json());
         if (activeRes.ok) {
           const text = await activeRes.text();
@@ -669,6 +683,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.removeItem('planner_user');
     setProjects([]);
     setNotes([]);
+    setWorkspaces([]);
+    setWorkspaceRoles({});
     setWorkspaceMembers([]);
     setTimeBlocks([]);
     setActiveTimer(null);
@@ -1066,8 +1082,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       headers: getHeaders(),
     });
     if (!res.ok) return 0;
-    const data = await res.json();
-    return typeof data === 'number' ? data : 0;
+    const data: unknown = await res.json();
+    if (typeof data === 'number') return data;
+    if (
+      typeof data === 'object' &&
+      data !== null &&
+      'velocity' in data &&
+      typeof data.velocity === 'number'
+    ) {
+      return data.velocity;
+    }
+    return 0;
   };
 
   const createInvitation = async (
@@ -1537,10 +1562,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const currentUserRole = useMemo(() => {
-    if (!user || workspaceMembers.length === 0) return null;
-    const membership = workspaceMembers.find((m) => m.user.id === user.id);
-    return membership ? membership.role : null;
-  }, [user, workspaceMembers]);
+    const defaultWorkspace = workspaces[0];
+    return defaultWorkspace ? (workspaceRoles[defaultWorkspace.id] ?? null) : null;
+  }, [workspaces, workspaceRoles]);
+
+  const getWorkspaceRole = useCallback(
+    (workspaceId: string) => workspaceRoles[workspaceId] ?? null,
+    [workspaceRoles],
+  );
+
+  const isReadOnlyForWorkspace = useCallback(
+    (workspaceId: string) => getWorkspaceRole(workspaceId) === 'VIEWER',
+    [getWorkspaceRole],
+  );
 
   const isReadOnly = useMemo(() => {
     return currentUserRole === 'VIEWER';
@@ -1644,6 +1678,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         associateTasksToSprint,
         getBurndownData,
         getVelocityData,
+        getWorkspaceRole,
+        isReadOnlyForWorkspace,
         // Permissions
         currentUserRole,
         isReadOnly,

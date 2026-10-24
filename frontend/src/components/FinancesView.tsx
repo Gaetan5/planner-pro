@@ -50,8 +50,20 @@ const formatCurrency = (cents: number) => {
 export const FinancesView: React.FC = () => {
   const { user, workspaces } = useApp();
   const [summary, setSummary] = useState<WorkspaceSummary | null>(null);
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(workspaces[0]?.id ?? '');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (workspaces.length === 0) {
+      setSelectedWorkspaceId('');
+      return;
+    }
+
+    if (!workspaces.some((workspace) => workspace.id === selectedWorkspaceId)) {
+      setSelectedWorkspaceId(workspaces[0].id);
+    }
+  }, [workspaces, selectedWorkspaceId]);
 
   const getHeaders = useCallback(
     () => ({
@@ -61,37 +73,66 @@ export const FinancesView: React.FC = () => {
     [user?.token],
   );
 
-  const loadFinances = useCallback(async () => {
-    if (!user || workspaces.length === 0) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const workspaceId = workspaces[0].id;
-      const res = await fetch(`${BACKEND_URL}/projects/workspaces/${workspaceId}/finances`, {
-        headers: getHeaders(),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setSummary(data);
-      } else if (res.status === 403) {
-        setError('Accès restreint : droits Admin ou Owner requis pour consulter les finances.');
-      } else {
-        setError('Erreur lors du chargement des données financières.');
+  const loadFinances = useCallback(
+    async (signal?: AbortSignal) => {
+      setLoading(true);
+      setError(null);
+      setSummary(null);
+      try {
+        if (!user || workspaces.length === 0) return;
+        const workspaceId =
+          workspaces.find((workspace) => workspace.id === selectedWorkspaceId)?.id ??
+          workspaces[0].id;
+        const res = await fetch(`${BACKEND_URL}/projects/workspaces/${workspaceId}/finances`, {
+          headers: getHeaders(),
+          signal,
+        });
+        if (signal?.aborted) return;
+        if (res.ok) {
+          const data = await res.json();
+          setSummary(data);
+        } else if (res.status === 403) {
+          setError('Accès restreint : droits Admin ou Owner requis pour consulter les finances.');
+        } else {
+          setError('Erreur lors du chargement des données financières.');
+        }
+      } catch {
+        if (!signal?.aborted) setError('Impossible de contacter le serveur.');
+      } finally {
+        if (!signal?.aborted) setLoading(false);
       }
-    } catch {
-      setError('Impossible de contacter le serveur.');
-    } finally {
-      setLoading(false);
-    }
-  }, [user, workspaces, getHeaders]);
+    },
+    [user, workspaces, selectedWorkspaceId, getHeaders],
+  );
 
   useEffect(() => {
-    loadFinances();
+    const controller = new AbortController();
+    void loadFinances(controller.signal);
+    return () => controller.abort();
   }, [loadFinances]);
+
+  const workspaceSelector =
+    workspaces.length > 1 ? (
+      <label className="finances-workspace-selector">
+        Workspace
+        <select
+          aria-label="Workspace financier"
+          value={selectedWorkspaceId}
+          onChange={(event) => setSelectedWorkspaceId(event.target.value)}
+        >
+          {workspaces.map((workspace) => (
+            <option key={workspace.id} value={workspace.id}>
+              {workspace.name}
+            </option>
+          ))}
+        </select>
+      </label>
+    ) : null;
 
   if (loading) {
     return (
       <div className="finances-layout">
+        {workspaceSelector}
         <div className="glass-panel finances-loading">
           <div className="finances-loading__spinner" />
           Chargement des données financières…
@@ -103,6 +144,7 @@ export const FinancesView: React.FC = () => {
   if (error) {
     return (
       <div className="finances-layout">
+        {workspaceSelector}
         <div className="glass-panel finances-empty">
           <AlertTriangle size={40} className="finances-empty__icon" />
           <span className="finances-empty__text">{error}</span>
@@ -122,6 +164,7 @@ export const FinancesView: React.FC = () => {
               <p className="finances-header__subtitle">Vue financière du workspace</p>
             </div>
           </div>
+          {workspaceSelector}
         </div>
         <div className="glass-panel finances-empty">
           <PiggyBank size={48} className="finances-empty__icon" />
@@ -152,6 +195,7 @@ export const FinancesView: React.FC = () => {
             <p className="finances-header__subtitle">Vue financière consolidée du workspace</p>
           </div>
         </div>
+        {workspaceSelector}
       </div>
 
       {/* Summary Cards */}
