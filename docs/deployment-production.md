@@ -150,3 +150,59 @@ Les changements de schéma doivent être livrés sous forme de nouvelles migrati
 Prisma. Le démarrage exécute `prisma migrate deploy` avant l’API ; il n’altère jamais
 le schéma par introspection ou synchronisation implicite. Sauvegarder MySQL avant
 chaque changement de schéma et contrôler les logs après le redémarrage.
+
+## Sauvegardes de production
+
+Les sauvegardes locales protègent contre certaines erreurs logiques, mais pas contre
+la perte de la VM ou de son disque. Copier régulièrement les sauvegardes chiffrées
+vers un stockage hors VM avec accès dédié et rétention indépendante.
+
+1. Installer `gpg`, `gzip` et `flock` sur l’hôte.
+2. Créer un secret de chiffrement dédié, distinct de tous les secrets applicatifs,
+   puis le conserver dans un gestionnaire de secrets et sur un support de reprise
+   contrôlé. Ne pas le mettre dans le dépôt, `.env.production` ou le même disque que
+   les sauvegardes :
+
+   ```sh
+   sudo install -d -m 700 /etc/planner-pro
+   sudo sh -c 'umask 077; openssl rand -hex 32 > /etc/planner-pro/backup-passphrase'
+   sudo chmod 600 /etc/planner-pro/backup-passphrase
+   ```
+
+3. Installer le script et les unités systemd du dépôt :
+
+   ```sh
+   sudo install -o root -g root -m 700 scripts/backup-production.sh \
+     /opt/planner-pro/scripts/backup-production.sh
+   sudo install -o root -g root -m 600 ops/systemd/planner-pro-backup.service \
+     /etc/systemd/system/planner-pro-backup.service
+   sudo install -o root -g root -m 644 ops/systemd/planner-pro-backup.timer \
+     /etc/systemd/system/planner-pro-backup.timer
+   sudo install -d -o root -g root -m 700 /var/backups/planner-pro
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now planner-pro-backup.timer
+   ```
+
+4. Lancer une première sauvegarde, puis vérifier son état et le contenu chiffré :
+
+   ```sh
+   sudo systemctl start planner-pro-backup.service
+   sudo systemctl status planner-pro-backup.service
+   sudo systemctl list-timers planner-pro-backup.timer
+   sudo find /var/backups/planner-pro -maxdepth 1 -type f -printf '%f %s bytes\n'
+   ```
+
+   Le script effectue un dump InnoDB cohérent avec `--single-transaction`, chiffre
+   avec GPG/AES-256, vérifie le déchiffrement et l’intégrité gzip avant de publier
+   atomiquement le fichier, puis supprime les sauvegardes locales de plus de 30 jours.
+   Les fichiers sont privés au compte root (`0700` pour le répertoire, `0600` pour
+   le fichier). Les sauvegardes échouées ne sont jamais considérées comme valides.
+
+5. Restaurer périodiquement une sauvegarde récente dans un MySQL isolé, sans port
+   publié et sans volume de production, puis contrôler les migrations et un échantillon
+   de données métier. Tester aussi la procédure avec une clé de chiffrement récupérée
+   depuis le support de reprise.
+
+6. Transférer les fichiers `.sql.gz.gpg` vers un stockage chiffré hors de la VM et
+   surveiller la réussite des transferts. La rétention locale de 30 jours ne remplace
+   pas une copie hors site ni un test de restauration.
