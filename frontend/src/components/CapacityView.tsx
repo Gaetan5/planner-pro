@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useApp } from '../context/AppContext';
+import { ResourceCapacityReportItem, WorkspaceMember, useApp } from '../context/AppContext';
 import {
   Users,
   AlertTriangle,
@@ -20,9 +20,11 @@ export const CapacityView: React.FC = () => {
     user,
     projects,
     workspaces,
-    workspaceMembers,
-    resourceCapacity,
+    activeWorkspaceId,
+    setActiveWorkspaceId,
     updateResourceProfile,
+    getResourceCapacityReport,
+    getWorkspaceMembers,
     createResourceAllocation,
     refreshData,
     createInvitation,
@@ -30,10 +32,66 @@ export const CapacityView: React.FC = () => {
     revokeInvitation,
   } = useApp();
 
+  const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMember[]>([]);
+  const [resourceCapacity, setResourceCapacity] = useState<ResourceCapacityReportItem[]>([]);
+  const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  const [workspaceLoadError, setWorkspaceLoadError] = useState<string | null>(null);
   const [isOptimizing, setIsOptimizing] = useState(false);
 
+  useEffect(() => {
+    if (!activeWorkspaceId) {
+      setWorkspaceMembers([]);
+      setResourceCapacity([]);
+      return;
+    }
+
+    let cancelled = false;
+    setWorkspaceLoading(true);
+    setWorkspaceLoadError(null);
+
+    Promise.all([
+      getWorkspaceMembers(activeWorkspaceId),
+      getResourceCapacityReport(activeWorkspaceId),
+    ])
+      .then(([members, capacity]) => {
+        if (cancelled) return;
+        setWorkspaceMembers(members);
+        setResourceCapacity(capacity);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setWorkspaceLoadError(
+          err instanceof Error ? err.message : 'Impossible de charger les données du workspace.',
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setWorkspaceLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeWorkspaceId, getResourceCapacityReport, getWorkspaceMembers]);
+
+  const workspaceProjects = projects.filter(
+    (project) => (project.workspaceId || project.workspace?.id) === activeWorkspaceId,
+  );
+
+  const refreshWorkspaceCapacity = async () => {
+    if (!activeWorkspaceId) return;
+    try {
+      setResourceCapacity(await getResourceCapacityReport(activeWorkspaceId));
+      setWorkspaceLoadError(null);
+    } catch (err) {
+      setWorkspaceLoadError(
+        err instanceof Error
+          ? err.message
+          : 'Impossible de rafraîchir les ressources du workspace.',
+      );
+    }
+  };
+
   const handleOptimize = async () => {
-    const activeWorkspaceId = workspaces[0]?.id;
     if (!activeWorkspaceId) {
       alert("Aucun espace de travail disponible pour l'optimisation.");
       return;
@@ -60,6 +118,7 @@ export const CapacityView: React.FC = () => {
       const result = await res.json();
       alert(result.message || 'Optimisation des ressources effectuée avec succès !');
       await refreshData();
+      await refreshWorkspaceCapacity();
     } catch (err) {
       console.error(err);
       alert("Erreur lors de l'optimisation des ressources d'équipe.");
@@ -90,16 +149,19 @@ export const CapacityView: React.FC = () => {
   const [inviteDuration, setInviteDuration] = useState('2');
   const [generatedLink, setGeneratedLink] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
-
-  const activeWorkspaceId = workspaces[0]?.id;
+  const [invitationError, setInvitationError] = useState<string | null>(null);
 
   const loadInvitationsList = async () => {
     if (activeWorkspaceId) {
+      setInvitationError(null);
       try {
         const list = await listInvitations(activeWorkspaceId);
         setInvitations(list);
       } catch (err) {
         console.error('Erreur lors de la récupération des invitations :', err);
+        setInvitationError(
+          err instanceof Error ? err.message : 'Impossible de charger les invitations.',
+        );
       }
     }
   };
@@ -115,29 +177,36 @@ export const CapacityView: React.FC = () => {
       return;
     }
 
-    const result = await createInvitation(
-      activeWorkspaceId,
-      inviteEmail || null,
-      inviteRole as any,
-      inviteProjId || undefined,
-      Number(inviteDuration),
-    );
-
-    if (result) {
+    try {
+      const result = await createInvitation(
+        activeWorkspaceId,
+        inviteEmail || null,
+        inviteRole as any,
+        inviteProjId || undefined,
+        Number(inviteDuration),
+      );
       const joinUrl = `${window.location.origin}/?token=${result.rawToken}`;
       setGeneratedLink(joinUrl);
       setInviteEmail('');
       alert('Invitation générée avec succès !');
-      loadInvitationsList();
-    } else {
-      alert("Une erreur s'est produite lors de la génération de l'invitation.");
+      await loadInvitationsList();
+    } catch (err) {
+      alert(
+        err instanceof Error
+          ? err.message
+          : "Une erreur s'est produite lors de la génération de l'invitation.",
+      );
     }
   };
 
   const handleRevokeInvitation = async (invitationId: string) => {
     if (window.confirm('Voulez-vous vraiment révoquer cette invitation active ?')) {
-      await revokeInvitation(invitationId);
-      loadInvitationsList();
+      try {
+        await revokeInvitation(invitationId);
+        await loadInvitationsList();
+      } catch (err) {
+        alert(err instanceof Error ? err.message : "Impossible de révoquer l'invitation.");
+      }
     }
   };
 
@@ -154,7 +223,14 @@ export const CapacityView: React.FC = () => {
     const minutes = Math.round(Number(profileHours) * 60);
     const costRate = profileCostRate ? Math.round(Number(profileCostRate) * 100) : undefined;
 
-    await updateResourceProfile(profileUserId, minutes, profileSkills || undefined, costRate);
+    await updateResourceProfile(
+      profileUserId,
+      minutes,
+      profileSkills || undefined,
+      costRate,
+      activeWorkspaceId,
+    );
+    await refreshWorkspaceCapacity();
 
     // Reset or show success
     alert('Profil de ressource mis à jour avec succès !');
@@ -172,6 +248,7 @@ export const CapacityView: React.FC = () => {
       allocStartDate || undefined,
       allocEndDate || undefined,
     );
+    await refreshWorkspaceCapacity();
 
     alert('Affectation enregistrée avec succès !');
     setAllocRoleLabel('');
@@ -215,6 +292,25 @@ export const CapacityView: React.FC = () => {
             projets stratégiques.
           </p>
         </div>
+        <label className="form-group">
+          <span className="form-label">Workspace</span>
+          <select
+            className="gov-select"
+            aria-label="Workspace des ressources"
+            value={activeWorkspaceId}
+            onChange={(event) => {
+              setActiveWorkspaceId(event.target.value);
+              setAllocProjId('');
+              setInviteProjId('');
+            }}
+          >
+            {workspaces.map((workspace) => (
+              <option key={workspace.id} value={workspace.id}>
+                {workspace.name}
+              </option>
+            ))}
+          </select>
+        </label>
         <button
           onClick={handleOptimize}
           disabled={isOptimizing}
@@ -237,7 +333,13 @@ export const CapacityView: React.FC = () => {
       <div className="capacity-grid-layout">
         {/* Liste des Membres et charges de travail */}
         <div className="members-cards-container">
-          {resourceCapacity.length === 0 ? (
+          {workspaceLoadError ? (
+            <p className="workspace-meta" role="alert">
+              {workspaceLoadError}
+            </p>
+          ) : workspaceLoading ? (
+            <p className="workspace-meta">Chargement des ressources du workspace...</p>
+          ) : resourceCapacity.length === 0 ? (
             <div className="member-capacity-card text-center" style={{ padding: '40px' }}>
               <Users
                 size={32}
@@ -431,7 +533,7 @@ export const CapacityView: React.FC = () => {
                   className="gov-select"
                 >
                   <option value="">Sélectionner...</option>
-                  {projects.map((p) => (
+                  {workspaceProjects.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.name}
                     </option>
@@ -529,7 +631,7 @@ export const CapacityView: React.FC = () => {
                   className="gov-select"
                 >
                   <option value="">Aucun projet</option>
-                  {projects.map((p) => (
+                  {workspaceProjects.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.name}
                     </option>
@@ -622,7 +724,11 @@ export const CapacityView: React.FC = () => {
               Invitations en Attente ({invitations.length})
             </h3>
 
-            {invitations.length === 0 ? (
+            {invitationError ? (
+              <p className="workspace-meta" role="alert">
+                {invitationError}
+              </p>
+            ) : invitations.length === 0 ? (
               <p
                 className="workspace-meta"
                 style={{

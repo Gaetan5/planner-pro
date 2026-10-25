@@ -1,0 +1,104 @@
+name: planner-pro-production
+
+services:
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env.production}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-planner_pro}
+      MYSQL_USER: ${MYSQL_USER:?Set MYSQL_USER in .env.production}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env.production}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - app
+    healthcheck:
+      test: ['CMD-SHELL', 'mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  cache:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks:
+      - app
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    command:
+      ['sh', '-c', 'node wait-for-db.js && pnpm exec prisma migrate deploy && node dist/main']
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: mysql://${MYSQL_USER:?Set MYSQL_USER}:${MYSQL_PASSWORD:?Set MYSQL_PASSWORD}@db:3306/${MYSQL_DATABASE:-planner_pro}
+      REDIS_HOST: cache
+      REDIS_PORT: 6379
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env.production}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Set ENCRYPTION_KEY in .env.production}
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
+      FIREBASE_CLIENT_EMAIL: ${FIREBASE_CLIENT_EMAIL:-}
+      FIREBASE_PRIVATE_KEY: ${FIREBASE_PRIVATE_KEY:-}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:?Set GITHUB_CLIENT_ID in .env.production}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:?Set GITHUB_CLIENT_SECRET in .env.production}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:?Set CORS_ORIGINS in .env.production}
+      FRONTEND_URL: ${FRONTEND_URL:?Set FRONTEND_URL in .env.production}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID:-}
+      MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-no-reply@planner.pro}
+      SMTP_SECURE: ${SMTP_SECURE:-true}
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    ports:
+      - '127.0.0.1:${BACKEND_HOST_PORT:-3003}:3001'
+    networks:
+      - app
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile.prod
+      args:
+        VITE_API_URL: ${VITE_API_URL:?Set VITE_API_URL in .env.production}
+        VITE_GITHUB_CLIENT_ID: ${VITE_GITHUB_CLIENT_ID:-}
+        VITE_FIREBASE_API_KEY: ${VITE_FIREBASE_API_KEY:-}
+        VITE_FIREBASE_AUTH_DOMAIN: ${VITE_FIREBASE_AUTH_DOMAIN:-}
+        VITE_FIREBASE_PROJECT_ID: ${VITE_FIREBASE_PROJECT_ID:-}
+        VITE_FIREBASE_APP_ID: ${VITE_FIREBASE_APP_ID:-}
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - '127.0.0.1:${FRONTEND_HOST_PORT:-8080}:80'
+    networks:
+      - app
+
+networks:
+  app:
+
+volumes:
+  mysql_data:
+    external: true
+    name: ${MYSQL_VOLUME_NAME:?Set MYSQL_VOLUME_NAME to the existing database volume}

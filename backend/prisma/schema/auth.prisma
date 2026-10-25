@@ -3,6 +3,7 @@ model User {
   email             String         @unique
   name              String?
   passwordHash      String?
+  firebaseUid       String?        @unique
   githubId          String?        @unique
   githubUsername    String?
   githubAccessToken String?

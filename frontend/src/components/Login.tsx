@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { isFirebaseAuthConfigured } from '../firebase-config';
 import logo from '../logo.png';
 import './Login.css';
 
@@ -7,8 +8,11 @@ export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> 
   oauthError,
   isLoadingOAuth = false,
 }) => {
-  const { mockLogin, classicLogin, classicRegister } = useApp();
+  const { mockLogin, classicLogin, classicRegister, firebaseLogin } = useApp();
   const [isRegisterMode, setIsRegisterMode] = useState(false);
+  const [authProvider, setAuthProvider] = useState<'firebase' | 'legacy'>(
+    isFirebaseAuthConfigured ? 'firebase' : 'legacy',
+  );
 
   // Login fields
   const [loginEmail, setLoginEmail] = useState('');
@@ -24,6 +28,7 @@ export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> 
 
   // UI states
   const [errorMsg, setErrorMsg] = useState(oauthError ?? '');
+  const [infoMsg, setInfoMsg] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleGitHubLogin = () => {
@@ -84,6 +89,58 @@ export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> 
     }
   };
 
+  const handleFirebaseAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const email = isRegisterMode ? regEmail : loginEmail;
+    const password = isRegisterMode ? regPassword : loginPassword;
+    if (!email || !password || (isRegisterMode && !regName)) {
+      setErrorMsg('Veuillez remplir tous les champs.');
+      return;
+    }
+
+    setErrorMsg('');
+    setInfoMsg('');
+    setLoading(true);
+    try {
+      const [
+        {
+          createUserWithEmailAndPassword,
+          reload,
+          sendEmailVerification,
+          signInWithEmailAndPassword,
+          updateProfile,
+        },
+        { getFirebaseAuth },
+      ] = await Promise.all([import('firebase/auth'), import('../firebase-auth')]);
+      const auth = getFirebaseAuth();
+      if (isRegisterMode) {
+        const credential = await createUserWithEmailAndPassword(auth, email, password);
+        await updateProfile(credential.user, { displayName: regName.trim() });
+        await sendEmailVerification(credential.user);
+        setIsRegisterMode(false);
+        setInfoMsg('Compte créé. Vérifie ton adresse e-mail avant de te connecter.');
+        return;
+      }
+
+      const credential = await signInWithEmailAndPassword(auth, email, password);
+      await reload(credential.user);
+      if (!credential.user.emailVerified) {
+        await sendEmailVerification(credential.user);
+        setInfoMsg('Vérifie ton adresse e-mail. Nous venons de renvoyer le lien de confirmation.');
+        return;
+      }
+
+      await firebaseLogin(
+        await credential.user.getIdToken(),
+        credential.user.displayName || undefined,
+      );
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : 'Échec de connexion Firebase.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="login-page">
       <div className="background-decorations">
@@ -105,6 +162,33 @@ export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> 
             Le hub de planification immersif pour ingénieurs d'élite.
           </p>
         </div>
+
+        {isFirebaseAuthConfigured && (
+          <div className="auth-tabs" aria-label="Type de compte">
+            <button
+              className={`auth-tab ${authProvider === 'firebase' ? 'auth-tab--active' : ''}`}
+              type="button"
+              onClick={() => {
+                setAuthProvider('firebase');
+                setErrorMsg('');
+                setInfoMsg('');
+              }}
+            >
+              Firebase
+            </button>
+            <button
+              className={`auth-tab ${authProvider === 'legacy' ? 'auth-tab--active' : ''}`}
+              type="button"
+              onClick={() => {
+                setAuthProvider('legacy');
+                setErrorMsg('');
+                setInfoMsg('');
+              }}
+            >
+              Compte existant
+            </button>
+          </div>
+        )}
 
         {/* Navigation Tabs */}
         <div className="auth-tabs">
@@ -135,11 +219,76 @@ export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> 
             <span className="auth-error-text">{errorMsg}</span>
           </div>
         )}
+        {infoMsg && (
+          <p className="auth-info" role="status">
+            {infoMsg}
+          </p>
+        )}
         {isLoadingOAuth && <p role="status">Connexion à GitHub en cours…</p>}
 
         {/* Forms Container */}
         <div className="auth-forms-wrapper">
-          {!isRegisterMode ? (
+          {authProvider === 'firebase' ? (
+            <form onSubmit={handleFirebaseAuth} className="auth-form fade-in">
+              {isRegisterMode && (
+                <div className="form-group">
+                  <label className="form-label" htmlFor="firebase-register-name">
+                    Nom complet
+                  </label>
+                  <input
+                    id="firebase-register-name"
+                    type="text"
+                    placeholder="Ada Lovelace"
+                    value={regName}
+                    onChange={(e) => setRegName(e.target.value)}
+                    className="form-input"
+                    required
+                  />
+                </div>
+              )}
+              <div className="form-group">
+                <label className="form-label" htmlFor="firebase-email">
+                  Adresse e-mail
+                </label>
+                <input
+                  id="firebase-email"
+                  type="email"
+                  placeholder="nom@entreprise.com"
+                  value={isRegisterMode ? regEmail : loginEmail}
+                  onChange={(e) =>
+                    isRegisterMode ? setRegEmail(e.target.value) : setLoginEmail(e.target.value)
+                  }
+                  className="form-input"
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label" htmlFor="firebase-password">
+                  Mot de passe
+                </label>
+                <input
+                  id="firebase-password"
+                  type="password"
+                  placeholder={isRegisterMode ? 'Min. 6 caractères' : '••••••••'}
+                  value={isRegisterMode ? regPassword : loginPassword}
+                  onChange={(e) =>
+                    isRegisterMode
+                      ? setRegPassword(e.target.value)
+                      : setLoginPassword(e.target.value)
+                  }
+                  className="form-input"
+                  required
+                />
+              </div>
+              <button type="submit" className="btn-primary auth-submit-btn" disabled={loading}>
+                {loading
+                  ? 'Connexion en cours...'
+                  : isRegisterMode
+                    ? 'Créer un compte Firebase'
+                    : 'Se connecter avec Firebase'}
+              </button>
+            </form>
+          ) : !isRegisterMode ? (
             /* Login Form */
             <form onSubmit={handleClassicLogin} className="auth-form fade-in">
               <div className="form-group">

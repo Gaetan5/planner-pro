@@ -38,12 +38,15 @@ services:
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET}
       CORS_ORIGINS: http://localhost:3004,http://localhost:3000
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
+      FIREBASE_CLIENT_EMAIL: ${FIREBASE_CLIENT_EMAIL:-}
+      FIREBASE_PRIVATE_KEY: ${FIREBASE_PRIVATE_KEY:-}
     extra_hosts:
       - 'host.docker.internal:host-gateway'
     volumes:
       - ./backend:/home/node/app/backend
       - /home/node/app/backend/node_modules
-    command: sh -c 'node wait-for-db.js && pnpm exec prisma db push && pnpm --filter backend start:dev'
+    command: sh -c 'pnpm install --filter backend... --frozen-lockfile && node wait-for-db.js && pnpm exec prisma db push && pnpm --filter backend start:dev'
     depends_on:
       - db
       - cache
@@ -56,6 +59,7 @@ services:
     restart: always
     ports:
       - '3004:3000'
+    command: sh -c 'pnpm install --filter frontend... --frozen-lockfile && pnpm exec vite --host 0.0.0.0 --port 3000'
     environment:
       VITE_API_URL: http://localhost:3003
     volumes:

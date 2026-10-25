@@ -184,7 +184,7 @@ export const CalendarView: React.FC = () => {
     setCurrentDate(new Date());
   };
 
-  const handleScheduleTask = (dateStr: string, hour: number, taskIdParam?: string) => {
+  const handleScheduleTask = async (dateStr: string, hour: number, taskIdParam?: string) => {
     const taskId = taskIdParam || selectedTaskId || activeDragTaskId;
     if (!taskId) return;
 
@@ -192,13 +192,10 @@ export const CalendarView: React.FC = () => {
     const startTime = new Date(targetDate.setHours(hour, 0, 0, 0)).toISOString();
     const endTime = new Date(targetDate.setHours(hour + 1, 0, 0, 0)).toISOString();
 
-    createTimeBlock(taskId, startTime, endTime);
-
-    // Planifier la notification de rappel
-    const allTasks = projects.flatMap((p) => p.tasks || []);
-    const task = allTasks.find((t) => t.id === taskId);
-    if (task) {
-      scheduleReminder(task.title, startTime);
+    const created = await createTimeBlock(taskId, startTime, endTime);
+    if (created) {
+      const task = allTasks.find((item) => item.id === taskId);
+      if (task) scheduleReminder(task.title, startTime);
     }
 
     setSelectedTaskId(null);

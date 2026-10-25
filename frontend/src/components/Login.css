@@ -269,6 +269,17 @@
   font-weight: 500;
 }
 
+.auth-info {
+  margin: 0;
+  padding: var(--space-lg);
+  border: 1px solid rgba(52, 211, 153, 0.3);
+  border-radius: var(--radius-md);
+  background: rgba(16, 185, 129, 0.12);
+  color: #a7f3d0;
+  font-size: var(--font-sm);
+  text-align: left;
+}
+
 /* Divider & SSO */
 .login-divider {
   display: flex;

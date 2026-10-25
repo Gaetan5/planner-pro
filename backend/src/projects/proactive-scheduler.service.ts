@@ -113,11 +113,9 @@ export class ProactiveSchedulerService {
 
         if (!membership) continue;
 
-        // Générer le briefing (mocké par défaut ou via Gemini)
-        const briefingText = await this.copilotService.generateBriefing(
+        const briefingResult = await this.copilotService.generateBriefing(
           u.id,
           membership.workspaceId,
-          true,
         );
 
         // Mettre à jour dans la table AiBriefing
@@ -125,10 +123,10 @@ export class ProactiveSchedulerService {
           where: { userId: u.id },
           create: {
             userId: u.id,
-            content: briefingText,
+            content: briefingResult.briefing,
           },
           update: {
-            content: briefingText,
+            content: briefingResult.briefing,
           },
         });
       } catch (err: unknown) {

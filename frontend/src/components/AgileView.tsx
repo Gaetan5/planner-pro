@@ -32,8 +32,9 @@ export const AgileView: React.FC = () => {
   const [activeTab, setSubTab] = useState<'planning' | 'dashboard'>('planning');
   const [sprints, setSprints] = useState<Sprint[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>('');
-  const [velocity, setVelocity] = useState<number>(0);
+  const [velocity, setVelocity] = useState<number | null>(null);
   const [burndownData, setBurndownData] = useState<any>(null);
+  const [dataError, setDataError] = useState<string | null>(null);
   const [selectedSprintId, setSelectedSprintId] = useState<string>('');
 
   // Modale création sprint states
@@ -58,6 +59,8 @@ export const AgileView: React.FC = () => {
   // Charger les sprints et la vélocité quand le workspace change
   const loadWorkspaceAgileData = async () => {
     if (!activeWorkspaceId) return;
+    setDataError(null);
+    setVelocity(null);
     try {
       // Charger la vélocité
       const vel = await getVelocityData(activeWorkspaceId);
@@ -72,19 +75,24 @@ export const AgileView: React.FC = () => {
           },
         },
       );
-      if (res.ok) {
-        const data = await res.json();
-        setSprints(data);
-        // Sélectionner par défaut le sprint actif ou le premier
-        const activeSprint = data.find((s: Sprint) => s.status === 'ACTIVE');
-        if (activeSprint) {
-          setSelectedSprintId(activeSprint.id);
-        } else if (data.length > 0 && !selectedSprintId) {
-          setSelectedSprintId(data[0].id);
-        }
+      if (!res.ok) {
+        throw new Error(
+          (await res.text()) || `Impossible de charger les sprints (HTTP ${res.status}).`,
+        );
+      }
+      const data: Sprint[] = await res.json();
+      setSprints(data);
+      const activeSprint = data.find((s) => s.status === 'ACTIVE');
+      if (activeSprint) {
+        setSelectedSprintId(activeSprint.id);
+      } else if (data.length > 0 && !selectedSprintId) {
+        setSelectedSprintId(data[0].id);
       }
     } catch (err) {
       console.error('Erreur lors du chargement des données agiles :', err);
+      setDataError(
+        err instanceof Error ? err.message : 'Impossible de charger les données agiles.',
+      );
     }
   };
 
@@ -104,6 +112,8 @@ export const AgileView: React.FC = () => {
         setBurndownData(data);
       } catch (err) {
         console.error('Erreur lors du chargement du burndown chart :', err);
+        setBurndownData(null);
+        setDataError(err instanceof Error ? err.message : 'Impossible de charger le burndown.');
       }
     };
     loadBurndown();
@@ -379,6 +389,12 @@ export const AgileView: React.FC = () => {
         </button>
       </div>
 
+      {dataError && (
+        <div className="app-api-error" role="alert">
+          <span>{dataError}</span>
+        </div>
+      )}
+
       {/* RENDER ACTIVE TAB */}
       {activeTab === 'planning' ? (
         <div className="planning-grid">
@@ -592,7 +608,7 @@ export const AgileView: React.FC = () => {
               <Award className="kpi-icon" size={24} />
               <div className="kpi-info">
                 <span className="kpi-label">Vélocité Moyenne</span>
-                <span className="kpi-value">{velocity} SP</span>
+                <span className="kpi-value">{velocity === null ? '—' : `${velocity} SP`}</span>
               </div>
             </div>
 

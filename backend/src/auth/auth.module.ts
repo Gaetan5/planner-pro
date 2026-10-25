@@ -4,6 +4,7 @@ import { ConfigModule } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { PrismaModule } from '../prisma/prisma.module';
+import { FirebaseIdentityService } from './firebase-identity.service';
 
 @Module({
   imports: [
@@ -23,7 +24,7 @@ import { PrismaModule } from '../prisma/prisma.module';
       signOptions: { expiresIn: '7d' },
     }),
   ],
-  providers: [AuthService],
+  providers: [AuthService, FirebaseIdentityService],
   controllers: [AuthController],
   exports: [AuthService],
 })
