@@ -172,7 +172,13 @@ export type CreateTaskOptions = {
 interface AppContextType {
   apiError: string | null;
   dismissApiError: () => void;
-  user: { id: string; name: string; email: string; token?: string } | null;
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    token?: string;
+    platformRole?: 'SUPER_ADMIN' | 'PLATFORM_ADMIN' | null;
+  } | null;
   projects: Project[];
   notes: Note[];
   workspaces: Workspace[];
@@ -192,7 +198,8 @@ interface AppContextType {
     | 'resources'
     | 'agile'
     | 'gantt'
-    | 'finances';
+    | 'finances'
+    | 'admin';
   isConnected: boolean;
   login: (code: string) => Promise<void>;
   classicLogin: (email: string, passwordRaw: string) => Promise<void>;
@@ -211,7 +218,8 @@ interface AppContextType {
       | 'resources'
       | 'agile'
       | 'gantt'
-      | 'finances',
+      | 'finances'
+      | 'admin',
   ) => void;
   createProject: (
     name: string,
@@ -416,6 +424,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     | 'agile'
     | 'gantt'
     | 'finances'
+    | 'admin'
   >('dashboard');
   const [isConnected, setIsConnected] = useState(false);
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -719,6 +728,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         name: data.user.name,
         email: data.user.email,
         token: data.accessToken,
+        platformRole: data.user.platformRole ?? null,
       };
       setUser(userData);
       localStorage.setItem('planner_user', JSON.stringify(userData));
@@ -761,6 +771,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         name: data.user.name,
         email: data.user.email,
         token: data.accessToken,
+        platformRole: data.user.platformRole ?? null,
       };
       setUser(userData);
       localStorage.setItem('planner_user', JSON.stringify(userData));
@@ -787,6 +798,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         name: data.user.name,
         email: data.user.email,
         token: data.accessToken,
+        platformRole: data.user.platformRole ?? null,
       };
       setUser(userData);
       localStorage.setItem('planner_user', JSON.stringify(userData));
@@ -813,6 +825,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         name: data.user.name,
         email: data.user.email,
         token: data.accessToken,
+        platformRole: data.user.platformRole ?? null,
       };
       setUser(userData);
       localStorage.setItem('planner_user', JSON.stringify(userData));
@@ -838,6 +851,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       name: data.user.name,
       email: data.user.email,
       token: data.accessToken,
+      platformRole: data.user.platformRole ?? null,
     };
     setUser(userData);
     localStorage.setItem('planner_user', JSON.stringify(userData));

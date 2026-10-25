@@ -5,6 +5,28 @@ mode production et applique uniquement les migrations Prisma versionnées. Il ne
 jamais `prisma db push`. MySQL utilise un volume Docker externe pour empêcher la
 création accidentelle d’un nouveau volume vide à la place des données existantes.
 
+## Accès initial à l'administration
+
+Le premier compte utilisateur doit se connecter avec Firebase afin que son adresse
+e-mail vérifiée soit liée à son compte Planner Pro. Depuis la VM, attribuez ensuite
+le rôle initial avec le script à usage unique :
+
+```sh
+cd /opt/planner-pro
+docker compose --env-file .env.production -f docker-compose.prod.yml exec backend \
+  node scripts/bootstrap-platform-admin.cjs
+```
+
+Le script demande l'adresse e-mail, refuse les comptes non vérifiés par Firebase et
+refuse de s'exécuter si un rôle d'administration existe déjà. L'opération est
+consignée dans le journal d'audit de la plateforme. Déconnectez-vous puis reconnectez-
+vous dans l'application pour afficher l'accès « Administration ».
+
+L'espace admin initial est volontairement en lecture seule : indicateurs agrégés,
+état des dépendances et journal des actions administratives. Les actions de gestion
+seront ajoutées après la mise en place de leurs contrôles d'accès, d'audit et de
+révocation de session.
+
 ## Firebase Auth en développement
 
 Firebase sert uniquement à vérifier l’identité. Les comptes Planner Pro, projets,

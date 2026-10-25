@@ -14,6 +14,7 @@ import { AgileView } from './components/AgileView';
 import { GanttView } from './components/GanttView';
 import { NotificationInbox } from './components/NotificationInbox';
 import { FinancesView } from './components/FinancesView';
+import { AdminConsole } from './components/AdminConsole';
 import { OnboardingModal } from './components/OnboardingModal';
 import {
   LogOut,
@@ -56,6 +57,8 @@ function AppWithSession() {
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [oauthError, setOauthError] = useState<string | null>(null);
   const [handlingOAuth, setHandlingOAuth] = useState(false);
+  const isPlatformAdmin =
+    user?.platformRole === 'SUPER_ADMIN' || user?.platformRole === 'PLATFORM_ADMIN';
 
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -124,6 +127,8 @@ function AppWithSession() {
         return <GanttView />;
       case 'finances':
         return <FinancesView />;
+      case 'admin':
+        return isPlatformAdmin ? <AdminConsole /> : <DashboardContent />;
       default:
         return <DashboardContent />;
     }
@@ -205,6 +210,14 @@ function AppWithSession() {
           >
             Finances
           </button>
+          {isPlatformAdmin && (
+            <button
+              onClick={() => setActiveTab('admin')}
+              className={`nav-tab ${activeTab === 'admin' ? 'nav-tab--active' : ''}`}
+            >
+              Administration
+            </button>
+          )}
         </nav>
 
         {/* Profil & Mode Info */}
@@ -348,6 +361,15 @@ function AppWithSession() {
           <Wallet size={20} />
           <span>Finances</span>
         </button>
+        {isPlatformAdmin && (
+          <button
+            onClick={() => setActiveTab('admin')}
+            className={`bottom-nav-item ${activeTab === 'admin' ? 'bottom-nav-item--active' : ''}`}
+          >
+            <ShieldCheck size={20} />
+            <span>Admin</span>
+          </button>
+        )}
       </nav>
       <AiCommandBar />
       {showOnboarding && (
