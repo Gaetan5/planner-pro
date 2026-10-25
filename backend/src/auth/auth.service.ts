@@ -65,7 +65,12 @@ export class AuthService {
     });
 
     return {
-      user: { id: user.id, email: user.email, name: user.name },
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        platformRole: user.platformRole,
+      },
       accessToken,
     };
   }
@@ -154,7 +159,12 @@ export class AuthService {
     const jwt = this.jwtService.sign(payload);
 
     return {
-      user,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        platformRole: user.platformRole,
+      },
       accessToken: jwt,
     };
   }
@@ -181,7 +191,12 @@ export class AuthService {
     const jwt = this.jwtService.sign(payload);
 
     return {
-      user,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        platformRole: user.platformRole,
+      },
       accessToken: jwt,
     };
   }
@@ -291,6 +306,7 @@ export class AuthService {
         id: user.id,
         email: user.email,
         name: user.name,
+        platformRole: user.platformRole,
       },
       accessToken: jwt,
     };
@@ -334,6 +350,7 @@ export class AuthService {
         id: user.id,
         email: user.email,
         name: user.name,
+        platformRole: user.platformRole,
       },
       accessToken: jwt,
     };

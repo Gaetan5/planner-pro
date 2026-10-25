@@ -5,6 +5,7 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { PrismaModule } from '../prisma/prisma.module';
 import { FirebaseIdentityService } from './firebase-identity.service';
+import { JwtAuthGuard } from './jwt.guard';
 
 @Module({
   imports: [
@@ -24,8 +25,8 @@ import { FirebaseIdentityService } from './firebase-identity.service';
       signOptions: { expiresIn: '7d' },
     }),
   ],
-  providers: [AuthService, FirebaseIdentityService],
+  providers: [AuthService, FirebaseIdentityService, JwtAuthGuard],
   controllers: [AuthController],
-  exports: [AuthService],
+  exports: [AuthService, JwtAuthGuard],
 })
 export class AuthModule {}
