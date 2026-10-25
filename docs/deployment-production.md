@@ -34,19 +34,24 @@ UID Firebase au même compte MySQL.
 
 ## Préparer le VPS
 
-1. Vérifier que Docker Compose v2, les DNS et un reverse proxy TLS sont prêts.
+1. Vérifier que Docker Compose v2 et un reverse proxy TLS sont prêts. Pour
+   `planner-pro.boukarou-os.com`, créer aussi un enregistrement A
+   `api.planner-pro.boukarou-os.com` vers l'IP du VPS.
 2. Copier `.env.production.example` vers `.env.production`. Ce fichier est ignoré par
-   Git et doit rester privé. Renseigner les identifiants MySQL existants et le nom
-   exact du volume (`docker volume ls`). Ne pas choisir un nouveau volume pour migrer
-   les données existantes.
+   Git et doit rester privé. Pour une nouvelle production isolée, utiliser des
+   identifiants MySQL dédiés et un nouveau volume vide avec le nom défini dans
+   `MYSQL_VOLUME_NAME`. Ne jamais réutiliser le volume de préproduction ou celui
+   d'une autre application. Pour migrer des données existantes, suivre plutôt la
+   procédure de baseline ci-dessous.
 3. Générer un `JWT_SECRET` dédié (par exemple `openssl rand -hex 32`) et une
    `ENCRYPTION_KEY` de 32 caractères (par exemple `openssl rand -base64 24`).
    Les mots de passe MySQL utilisés dans `DATABASE_URL` doivent être encodables sans
    échappement URL ; des valeurs hexadécimales générées conviennent.
 4. Régler `FRONTEND_URL`, `CORS_ORIGINS` et `VITE_API_URL` sur les origines HTTPS
-   publiques. Le reverse proxy doit diriger `app.example.com` vers `127.0.0.1:8080`
-   et `api.example.com` vers `127.0.0.1:3003`, avec la prise en charge WebSocket
-   pour l’API.
+   publiques. Pour les valeurs de ce dépôt, le reverse proxy doit diriger
+   `planner-pro.boukarou-os.com` vers `127.0.0.1:8080` et
+   `api.planner-pro.boukarou-os.com` vers `127.0.0.1:3003`, avec la prise en charge
+   WebSocket pour l'API.
 5. Pour activer Firebase Auth, créer une application Web Firebase, activer le
    fournisseur e-mail/mot de passe et ajouter le domaine de l’application aux
    domaines autorisés. Renseigner les variables `VITE_FIREBASE_*` pour le build
