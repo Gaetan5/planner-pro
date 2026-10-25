@@ -31,6 +31,7 @@ export const CopilotWidget: React.FC = () => {
 
   const [alerts, setAlerts] = useState<CopilotAlert[]>([]);
   const [briefing, setBriefing] = useState<string | null>(null);
+  const [briefingSource, setBriefingSource] = useState<'ai' | 'rules' | null>(null);
 
   const [loadingBriefing, setLoadingBriefing] = useState(false);
   const [loadingAlerts, setLoadingAlerts] = useState(false);
@@ -85,10 +86,9 @@ export const CopilotWidget: React.FC = () => {
     }
 
     try {
-      // Si aucune clé API n'est active en CI ou local, on demande explicitement le briefing mocké
-      // de façon sécurisée.
-      const data = await getCopilotBriefing(workspaceId, false);
+      const data = await getCopilotBriefing(workspaceId);
       setBriefing(data.briefing);
+      setBriefingSource(data.source);
     } catch (err: unknown) {
       console.error(err);
       setError('Impossible de générer le briefing IA.');
@@ -254,10 +254,13 @@ export const CopilotWidget: React.FC = () => {
             ) : loadingBriefing ? (
               <div className="copilot-loading-briefing">
                 <Loader2 className="spinner-icon large" size={32} />
-                <p>Gemini synthétise vos données de projet et prépare vos recommandations...</p>
+                <p>Analyse de vos données de projet en cours...</p>
               </div>
             ) : (
               <div className="copilot-briefing-display-wrapper">
+                {briefingSource === 'rules' && (
+                  <p className="copilot-subtitle">Résumé automatique · IA indisponible</p>
+                )}
                 {/* Actions sur le Briefing */}
                 <div className="briefing-actions-panel">
                   <div className="tts-controls">

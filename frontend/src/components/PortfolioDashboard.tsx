@@ -2,7 +2,6 @@ import { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import {
   Activity,
-  TrendingUp,
   CheckCircle,
   AlertTriangle,
   Clock,
@@ -15,7 +14,7 @@ import './PortfolioDashboard.css';
 export function PortfolioDashboard() {
   const { projects } = useApp();
   const [sortBy, setSortBy] = useState<
-    'name' | 'health-desc' | 'health-asc' | 'progress-desc' | 'burn-rate'
+    'name' | 'health-desc' | 'health-asc' | 'progress-desc' | 'overdue-desc'
   >('health-desc');
 
   // Calcul du Health Score pour chaque projet
@@ -24,70 +23,59 @@ export function PortfolioDashboard() {
       const tasks = project.tasks || [];
       const totalTasks = tasks.length;
       const completedTasks = tasks.filter((t) => t.status === 'DONE').length;
-
-      // Critère 1 : Taux de complétion des tâches (max 40 pts)
-      const taskCompletionRate = totalTasks > 0 ? completedTasks / totalTasks : 1;
-      const completionScore = taskCompletionRate * 40;
-
-      // Critère 2 : Tâches en retard (max 30 pts, pénalités si en retard)
-      // On considère comme en retard une tâche non terminée dont la date de fin (dueDate) est dépassée
+      const taskCompletionRate = totalTasks > 0 ? completedTasks / totalTasks : null;
       const now = new Date();
+      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
       const overdueTasks = tasks.filter((t) => {
         if (t.status === 'DONE') return false;
         if (!t.dueDate) return false;
-        return new Date(t.dueDate) < now;
+        const dueDate = new Date(t.dueDate);
+        if (Number.isNaN(dueDate.getTime())) return false;
+        const dueDay = /^\d{4}-\d{2}-\d{2}$/.test(t.dueDate)
+          ? t.dueDate
+          : `${dueDate.getFullYear()}-${String(dueDate.getMonth() + 1).padStart(2, '0')}-${String(dueDate.getDate()).padStart(2, '0')}`;
+        return dueDay < today;
       }).length;
 
-      const overduePenalty = overdueTasks * 8;
-      const overdueScore = Math.max(0, 30 - overduePenalty);
-
-      // Critère 3 : Respect des jalons / progression globale (max 15 pts)
-      // Si un projet a des tâches prioritaires non gérées ou s'il est étiqueté à risque
       let riskPenalty = 0;
       if (project.status === 'AT_RISK') riskPenalty += 10;
       if (project.status === 'ON_HOLD') riskPenalty += 5;
       const riskScore = Math.max(0, 15 - riskPenalty);
 
-      // Critère 4 : Respect du budget (max 15 pts)
-      // Mimer la logique financière du backend s'il y a des budgets
-      // Pour simuler le burn rate côté UI : si le projet est estimé en heures
-      const totalEstimated = tasks.reduce((sum, t) => sum + (t.estimatedMinutes || 0), 0);
-      const burnRatePercent =
-        totalEstimated > 0 ? Math.min(150, (completedTasks / totalTasks) * 100) : 0; // simulation
+      const estimatedMinutes = tasks.reduce((sum, t) => sum + (t.estimatedMinutes || 0), 0);
+      const healthScore =
+        taskCompletionRate === null
+          ? null
+          : Math.round(
+              ((taskCompletionRate * 40 + Math.max(0, 30 - overdueTasks * 8) + riskScore) / 85) *
+                100,
+            );
 
-      // Si un budget est disponible, on peut l'utiliser
-      // Pour la simulation de burn rate, plus on approche de 100% de complétion sans dépasser les coûts, mieux c'est
-      let budgetScore = 15;
-      if (burnRatePercent > 100) {
-        budgetScore = Math.max(0, 15 - (burnRatePercent - 100) * 0.3);
-      }
-
-      // Health Score final consolidé (sur 100)
-      const healthScore = Math.round(completionScore + overdueScore + riskScore + budgetScore);
-
-      // Textes d'analyse IA Mocks locaux très précis
       let assessment: string;
-      let statusClass: 'excellent' | 'good' | 'warning' | 'danger';
+      let statusClass: 'excellent' | 'good' | 'warning' | 'danger' | 'unknown';
       let statusText: string;
 
-      if (healthScore >= 85) {
+      if (healthScore === null) {
+        statusClass = 'unknown';
+        statusText = 'Non évalué';
+        assessment = 'Ajoutez des tâches pour calculer les indicateurs de suivi de ce projet.';
+      } else if (healthScore >= 85) {
         statusClass = 'excellent';
         statusText = 'Excellent';
         assessment =
-          'Excellente santé opérationnelle. Les tâches sont complétées dans les temps et les risques de retard sont minimes.';
+          'Bon niveau de suivi selon l’avancement des tâches, les échéances et le statut du projet.';
       } else if (healthScore >= 70) {
         statusClass = 'good';
         statusText = 'Satisfaisant';
-        assessment =
-          "Bonne progression générale. Quelques tâches accusent un léger retard mais l'ensemble reste sous contrôle.";
+        assessment = 'Progression à suivre : vérifiez les tâches en retard et le statut du projet.';
       } else if (healthScore >= 50) {
         statusClass = 'warning';
         statusText = 'À Surveiller';
-        assessment = `Attention requise : ${overdueTasks} tâche(s) en retard et une dérive potentielle sur les échéances clés.`;
+        assessment = `Attention requise : ${overdueTasks} tâche(s) en retard ou un statut projet à risque.`;
       } else {
         statusClass = 'danger';
         statusText = 'En Alerte';
-        assessment = `Projet critique. Taux de complétion faible (${Math.round(taskCompletionRate * 100)}%), plusieurs retards accumulés et budget opérationnel sous haute tension.`;
+        assessment = `Suivi dégradé : ${overdueTasks} tâche(s) en retard et faible avancement des tâches.`;
       }
 
       return {
@@ -100,8 +88,7 @@ export function PortfolioDashboard() {
         statusClass,
         statusText,
         assessment,
-        estimatedHours: Number((totalEstimated / 60).toFixed(1)),
-        burnRatePercent: Math.round(burnRatePercent),
+        estimatedHours: Number((estimatedMinutes / 60).toFixed(1)),
       };
     });
   }, [projects]);
@@ -110,15 +97,21 @@ export function PortfolioDashboard() {
   const globalStats = useMemo(() => {
     const totalProjects = projectsWithHealth.length;
     if (totalProjects === 0) {
-      return { count: 0, avgHealth: 0, completedPercent: 0, overdueCount: 0 };
+      return { count: 0, avgHealth: null, completedPercent: null, overdueCount: 0 };
     }
 
-    const sumHealth = projectsWithHealth.reduce((sum, p) => sum + p.healthScore, 0);
-    const avgHealth = Math.round(sumHealth / totalProjects);
+    const assessedProjects = projectsWithHealth.filter((project) => project.healthScore !== null);
+    const sumHealth = assessedProjects.reduce(
+      (sum, project) => sum + (project.healthScore ?? 0),
+      0,
+    );
+    const avgHealth =
+      assessedProjects.length > 0 ? Math.round(sumHealth / assessedProjects.length) : null;
 
     const totalTasks = projectsWithHealth.reduce((sum, p) => sum + p.totalTasks, 0);
     const completedTasks = projectsWithHealth.reduce((sum, p) => sum + p.completedTasks, 0);
-    const completedPercent = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 100;
+    const completedPercent =
+      totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : null;
 
     const overdueCount = projectsWithHealth.reduce((sum, p) => sum + p.overdueTasks, 0);
 
@@ -137,20 +130,23 @@ export function PortfolioDashboard() {
       case 'name':
         return list.sort((a, b) => a.name.localeCompare(b.name));
       case 'health-desc':
-        return list.sort((a, b) => b.healthScore - a.healthScore);
+        return list.sort((a, b) => (b.healthScore ?? -1) - (a.healthScore ?? -1));
       case 'health-asc':
-        return list.sort((a, b) => a.healthScore - b.healthScore);
+        return list.sort(
+          (a, b) => (a.healthScore ?? Number.MAX_VALUE) - (b.healthScore ?? Number.MAX_VALUE),
+        );
       case 'progress-desc':
-        return list.sort((a, b) => b.taskCompletionRate - a.taskCompletionRate);
-      case 'burn-rate':
-        return list.sort((a, b) => b.burnRatePercent - a.burnRatePercent);
+        return list.sort((a, b) => (b.taskCompletionRate ?? -1) - (a.taskCompletionRate ?? -1));
+      case 'overdue-desc':
+        return list.sort((a, b) => b.overdueTasks - a.overdueTasks);
       default:
         return list;
     }
   }, [projectsWithHealth, sortBy]);
 
   // Couleur dynamique du score global
-  const getGlobalHealthColor = (score: number) => {
+  const getGlobalHealthColor = (score: number | null) => {
+    if (score === null) return 'var(--text-muted)';
     if (score >= 85) return '#10b981'; // excellent
     if (score >= 70) return '#3b82f6'; // good
     if (score >= 50) return '#f59e0b'; // warning
@@ -165,7 +161,8 @@ export function PortfolioDashboard() {
           <div>
             <h2 className="section-title">Tableau de Bord du Portefeuille</h2>
             <p className="portfolio-subtitle">
-              Vue globale de la santé de vos projets et indicateurs clés de performance (KPIs)
+              Suivi calculé à partir de l’avancement, des échéances et du statut. Les budgets ne
+              sont pas intégrés à ce score.
             </p>
           </div>
         </div>
@@ -179,7 +176,7 @@ export function PortfolioDashboard() {
           </div>
           <div className="portfolio-kpi-info">
             <span className="portfolio-kpi-val">{globalStats.count}</span>
-            <span className="portfolio-kpi-label">Projets Actifs</span>
+            <span className="portfolio-kpi-label">Projets du portefeuille</span>
           </div>
         </div>
 
@@ -195,9 +192,9 @@ export function PortfolioDashboard() {
               className="portfolio-kpi-val"
               style={{ color: getGlobalHealthColor(globalStats.avgHealth) }}
             >
-              {globalStats.avgHealth}%
+              {globalStats.avgHealth === null ? '—' : `${globalStats.avgHealth}%`}
             </span>
-            <span className="portfolio-kpi-label">Score de Santé Moyen</span>
+            <span className="portfolio-kpi-label">Score de suivi moyen</span>
           </div>
         </div>
 
@@ -206,7 +203,9 @@ export function PortfolioDashboard() {
             <CheckCircle size={24} />
           </div>
           <div className="portfolio-kpi-info">
-            <span className="portfolio-kpi-val">{globalStats.completedPercent}%</span>
+            <span className="portfolio-kpi-val">
+              {globalStats.completedPercent === null ? '—' : `${globalStats.completedPercent}%`}
+            </span>
             <span className="portfolio-kpi-label">Complétion Tâches</span>
           </div>
         </div>
@@ -241,7 +240,7 @@ export function PortfolioDashboard() {
             <option value="health-asc">Santé croissante</option>
             <option value="name">Nom du projet</option>
             <option value="progress-desc">Progression tâches</option>
-            <option value="burn-rate">Consommation ressources</option>
+            <option value="overdue-desc">Tâches en retard</option>
           </select>
         </div>
       </div>
@@ -261,7 +260,10 @@ export function PortfolioDashboard() {
       ) : (
         <div className="portfolio-projects-grid">
           {sortedProjects.map((project) => {
-            const completionPercent = Math.round(project.taskCompletionRate * 100);
+            const completionPercent =
+              project.taskCompletionRate === null
+                ? null
+                : Math.round(project.taskCompletionRate * 100);
 
             return (
               <div key={project.id} className="glass-panel project-health-card">
@@ -276,8 +278,8 @@ export function PortfolioDashboard() {
 
                   {/* Badge score */}
                   <div className={`health-score-badge health-score-badge--${project.statusClass}`}>
-                    {project.healthScore}
-                    <span className="health-score-label">Health</span>
+                    {project.healthScore ?? '—'}
+                    <span className="health-score-label">Suivi</span>
                   </div>
                 </div>
 
@@ -312,13 +314,6 @@ export function PortfolioDashboard() {
                       <Clock size={12} /> {project.estimatedHours} h
                     </span>
                   </div>
-
-                  <div className="health-metric-item">
-                    <span className="health-metric-label">Burn Rate</span>
-                    <span className="health-metric-val">
-                      <TrendingUp size={12} /> {project.burnRatePercent}%
-                    </span>
-                  </div>
                 </div>
 
                 {/* Barres de progression */}
@@ -326,15 +321,15 @@ export function PortfolioDashboard() {
                   <div className="health-progress-bar-group">
                     <div className="health-progress-bar-header">
                       <span>Avancement des tâches</span>
-                      <span>{completionPercent}%</span>
+                      <span>{completionPercent === null ? '—' : `${completionPercent}%`}</span>
                     </div>
                     <div className="health-progress-bar-bg">
                       <div
                         className="health-progress-bar-fill"
                         style={{
-                          width: `${completionPercent}%`,
+                          width: `${completionPercent ?? 0}%`,
                           background:
-                            project.healthScore >= 70
+                            (project.healthScore ?? 0) >= 70
                               ? 'linear-gradient(90deg, #10B981, #059669)'
                               : 'linear-gradient(90deg, #F59E0B, #D97706)',
                         }}
@@ -348,7 +343,7 @@ export function PortfolioDashboard() {
                   <div className="project-health-assessment-icon">
                     <ShieldAlert
                       size={14}
-                      color={project.healthScore < 50 ? '#ef4444' : 'var(--accent-primary)'}
+                      color={(project.healthScore ?? 0) < 50 ? '#ef4444' : 'var(--accent-primary)'}
                     />
                   </div>
                   <div className="project-health-assessment-text">

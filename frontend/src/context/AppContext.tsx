@@ -170,6 +170,8 @@ export type CreateTaskOptions = {
   sprintId?: string;
 };
 interface AppContextType {
+  apiError: string | null;
+  dismissApiError: () => void;
   user: { id: string; name: string; email: string; token?: string } | null;
   projects: Project[];
   notes: Note[];
@@ -177,6 +179,8 @@ interface AppContextType {
   workspaceMembers: WorkspaceMember[];
   resourceCapacity: ResourceCapacityReportItem[];
   timeBlocks: TimeBlock[];
+  activeWorkspaceId: string;
+  setActiveWorkspaceId: (workspaceId: string) => void;
   activeTimer: { id: string; startTime: string; taskId: string; task?: Task } | null;
   activeTab:
     | 'dashboard'
@@ -193,6 +197,7 @@ interface AppContextType {
   login: (code: string) => Promise<void>;
   classicLogin: (email: string, passwordRaw: string) => Promise<void>;
   classicRegister: (email: string, passwordRaw: string, name: string) => Promise<void>;
+  firebaseLogin: (idToken: string, name?: string) => Promise<void>;
   logout: () => void;
   mockLogin: (name: string) => Promise<void>;
   setActiveTab: (
@@ -230,7 +235,7 @@ interface AppContextType {
   stopTimer: () => void;
   saveNote: (title: string, content: string, noteId?: string) => Promise<void>;
   deleteNote: (noteId: string) => Promise<void>;
-  createTimeBlock: (taskId: string, startTime: string, endTime: string) => Promise<void>;
+  createTimeBlock: (taskId: string, startTime: string, endTime: string) => Promise<boolean>;
   updateTimeBlock: (timeBlockId: string, startTime: string, endTime: string) => Promise<void>;
   deleteTimeBlock: (timeBlockId: string) => Promise<void>;
   // Pomodoro
@@ -281,7 +286,10 @@ interface AppContextType {
     weeklyCapacityMinutes?: number,
     skills?: string,
     costRateCents?: number,
+    workspaceId?: string,
   ) => Promise<void>;
+  getResourceCapacityReport: (workspaceId: string) => Promise<ResourceCapacityReportItem[]>;
+  getWorkspaceMembers: (workspaceId: string) => Promise<WorkspaceMember[]>;
   createResourceAllocation: (
     projectId: string,
     userId: string,
@@ -298,7 +306,7 @@ interface AppContextType {
     role: 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER',
     projectId?: string,
     durationDays?: number,
-  ) => Promise<{ invitation: unknown; rawToken: string } | null>;
+  ) => Promise<{ invitation: unknown; rawToken: string }>;
   listInvitations: (workspaceId: string) => Promise<unknown[]>;
   revokeInvitation: (invitationId: string) => Promise<void>;
   checkInvitation: (
@@ -346,7 +354,9 @@ interface AppContextType {
     imageBlob: Blob,
   ) => Promise<unknown[]>;
   getCopilotAlerts: (workspaceId: string) => Promise<unknown[]>;
-  getCopilotBriefing: (workspaceId: string, isMock?: boolean) => Promise<{ briefing: string }>;
+  getCopilotBriefing: (
+    workspaceId: string,
+  ) => Promise<{ briefing: string; source: 'ai' | 'rules' }>;
   // Intégrations & Synchronisation Réelle
   listIntegrations: (workspaceId: string) => Promise<unknown[]>;
   createIntegration: (
@@ -384,10 +394,12 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [apiError, setApiError] = useState<string | null>(null);
   const [user, setUser] = useState<AppContextType['user']>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState('');
   const [workspaceRoles, setWorkspaceRoles] = useState<Record<string, WorkspaceMember['role']>>({});
   const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMember[]>([]);
   const [resourceCapacity, setResourceCapacity] = useState<ResourceCapacityReportItem[]>([]);
@@ -408,6 +420,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isConnected, setIsConnected] = useState(false);
   const [socket, setSocket] = useState<Socket | null>(null);
   const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    if (workspaces.length === 0) {
+      if (activeWorkspaceId) setActiveWorkspaceId('');
+      return;
+    }
+    if (!workspaces.some((workspace) => workspace.id === activeWorkspaceId)) {
+      setActiveWorkspaceId(workspaces[0].id);
+    }
+  }, [activeWorkspaceId, workspaces]);
 
   useEffect(() => {
     return () => {
@@ -445,6 +467,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [user?.token]);
 
+  const reportApiError = async (res: Response, action: string): Promise<never> => {
+    const responseBody = await res.text();
+    let detail = responseBody;
+    try {
+      const parsed: unknown = JSON.parse(responseBody);
+      if (
+        typeof parsed === 'object' &&
+        parsed !== null &&
+        'message' in parsed &&
+        (typeof parsed.message === 'string' ||
+          (Array.isArray(parsed.message) &&
+            parsed.message.every((item) => typeof item === 'string')))
+      ) {
+        detail = Array.isArray(parsed.message) ? parsed.message.join(', ') : parsed.message;
+      }
+    } catch {
+      detail = responseBody;
+    }
+    const message = detail || `${action} (HTTP ${res.status})`;
+    setApiError(message);
+    throw new Error(message);
+  };
+
   // Gérer la connexion WebSocket et tester l'API Backend
   useEffect(() => {
     let activeSocket: Socket | null = null;
@@ -464,7 +509,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           headers: getHeaders(),
         });
 
-        if (testRes.ok || testRes.status === 401) {
+        if (testRes.ok) {
           setIsConnected(true);
 
           // Initialisation du WebSocket
@@ -575,6 +620,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           newSocket.on('task-schedule-propagated', handleTaskSchedulePropagated);
           newSocket.on('project-data-updated', handleProjectDataUpdated);
           newSocket.on('mention-notification', handleMentionNotification);
+        } else if (testRes.status === 401) {
+          console.warn('Session expirée ou invalide. Veuillez vous reconnecter.');
+          localStorage.removeItem('planner_user');
+          setUser(null);
+          setIsConnected(false);
         } else {
           setIsConnected(false);
         }
@@ -679,11 +729,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const logout = () => {
+    void import('../firebase-auth')
+      .then(({ signOutFirebase }) => signOutFirebase())
+      .catch((error: unknown) => {
+        setApiError(error instanceof Error ? error.message : 'Échec de la déconnexion Firebase.');
+      });
     setUser(null);
     localStorage.removeItem('planner_user');
     setProjects([]);
     setNotes([]);
     setWorkspaces([]);
+    setActiveWorkspaceId('');
     setWorkspaceRoles({});
     setWorkspaceMembers([]);
     setTimeBlocks([]);
@@ -766,6 +822,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const firebaseLogin = async (idToken: string, name?: string) => {
+    const res = await fetch(`${BACKEND_URL}/auth/firebase/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken, name }),
+    });
+    if (!res.ok) {
+      const errData = await res.json();
+      throw new Error(errData.message || 'Connexion Firebase refusée.');
+    }
+    const data = await res.json();
+    const userData = {
+      id: data.user.id,
+      name: data.user.name,
+      email: data.user.email,
+      token: data.accessToken,
+    };
+    setUser(userData);
+    localStorage.setItem('planner_user', JSON.stringify(userData));
+  };
+
   // CRUD Projets
   const createProject = async (
     name: string,
@@ -780,7 +857,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       headers: getHeaders(),
       body: JSON.stringify({ name, description, workspaceId, status, startDate, dueDate }),
     });
-    if (res.ok) refreshData();
+    if (!res.ok) await reportApiError(res, 'Impossible de créer le projet.');
+    refreshData();
   };
 
   const deleteProject = async (projectId: string) => {
@@ -788,7 +866,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       method: 'DELETE',
       headers: getHeaders(),
     });
-    if (res.ok) refreshData();
+    if (!res.ok) await reportApiError(res, 'Impossible de supprimer le projet.');
+    refreshData();
   };
 
   // CRUD Tâches
@@ -804,12 +883,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       headers: getHeaders(),
       body: JSON.stringify({ title, description, priority, ...options }),
     });
-    if (res.ok) {
-      const task = await res.json();
-      refreshData();
-      return task;
-    }
-    return null;
+    if (!res.ok) await reportApiError(res, 'Impossible de créer la tâche.');
+    const task = await res.json();
+    refreshData();
+    return task;
   };
 
   const updateTask = async (taskId: string, data: Partial<Task>) => {
@@ -818,7 +895,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       headers: getHeaders(),
       body: JSON.stringify(data),
     });
-    if (res.ok) refreshData();
+    if (!res.ok) await reportApiError(res, 'Impossible de modifier la tâche.');
+    refreshData();
   };
 
   const deleteTask = async (taskId: string) => {
@@ -826,7 +904,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       method: 'DELETE',
       headers: getHeaders(),
     });
-    if (res.ok) refreshData();
+    if (!res.ok) await reportApiError(res, 'Impossible de supprimer la tâche.');
+    refreshData();
   };
 
   const getProjectCriticalPath = async (
@@ -835,10 +914,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const res = await fetch(`${BACKEND_URL}/projects/${projectId}/critical-path`, {
       headers: getHeaders(),
     });
-    if (res.ok) {
-      return res.json();
-    }
-    return null;
+    if (!res.ok) await reportApiError(res, 'Impossible de charger le chemin critique.');
+    return res.json();
   };
 
   // WebSocket Time Tracking
@@ -863,7 +940,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       headers: getHeaders(),
       body: JSON.stringify({ title, content }),
     });
-    if (res.ok) refreshData();
+    if (!res.ok) await reportApiError(res, 'Impossible d’enregistrer la note.');
+    refreshData();
   };
 
   const deleteNote = async (noteId: string) => {
@@ -871,17 +949,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       method: 'DELETE',
       headers: getHeaders(),
     });
-    if (res.ok) refreshData();
+    if (!res.ok) await reportApiError(res, 'Impossible de supprimer la note.');
+    refreshData();
   };
 
   // CRUD Calendrier (TimeBlocks)
-  const createTimeBlock = async (taskId: string, startTime: string, endTime: string) => {
-    const res = await fetch(`${BACKEND_URL}/projects/tasks/${taskId}/timeblocks`, {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify({ startTime, endTime }),
-    });
-    if (res.ok) refreshData();
+  const createTimeBlock = async (
+    taskId: string,
+    startTime: string,
+    endTime: string,
+  ): Promise<boolean> => {
+    let res: Response;
+    try {
+      res = await fetch(`${BACKEND_URL}/projects/tasks/${taskId}/timeblocks`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ startTime, endTime }),
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? ` ${error.message}` : '';
+      setApiError(`Impossible de planifier le bloc horaire.${detail}`);
+      return false;
+    }
+
+    if (!res.ok) {
+      try {
+        await reportApiError(res, 'Impossible de planifier le bloc horaire.');
+      } catch {
+        return false;
+      }
+    }
+
+    refreshData();
+    return true;
   };
 
   const updateTimeBlock = async (timeBlockId: string, startTime: string, endTime: string) => {
@@ -890,7 +990,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       headers: getHeaders(),
       body: JSON.stringify({ startTime, endTime }),
     });
-    if (res.ok) refreshData();
+    if (!res.ok) await reportApiError(res, 'Impossible de modifier le bloc horaire.');
+    refreshData();
   };
 
   const deleteTimeBlock = async (timeBlockId: string) => {
@@ -898,7 +999,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       method: 'DELETE',
       headers: getHeaders(),
     });
-    if (res.ok) refreshData();
+    if (!res.ok) await reportApiError(res, 'Impossible de supprimer le bloc horaire.');
+    refreshData();
   };
 
   // Professional features
@@ -913,7 +1015,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       headers: getHeaders(),
       body: JSON.stringify({ name, description, dueDate }),
     });
-    if (res.ok) refreshData();
+    if (!res.ok) await reportApiError(res, 'Impossible de créer le jalon.');
+    refreshData();
   };
 
   const completeMilestone = async (milestoneId: string) => {
@@ -921,7 +1024,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       method: 'PUT',
       headers: getHeaders(),
     });
-    if (res.ok) refreshData();
+    if (!res.ok) await reportApiError(res, 'Impossible de terminer le jalon.');
+    refreshData();
   };
 
   const createDeliverable = async (
@@ -936,7 +1040,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       headers: getHeaders(),
       body: JSON.stringify({ title, description, status, dueDate }),
     });
-    if (res.ok) refreshData();
+    if (!res.ok) await reportApiError(res, 'Impossible de créer le livrable.');
+    refreshData();
   };
 
   const updateDeliverableStatus = async (deliverableId: string, status: string) => {
@@ -947,7 +1052,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         headers: getHeaders(),
       },
     );
-    if (res.ok) refreshData();
+    if (!res.ok) await reportApiError(res, 'Impossible de modifier le statut du livrable.');
+    refreshData();
   };
 
   const createDelivery = async (projectId: string, summary?: string, checklist?: string[]) => {
@@ -956,7 +1062,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       headers: getHeaders(),
       body: JSON.stringify({ summary, checklist }),
     });
-    if (res.ok) refreshData();
+    if (!res.ok) await reportApiError(res, 'Impossible de créer la livraison.');
+    refreshData();
   };
 
   const updateDeliveryStatus = async (deliveryId: string, status: string) => {
@@ -965,7 +1072,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       headers: getHeaders(),
       body: JSON.stringify({ status }),
     });
-    if (res.ok) refreshData();
+    if (!res.ok) await reportApiError(res, 'Impossible de modifier le statut de la livraison.');
+    refreshData();
   };
 
   const toggleDeliveryChecklistItem = async (itemId: string) => {
@@ -973,7 +1081,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       method: 'PUT',
       headers: getHeaders(),
     });
-    if (res.ok) refreshData();
+    if (!res.ok) await reportApiError(res, 'Impossible de modifier la checklist de livraison.');
+    refreshData();
   };
 
   const addTaskDependency = async (
@@ -986,7 +1095,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       headers: getHeaders(),
       body: JSON.stringify({ dependsOnTaskId, type }),
     });
-    if (res.ok) refreshData();
+    if (!res.ok) await reportApiError(res, 'Impossible de créer la dépendance.');
+    refreshData();
   };
 
   const removeTaskDependency = async (taskId: string, dependsOnTaskId: string) => {
@@ -997,7 +1107,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         headers: getHeaders(),
       },
     );
-    if (res.ok) refreshData();
+    if (!res.ok) await reportApiError(res, 'Impossible de supprimer la dépendance.');
+    refreshData();
   };
 
   const updateResourceProfile = async (
@@ -1005,13 +1116,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     weeklyCapacityMinutes?: number,
     skills?: string,
     costRateCents?: number,
+    workspaceId?: string,
   ) => {
-    const res = await fetch(`${BACKEND_URL}/projects/resources/${userId}/profile`, {
+    const query = workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : '';
+    const res = await fetch(`${BACKEND_URL}/projects/resources/${userId}/profile${query}`, {
       method: 'PUT',
       headers: getHeaders(),
       body: JSON.stringify({ weeklyCapacityMinutes, skills, costRateCents }),
     });
-    if (res.ok) refreshData();
+    if (!res.ok) await reportApiError(res, 'Impossible de modifier le profil de ressource.');
+    refreshData();
+  };
+
+  const getResourceCapacityReport = async (workspaceId: string) => {
+    const res = await fetch(
+      `${BACKEND_URL}/projects/resources/capacity?workspaceId=${encodeURIComponent(workspaceId)}`,
+      { headers: getHeaders() },
+    );
+    if (!res.ok) await reportApiError(res, 'Impossible de charger la capacité du workspace.');
+    return res.json();
   };
 
   const createResourceAllocation = async (
@@ -1027,7 +1150,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       headers: getHeaders(),
       body: JSON.stringify({ userId, allocationPercent, roleLabel, startDate, endDate }),
     });
-    if (res.ok) refreshData();
+    if (!res.ok) await reportApiError(res, 'Impossible de créer l’affectation.');
+    refreshData();
   };
 
   // Agile
@@ -1042,7 +1166,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       headers: getHeaders(),
       body: JSON.stringify({ name, startDate, endDate }),
     });
-    if (res.ok) refreshData();
+    if (!res.ok) await reportApiError(res, 'Impossible de créer le sprint.');
+    refreshData();
   };
 
   const updateSprintStatus = async (
@@ -1054,7 +1179,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       headers: getHeaders(),
       body: JSON.stringify({ status }),
     });
-    if (res.ok) refreshData();
+    if (!res.ok) await reportApiError(res, 'Impossible de modifier le sprint.');
+    refreshData();
   };
 
   const associateTasksToSprint = async (sprintId: string | null, taskIds: string[]) => {
@@ -1064,7 +1190,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       headers: getHeaders(),
       body: JSON.stringify({ taskIds }),
     });
-    if (res.ok) refreshData();
+    if (!res.ok) await reportApiError(res, 'Impossible de déplacer les tâches du sprint.');
+    refreshData();
   };
 
   const getBurndownData = async (sprintId: string) => {
@@ -1072,7 +1199,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       method: 'GET',
       headers: getHeaders(),
     });
-    if (!res.ok) return null;
+    if (!res.ok) await reportApiError(res, 'Impossible de charger le burndown.');
     return res.json();
   };
 
@@ -1081,7 +1208,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       method: 'GET',
       headers: getHeaders(),
     });
-    if (!res.ok) return 0;
+    if (!res.ok) await reportApiError(res, 'Impossible de charger la vélocité.');
     const data: unknown = await res.json();
     if (typeof data === 'number') return data;
     if (
@@ -1092,7 +1219,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     ) {
       return data.velocity;
     }
-    return 0;
+    const message = 'La réponse du serveur ne contient pas une vélocité valide.';
+    setApiError(message);
+    throw new Error(message);
   };
 
   const createInvitation = async (
@@ -1107,20 +1236,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       headers: getHeaders(),
       body: JSON.stringify({ email, role, projectId, durationDays }),
     });
-    if (res.ok) {
-      return res.json();
-    }
-    return null;
+    if (!res.ok) await reportApiError(res, "Impossible de créer l'invitation.");
+    return res.json();
   };
 
   const listInvitations = async (workspaceId: string) => {
     const res = await fetch(`${BACKEND_URL}/projects/workspaces/${workspaceId}/invitations`, {
       headers: getHeaders(),
     });
-    if (res.ok) {
-      return res.json();
-    }
-    return [];
+    if (!res.ok) await reportApiError(res, 'Impossible de charger les invitations.');
+    return res.json();
+  };
+
+  const getWorkspaceMembers = async (workspaceId: string) => {
+    const res = await fetch(
+      `${BACKEND_URL}/projects/workspaces/${encodeURIComponent(workspaceId)}/members`,
+      { headers: getHeaders() },
+    );
+    if (!res.ok) await reportApiError(res, 'Impossible de charger les membres du workspace.');
+    return res.json();
   };
 
   const revokeInvitation = async (invitationId: string) => {
@@ -1128,7 +1262,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       method: 'DELETE',
       headers: getHeaders(),
     });
-    if (res.ok) refreshData();
+    if (!res.ok) await reportApiError(res, "Impossible de révoquer l'invitation.");
+    refreshData();
   };
 
   const checkInvitation = async (token: string) => {
@@ -1173,10 +1308,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const res = await fetch(`${BACKEND_URL}/projects/tasks/${taskId}/comments`, {
       headers: getHeaders(),
     });
-    if (res.ok) {
-      return res.json();
-    }
-    return [];
+    if (!res.ok) await reportApiError(res, 'Impossible de charger les commentaires.');
+    return res.json();
   };
 
   const deleteComment = async (commentId: string) => {
@@ -1211,8 +1344,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const res = await fetch(`${BACKEND_URL}/projects/tasks/${taskId}/attachments`, {
       headers: getHeaders(),
     });
-    if (res.ok) return res.json();
-    return [];
+    if (!res.ok) await reportApiError(res, 'Impossible de charger les pièces jointes.');
+    return res.json();
   };
 
   const deleteTaskAttachment = async (attachmentId: string) => {
@@ -1388,9 +1521,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return res.json();
   };
 
-  const getCopilotBriefing = async (workspaceId: string, isMock: boolean = false) => {
+  const getCopilotBriefing = async (workspaceId: string) => {
     const res = await fetch(
-      `${BACKEND_URL}/projects/ai/copilot/briefing?workspaceId=${workspaceId}&isMock=${isMock}`,
+      `${BACKEND_URL}/projects/ai/copilot/briefing?workspaceId=${workspaceId}`,
       {
         method: 'GET',
         headers: getHeaders(),
@@ -1409,8 +1542,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         headers: getHeaders(),
       },
     );
-    if (res.ok) return res.json();
-    return [];
+    if (!res.ok) await reportApiError(res, 'Impossible de charger les intégrations.');
+    return res.json();
   };
 
   const createIntegration = async (
@@ -1478,8 +1611,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         headers: getHeaders(),
       },
     );
-    if (res.ok) return res.json();
-    return [];
+    if (!res.ok) await reportApiError(res, 'Impossible de charger les conflits de calendrier.');
+    return res.json();
   };
 
   // Demander la permission de notification au login
@@ -1583,6 +1716,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   return (
     <AppContext.Provider
       value={{
+        apiError,
+        dismissApiError: () => setApiError(null),
         user,
         projects,
         notes,
@@ -1590,12 +1725,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         workspaceMembers,
         resourceCapacity,
         timeBlocks,
+        activeWorkspaceId,
+        setActiveWorkspaceId,
         activeTimer,
         activeTab,
         isConnected,
         login,
         classicLogin,
         classicRegister,
+        firebaseLogin,
         logout,
         mockLogin,
         setActiveTab,
@@ -1642,6 +1780,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         removeTaskDependency,
         getProjectCriticalPath,
         updateResourceProfile,
+        getResourceCapacityReport,
+        getWorkspaceMembers,
         createResourceAllocation,
         refreshData,
         // Invitations / Collaboration

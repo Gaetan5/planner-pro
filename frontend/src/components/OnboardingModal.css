@@ -21,19 +21,20 @@
 .onboarding-card {
   position: relative;
   width: 100%;
-  max-width: 580px;
+  max-width: 660px;
+  max-height: min(90vh, 780px);
   background: rgba(17, 24, 39, 0.85);
   border: 1px solid var(--glass-border);
   box-shadow:
     0 30px 60px rgba(0, 0, 0, 0.4),
     0 0 80px rgba(139, 92, 246, 0.15);
   border-radius: var(--radius-xl);
-  padding: var(--space-3xl);
+  padding: var(--space-2xl) var(--space-3xl);
   display: flex;
   flex-direction: column;
-  gap: var(--space-xl);
+  gap: var(--space-lg);
   animation: pop-in 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-  overflow: hidden;
+  overflow-y: auto;
 }
 
 .onboarding-close-btn {
@@ -61,54 +62,82 @@
   transform: rotate(90deg);
 }
 
-/* Dots Progress indicator */
-.onboarding-progress-dots {
+/* The route line mirrors the ordered tasks in the starter project. */
+.onboarding-route {
   display: flex;
   justify-content: center;
-  gap: var(--space-md);
+  align-items: center;
+  gap: 0;
   margin-bottom: var(--space-sm);
 }
 
-.progress-dot {
-  width: 10px;
-  height: 10px;
+.onboarding-route-stop {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.15);
   background: rgba(255, 255, 255, 0.15);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--font-xs);
+  font-weight: 700;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition:
+    color 0.2s ease,
+    background 0.2s ease,
+    border-color 0.2s ease;
 }
 
-.progress-dot:hover {
-  background: rgba(255, 255, 255, 0.35);
-  transform: scale(1.2);
+.onboarding-route-stop:hover {
+  border-color: #a78bfa;
+  color: #fff;
 }
 
-.progress-dot--active {
-  width: 24px;
-  border-radius: 5px;
-  background: linear-gradient(90deg, #8b5cf6, #ec4899);
-  box-shadow: 0 0 10px rgba(139, 92, 246, 0.5);
+.onboarding-route-stop:focus-visible {
+  outline: 2px solid #c4b5fd;
+  outline-offset: 3px;
 }
 
-.progress-dot--completed {
-  background: #10b981;
+.onboarding-route-stop--active {
+  border-color: #a78bfa;
+  background: #8b5cf6;
+  color: #fff;
+  box-shadow: 0 0 14px rgba(139, 92, 246, 0.45);
+}
+
+.onboarding-route-stop--completed {
+  border-color: rgba(52, 211, 153, 0.65);
+  background: rgba(16, 185, 129, 0.18);
+  color: #6ee7b7;
+}
+
+.onboarding-route-line {
+  width: clamp(16px, 5vw, 42px);
+  height: 1px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.onboarding-route-line--completed {
+  background: #34d399;
 }
 
 /* Content Body */
 .onboarding-body {
   display: flex;
   flex-direction: column;
-  gap: var(--space-lg);
-  text-align: center;
-  min-height: 340px;
-  justify-content: center;
+  gap: var(--space-md);
+  text-align: left;
 }
 
 .onboarding-header {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-md);
+  gap: var(--space-sm);
+  text-align: center;
 }
 
 .onboarding-badge {
@@ -127,8 +156,8 @@
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid rgba(255, 255, 255, 0.05);
   border-radius: 50%;
-  width: 80px;
-  height: 80px;
+  width: 58px;
+  height: 58px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -136,40 +165,23 @@
 }
 
 .onboarding-icon {
-  animation: pulse-glow 3s infinite ease-in-out;
+  color: #93c5fd;
 }
 
 .onboarding-icon--blue {
-  color: #3b82f6;
-  filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.4));
+  color: #60a5fa;
 }
 .onboarding-icon--purple {
   color: #a78bfa;
-  filter: drop-shadow(0 0 8px rgba(167, 139, 250, 0.4));
 }
 .onboarding-icon--pink {
   color: #f472b6;
-  filter: drop-shadow(0 0 8px rgba(244, 114, 182, 0.4));
 }
 .onboarding-icon--green {
   color: #34d399;
-  filter: drop-shadow(0 0 8px rgba(52, 211, 153, 0.4));
 }
 .onboarding-icon--gold {
   color: #fbbf24;
-  filter: drop-shadow(0 0 8px rgba(251, 191, 36, 0.4));
-}
-
-@keyframes pulse-glow {
-  0%,
-  100% {
-    transform: scale(1);
-    opacity: 0.95;
-  }
-  50% {
-    transform: scale(1.08);
-    opacity: 1;
-  }
 }
 
 .onboarding-title {
@@ -183,7 +195,33 @@
   font-size: var(--font-base);
   color: var(--text-secondary);
   line-height: 1.6;
-  margin: 0 var(--space-lg);
+  margin: 0;
+  text-align: center;
+}
+
+.onboarding-task-callout {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-md);
+  padding: var(--space-md) var(--space-lg);
+  border-left: 3px solid #8b5cf6;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  background: rgba(139, 92, 246, 0.1);
+}
+
+.onboarding-task-callout > span {
+  flex: 0 0 auto;
+  color: #c4b5fd;
+  font-size: var(--font-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.onboarding-task-callout > strong {
+  color: var(--text-primary);
+  font-size: var(--font-sm);
+  font-weight: 600;
 }
 
 /* Tips Card */
@@ -193,14 +231,14 @@
   border-radius: var(--radius-lg);
   padding: var(--space-lg) var(--space-xl);
   text-align: left;
-  margin-top: var(--space-sm);
+  margin-top: 0;
 }
 
 .onboarding-tips-title {
   font-size: var(--font-sm);
   font-weight: 700;
   color: #fff;
-  margin-bottom: var(--space-md);
+  margin-bottom: var(--space-sm);
   letter-spacing: 0.25px;
 }
 
@@ -210,7 +248,7 @@
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-md);
+  gap: var(--space-sm);
 }
 
 .onboarding-tip-item {
@@ -235,6 +273,8 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-md);
   border-top: 1px solid rgba(255, 255, 255, 0.05);
   padding-top: var(--space-xl);
   margin-top: var(--space-sm);
@@ -251,21 +291,30 @@
   font-size: var(--font-xs);
   color: var(--text-muted);
   font-weight: 600;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.onboarding-open-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
 }
 
 /* Responsive adjustments */
 @media (max-width: 600px) {
-  .onboarding-card {
-    padding: var(--space-xl);
-    max-width: 100%;
+  .onboarding-overlay {
+    padding: var(--space-md);
   }
 
-  .onboarding-body {
-    min-height: 400px;
+  .onboarding-card {
+    padding: var(--space-xl) var(--space-lg);
+    max-width: 100%;
   }
 
   .onboarding-description {
     margin: 0;
+    font-size: var(--font-sm);
   }
 
   .onboarding-tips-card {
@@ -273,6 +322,26 @@
   }
 
   .onboarding-nav-btn {
-    padding: var(--space-md) var(--space-lg);
+    padding: var(--space-sm) var(--space-md);
+  }
+
+  .onboarding-open-btn {
+    padding: var(--space-sm) var(--space-md);
+  }
+
+  .onboarding-step-counter {
+    order: -1;
+    width: 100%;
+    text-align: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-card {
+    animation: none;
+  }
+
+  .onboarding-route-stop {
+    transition: none;
   }
 }

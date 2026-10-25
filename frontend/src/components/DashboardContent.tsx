@@ -36,6 +36,28 @@ export const DashboardContent: React.FC = () => {
   const allTasks = projects.flatMap((p) => p.tasks || []);
   const completedTasks = allTasks.filter((t) => t.status === 'DONE');
   const inProgressTasks = allTasks.filter((t) => t.status === 'IN_PROGRESS');
+  const priorityRank = { HIGH: 0, MEDIUM: 1, LOW: 2 };
+  const urgentTasks = allTasks
+    .filter((task) => task.status !== 'DONE')
+    .sort((a, b) => {
+      const priorityDifference = priorityRank[a.priority] - priorityRank[b.priority];
+      if (priorityDifference !== 0) return priorityDifference;
+      if (!a.dueDate) return b.dueDate ? 1 : 0;
+      if (!b.dueDate) return -1;
+      return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+    })
+    .slice(0, 3);
+  const today = new Date();
+  const todayTimeBlocks = timeBlocks
+    .filter((timeBlock) => {
+      const start = new Date(timeBlock.startTime);
+      return (
+        start.getFullYear() === today.getFullYear() &&
+        start.getMonth() === today.getMonth() &&
+        start.getDate() === today.getDate()
+      );
+    })
+    .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
 
   return (
     <div className="dashboard-layout">
@@ -109,18 +131,15 @@ export const DashboardContent: React.FC = () => {
           <div className="urgent-tasks-section">
             <h4 className="urgent-tasks-title">Tâches urgentes à réaliser</h4>
             <div className="urgent-tasks-list">
-              {allTasks
-                .filter((t) => t.status !== 'DONE')
-                .slice(0, 3)
-                .map((task) => (
-                  <div
-                    key={task.id}
-                    className={`urgent-task-item ${task.priority === 'HIGH' ? 'urgent-task-item--high' : ''}`}
-                  >
-                    <span className="urgent-task-title">{task.title}</span>
-                    <span className="urgent-task-priority">{task.priority}</span>
-                  </div>
-                ))}
+              {urgentTasks.map((task) => (
+                <div
+                  key={task.id}
+                  className={`urgent-task-item ${task.priority === 'HIGH' ? 'urgent-task-item--high' : ''}`}
+                >
+                  <span className="urgent-task-title">{task.title}</span>
+                  <span className="urgent-task-priority">{task.priority}</span>
+                </div>
+              ))}
             </div>
           </div>
         </section>
@@ -131,7 +150,7 @@ export const DashboardContent: React.FC = () => {
             <CalendarIcon size={18} color="var(--accent-primary)" /> Emploi du Temps du Jour
           </h3>
           <div className="schedule-list">
-            {timeBlocks.length === 0 ? (
+            {todayTimeBlocks.length === 0 ? (
               <div className="schedule-empty">
                 <CalendarIcon size={32} className="schedule-empty-icon" />
                 <p className="schedule-empty-text">Aucun bloc horaire planifié aujourd'hui.</p>
@@ -143,7 +162,7 @@ export const DashboardContent: React.FC = () => {
                 </button>
               </div>
             ) : (
-              timeBlocks.map((tb) => {
+              todayTimeBlocks.map((tb) => {
                 const start = new Date(tb.startTime).toLocaleTimeString([], {
                   hour: '2-digit',
                   minute: '2-digit',

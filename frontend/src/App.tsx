@@ -31,13 +31,24 @@ import {
   Milestone,
   CalendarRange,
   HelpCircle,
+  Wallet,
 } from 'lucide-react';
 import logo from './logo.png';
 import './App.css';
 
 function AppWithSession() {
-  const { user, login, logout, activeTab, setActiveTab, isConnected, theme, toggleTheme } =
-    useApp();
+  const {
+    user,
+    login,
+    logout,
+    activeTab,
+    setActiveTab,
+    isConnected,
+    theme,
+    toggleTheme,
+    apiError,
+    dismissApiError,
+  } = useApp();
   const [inviteToken, setInviteToken] = useState<string | null>(() => {
     const params = new URLSearchParams(window.location.search);
     return params.get('token');
@@ -211,7 +222,7 @@ function AppWithSession() {
           <button
             onClick={() => window.dispatchEvent(new CustomEvent('open-ai-command-bar'))}
             className="btn-icon ai-command-btn"
-            title="Ouvrir l'Assistant IA (⌘+K)"
+            title="Ouvrir l'Assistant IA"
             style={{ marginRight: '8px', color: '#8b5cf6' }}
           >
             <Sparkles size={16} />
@@ -251,6 +262,16 @@ function AppWithSession() {
           </div>
         </div>
       </header>
+
+      {apiError && (
+        <div className="app-api-error" role="alert">
+          <AlertTriangle size={16} />
+          <span>{apiError}</span>
+          <button onClick={dismissApiError} aria-label="Fermer le message d’erreur">
+            Fermer
+          </button>
+        </div>
+      )}
 
       {/* Main Page Area */}
       <div className="app-main">{renderActiveTab()}</div>
@@ -320,6 +341,13 @@ function AppWithSession() {
           <Milestone size={20} />
           <span>Agile</span>
         </button>
+        <button
+          onClick={() => setActiveTab('finances')}
+          className={`bottom-nav-item ${activeTab === 'finances' ? 'bottom-nav-item--active' : ''}`}
+        >
+          <Wallet size={20} />
+          <span>Finances</span>
+        </button>
       </nav>
       <AiCommandBar />
       {showOnboarding && (
@@ -327,6 +355,13 @@ function AppWithSession() {
           onClose={() => {
             localStorage.setItem(`planner_onboarding_completed_${user.id}`, 'true');
             setShowOnboarding(false);
+          }}
+          onNavigate={(tab) => {
+            if (tab === 'ai') {
+              window.dispatchEvent(new CustomEvent('open-ai-command-bar'));
+              return;
+            }
+            setActiveTab(tab);
           }}
         />
       )}

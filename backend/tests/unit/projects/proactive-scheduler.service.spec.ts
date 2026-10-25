@@ -151,11 +151,14 @@ describe('ProactiveSchedulerService', () => {
         workspaceId: 'ws-123',
       });
 
-      mockCopilotService.generateBriefing.mockResolvedValue('Bonjour Alice, voici votre briefing.');
+      mockCopilotService.generateBriefing.mockResolvedValue({
+        briefing: 'Bonjour Alice, voici votre briefing.',
+        source: 'rules',
+      });
 
       await service.updateAllUserBriefings();
 
-      expect(mockCopilotService.generateBriefing).toHaveBeenCalledWith('user-1', 'ws-123', true);
+      expect(mockCopilotService.generateBriefing).toHaveBeenCalledWith('user-1', 'ws-123');
       expect(mockPrisma.aiBriefing.upsert).toHaveBeenCalledWith({
         where: { userId: 'user-1' },
         create: {

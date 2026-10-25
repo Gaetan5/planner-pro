@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { useApp } from '../context/AppContext';
+import React, { useEffect, useState } from 'react';
+import { useApp, WorkspaceMember } from '../context/AppContext';
 import {
   ShieldCheck,
   Flag,
@@ -20,7 +20,9 @@ export const GovernanceView: React.FC = () => {
   const {
     projects,
     workspaces,
-    workspaceMembers,
+    activeWorkspaceId,
+    setActiveWorkspaceId,
+    getWorkspaceMembers,
     createMilestone,
     completeMilestone,
     createDeliverable,
@@ -31,6 +33,8 @@ export const GovernanceView: React.FC = () => {
   } = useApp();
 
   const [selectedProjId, setSelectedProjId] = useState<string>(projects[0]?.id || '');
+  const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMember[]>([]);
+  const [membersError, setMembersError] = useState<string | null>(null);
   const [activeSubTab, setActiveSubTab] = useState<'project' | 'integrations'>('project');
 
   // Modals / forms states
@@ -51,8 +55,42 @@ export const GovernanceView: React.FC = () => {
   const [deliverySummary, setDeliverySummary] = useState('');
   const [deliveryChecklistRaw, setDeliveryChecklistRaw] = useState('');
 
-  const activeProject = projects.find((p) => p.id === selectedProjId) || projects[0];
-  const activeWorkspace = workspaces[0]; // or derived from project
+  const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId);
+  const workspaceProjects = projects.filter(
+    (project) => (project.workspaceId || project.workspace?.id) === activeWorkspaceId,
+  );
+  const activeProject = workspaceProjects.find((project) => project.id === selectedProjId);
+
+  useEffect(() => {
+    if (workspaceProjects.some((project) => project.id === selectedProjId)) return;
+    setSelectedProjId(workspaceProjects[0]?.id || '');
+  }, [projects, selectedProjId, activeWorkspaceId]);
+
+  useEffect(() => {
+    if (!activeWorkspaceId) {
+      setWorkspaceMembers([]);
+      return;
+    }
+
+    let cancelled = false;
+    setWorkspaceMembers([]);
+    setMembersError(null);
+    getWorkspaceMembers(activeWorkspaceId)
+      .then((members) => {
+        if (!cancelled) setWorkspaceMembers(members);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setMembersError(
+            err instanceof Error ? err.message : 'Impossible de charger les membres du workspace.',
+          );
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [getWorkspaceMembers, activeWorkspaceId]);
 
   const handleCreateMilestone = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -126,9 +164,28 @@ export const GovernanceView: React.FC = () => {
               {workspaceMembers.find((m) => m.role === 'OWNER')?.user.name || 'Admin'}
             </p>
           </div>
+          <label>
+            <span className="form-label">Workspace</span>
+            <select
+              className="gov-select"
+              aria-label="Workspace de gouvernance"
+              value={activeWorkspaceId}
+              onChange={(event) => {
+                setActiveWorkspaceId(event.target.value);
+                setActiveSubTab('project');
+              }}
+            >
+              {workspaces.map((workspace) => (
+                <option key={workspace.id} value={workspace.id}>
+                  {workspace.name}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
         <div className="workspace-members-list">
+          {membersError && <span role="alert">{membersError}</span>}
           {workspaceMembers.map((member) => (
             <div
               key={member.id}
@@ -141,7 +198,7 @@ export const GovernanceView: React.FC = () => {
         </div>
       </section>
 
-      {projects.length === 0 ? (
+      {workspaceProjects.length === 0 ? (
         <div className="empty-state-gov">
           <ShieldCheck size={48} color="var(--accent-primary)" />
           <h3 className="empty-state-title">Aucun projet professionnel disponible</h3>
@@ -158,7 +215,7 @@ export const GovernanceView: React.FC = () => {
                 <FileText size={18} color="var(--accent-primary)" /> Projets
               </h3>
               <div className="project-selector-list">
-                {projects.map((proj) => (
+                {workspaceProjects.map((proj) => (
                   <div
                     key={proj.id}
                     onClick={() => {

@@ -46,7 +46,6 @@ function DraggableCard({
   startTimer,
   stopTimer,
   deleteTask,
-  moveTaskStatus,
   getPriorityClass,
   isReadOnly,
   onOpenComments,
@@ -57,7 +56,6 @@ function DraggableCard({
   startTimer: (id: string) => void;
   stopTimer: () => void;
   deleteTask: (id: string) => void;
-  moveTaskStatus: (id: string, status: string) => void;
   getPriorityClass: (priority: string) => string;
   isReadOnly: boolean;
   onOpenComments: (task: Task) => void;
@@ -83,7 +81,6 @@ function DraggableCard({
       {...(isReadOnly ? {} : listeners)}
       {...(isReadOnly ? {} : attributes)}
       className={`glass-panel kanban-card ${isDragging ? 'kanban-card--dragging' : ''} ${isReadOnly ? 'kanban-card--readonly' : ''}`}
-      onClick={() => !isReadOnly && moveTaskStatus(task.id, task.status)}
     >
       <div className="kanban-card-header">
         <span className={`kanban-card-priority ${getPriorityClass(task.priority)}`}>
@@ -279,14 +276,6 @@ export const KanbanBoard: React.FC = () => {
     setProjName('');
     setProjDesc('');
     setShowNewProjForm(false);
-  };
-
-  const moveTaskStatus = (taskId: string, currentStatus: string) => {
-    let nextStatus: Task['status'] = 'TODO';
-    if (currentStatus === 'TODO') nextStatus = 'IN_PROGRESS';
-    else if (currentStatus === 'IN_PROGRESS') nextStatus = 'DONE';
-    else if (currentStatus === 'DONE') nextStatus = 'TODO';
-    updateTask(taskId, { status: nextStatus });
   };
 
   /* DnD Handlers */
@@ -581,7 +570,6 @@ export const KanbanBoard: React.FC = () => {
                         startTimer={startTimer}
                         stopTimer={stopTimer}
                         deleteTask={deleteTask}
-                        moveTaskStatus={moveTaskStatus}
                         getPriorityClass={getPriorityClass}
                         onOpenComments={(task) => setCommentingTask(task)}
                       />

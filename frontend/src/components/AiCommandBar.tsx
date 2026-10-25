@@ -69,6 +69,12 @@ export const AiCommandBar: React.FC = () => {
   const overlayRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  useEffect(() => {
+    const openCommandBar = () => setIsOpen(true);
+    window.addEventListener('open-ai-command-bar', openCommandBar);
+    return () => window.removeEventListener('open-ai-command-bar', openCommandBar);
+  }, []);
+
   // Écouter les retours de la voix en streaming via WebSockets
   useEffect(() => {
     if (socket) {

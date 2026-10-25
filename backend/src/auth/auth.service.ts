@@ -1,15 +1,74 @@
-import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  UnauthorizedException,
+  BadRequestException,
+  ConflictException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 import { encrypt, decrypt, hashPassword, verifyPassword } from './encryption.util';
+import { FirebaseIdentityService } from './firebase-identity.service';
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
+    private readonly firebaseIdentity: FirebaseIdentityService,
   ) {}
+
+  async loginWithFirebase(idToken: string, suppliedName?: string) {
+    const identity = await this.firebaseIdentity.verifyIdToken(idToken);
+    const email = identity.email?.toLowerCase().trim();
+
+    if (!email || !identity.email_verified) {
+      throw new UnauthorizedException('Une adresse e-mail Firebase vérifiée est requise.');
+    }
+
+    let user = await this.prisma.user.findUnique({
+      where: { firebaseUid: identity.uid },
+    });
+
+    if (!user) {
+      const existingUser = await this.prisma.user.findUnique({ where: { email } });
+
+      if (existingUser?.firebaseUid) {
+        throw new ConflictException('Cet e-mail est déjà associé à un autre compte Firebase.');
+      }
+
+      if (existingUser) {
+        user = await this.prisma.user.update({
+          where: { id: existingUser.id },
+          data: {
+            firebaseUid: identity.uid,
+            name: existingUser.name || identity.name || suppliedName || email.split('@')[0],
+          },
+        });
+      } else {
+        const name = identity.name || suppliedName?.trim() || email.split('@')[0];
+        user = await this.prisma.$transaction(async (transaction) => {
+          const createdUser = await transaction.user.create({
+            data: { email, name, firebaseUid: identity.uid },
+          });
+          await this.createOnboardingData(transaction, createdUser.id, name);
+          return createdUser;
+        });
+      }
+    }
+
+    const accessToken = this.jwtService.sign({
+      sub: user.id,
+      email: user.email,
+      name: user.name,
+    });
+
+    return {
+      user: { id: user.id, email: user.email, name: user.name },
+      accessToken,
+    };
+  }
 
   /**
    * Échange le code d'autorisation GitHub contre un token d'accès,
@@ -108,19 +167,12 @@ export class AuthService {
       throw new BadRequestException("Le mode simulation n'est pas disponible en production.");
     }
 
-    const email = `${name.toLowerCase().replace(/\s+/g, '')}@local.planner.pro`;
-    const mockGithubId = `mock-github-id-${name.toLowerCase().replace(/\s+/g, '')}`;
-    const user = await this.prisma.user.upsert({
-      where: { email },
-      update: {
+    const sessionId = randomUUID();
+    const user = await this.prisma.user.create({
+      data: {
+        email: `demo-${sessionId}@local.planner.pro`,
         name,
-        githubId: mockGithubId,
-        githubUsername: name,
-      },
-      create: {
-        email,
-        name,
-        githubId: mockGithubId,
+        githubId: `mock-github-id-${sessionId}`,
         githubUsername: name,
       },
     });

@@ -31,14 +31,13 @@ WORKDIR /home/node/app/backend
 
 # Générer le client Prisma et compiler le backend dans l'image
 RUN pnpm exec prisma generate
+# A copied incremental cache can suppress emitting dist files in a clean image.
+RUN rm -f tsconfig.tsbuildinfo
 RUN pnpm --filter backend build
 
 EXPOSE 3001
 
-# Synchroniser le schéma actuel puis démarrer. La migration historique ne couvre pas encore
-# l'ensemble des modèles du schéma réparti.
-CMD node wait-for-db.js && pnpm exec prisma db push && node dist/main
-
-
+# Schema changes are applied by the deployment workflow before the application starts.
+CMD ["node", "dist/main"]
 
 

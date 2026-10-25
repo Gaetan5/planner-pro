@@ -124,8 +124,8 @@ export class ProjectsController {
   }
 
   @Get('resources/capacity')
-  getResourceCapacity(@Req() req: any) {
-    return this.projectsService.getResourceCapacityReport(req.user.id);
+  getResourceCapacity(@Req() req: any, @Query('workspaceId') workspaceId?: string) {
+    return this.projectsService.getResourceCapacityReport(req.user.id, workspaceId);
   }
 
   @Put('resources/:userId/profile')
@@ -133,8 +133,9 @@ export class ProjectsController {
     @Req() req: any,
     @Param('userId') userId: string,
     @Body() body: UpdateResourceProfileDto,
+    @Query('workspaceId') workspaceId?: string,
   ) {
-    return this.projectsService.updateResourceProfile(req.user.id, userId, body);
+    return this.projectsService.updateResourceProfile(req.user.id, userId, body, workspaceId);
   }
 
   @Post('resources/:userId/leaves')

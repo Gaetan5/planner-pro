@@ -19,6 +19,7 @@ describe('CopilotService', () => {
       findMany: jest.fn(),
     },
     membership: {
+      findFirst: jest.fn(),
       findMany: jest.fn(),
     },
     user: {
@@ -213,21 +214,24 @@ describe('CopilotService', () => {
     const userId = 'user-123';
     const workspaceId = 'workspace-123';
 
-    it('devrait renvoyer un briefing de démo structuré si isMock = true', async () => {
+    it('devrait renvoyer un résumé basé sur les données si Gemini est indisponible', async () => {
+      mockPrisma.membership.findFirst.mockResolvedValue({ workspaceId, userId });
       mockPrisma.user.findUnique.mockResolvedValue({ id: userId, name: 'Gaëtan' });
       mockPrisma.task.findMany.mockResolvedValue([]);
       mockPrisma.project.findMany.mockResolvedValue([]);
       mockPrisma.milestone.findMany.mockResolvedValue([]);
+      mockGeminiService.isAvailable.mockReturnValue(false);
 
-      const result = await service.generateBriefing(userId, workspaceId, true);
+      const result = await service.generateBriefing(userId, workspaceId);
 
-      expect(result).toContain('Bonjour Gaëtan !');
-      expect(result).toContain('Aperçu de votre journée');
-      expect(result).toContain('Alertes prédictives & Risques détectés');
-      expect(result).toContain('Recommandations du Copilote');
+      expect(result.source).toBe('rules');
+      expect(result.briefing).toContain('Résumé automatique — IA indisponible');
+      expect(result.briefing).toContain('Aucune tâche active assignée.');
+      expect(result.briefing).not.toContain('Alice');
     });
 
     it('devrait appeler Gemini et retourner sa réponse textuelle si disponible', async () => {
+      mockPrisma.membership.findFirst.mockResolvedValue({ workspaceId, userId });
       mockPrisma.user.findUnique.mockResolvedValue({ id: userId, name: 'Gaëtan' });
       mockPrisma.task.findMany.mockResolvedValue([
         { id: 'task-1', title: 'Faire les tests', priority: 'HIGH', project: { name: 'Projet A' } },
@@ -248,12 +252,15 @@ describe('CopilotService', () => {
         generateContent: mockGenerateContent,
       });
 
-      const result = await service.generateBriefing(userId, workspaceId, false);
+      const result = await service.generateBriefing(userId, workspaceId);
 
       expect(mockGeminiService.isAvailable).toHaveBeenCalled();
       expect(mockGeminiService.getGenerativeModel).toHaveBeenCalled();
       expect(mockGenerateContent).toHaveBeenCalled();
-      expect(result).toBe('Voici le briefing généré par Gemini pour Gaëtan.');
+      expect(result).toEqual({
+        briefing: 'Voici le briefing généré par Gemini pour Gaëtan.',
+        source: 'ai',
+      });
     });
   });
 });

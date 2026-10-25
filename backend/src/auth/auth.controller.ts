@@ -5,6 +5,7 @@ import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './jwt.guard';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { FirebaseLoginDto } from './dto/firebase-login.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -55,6 +56,17 @@ export class AuthController {
       loginDto.email,
       loginDto.passwordRaw,
     );
+    this.setTokenCookie(res, accessToken);
+    return { user, accessToken };
+  }
+
+  @Post('firebase/login')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async loginWithFirebase(
+    @Body() body: FirebaseLoginDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { user, accessToken } = await this.authService.loginWithFirebase(body.idToken, body.name);
     this.setTokenCookie(res, accessToken);
     return { user, accessToken };
   }

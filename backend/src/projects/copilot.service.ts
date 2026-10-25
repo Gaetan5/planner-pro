@@ -193,13 +193,12 @@ export class CopilotService {
   }
 
   /**
-   * Génère un briefing matinal dynamique en français basé sur l'IA (Gemini) ou un mock premium.
+   * Génère un briefing IA ou un résumé transparent fondé sur les données du workspace.
    */
   async generateBriefing(
     userId: string,
     workspaceId: string,
-    isMock: boolean = false,
-  ): Promise<string> {
+  ): Promise<{ briefing: string; source: 'ai' | 'rules' }> {
     this.logger.log(`Génération du briefing matinal pour l'utilisateur ${userId}`);
 
     // 1. Récupérer les données de l'utilisateur et de sa charge
@@ -251,41 +250,49 @@ export class CopilotService {
     });
 
     // 4. Calculer les alertes du workspace
-    const alerts = await this.calculatePredictiveAlerts(workspaceId);
-    const criticalAlertsCount = alerts.filter((a) => a.severity === 'CRITICAL').length;
-    const highAlertsCount = alerts.filter((a) => a.severity === 'HIGH').length;
+    const alerts = await this.calculatePredictiveAlerts(workspaceId, userId);
+    const buildRulesBriefing = () => {
+      const taskLines = assignedTasks
+        .slice(0, 3)
+        .map(
+          (task) =>
+            `- ${task.title} (${task.project?.name || 'Inbox'}) — priorité ${task.priority}`,
+        );
+      const milestoneLines = upcomingMilestones
+        .slice(0, 3)
+        .map(
+          (milestone) =>
+            `- ${milestone.name} (${milestone.project?.name || 'Projet'}) — échéance ${
+              milestone.dueDate?.toISOString().slice(0, 10) || 'non définie'
+            }`,
+        );
 
-    // 5. Générer le briefing (Bypass si mock ou pas de clé API)
-    if (isMock || !this.geminiService.isAvailable()) {
-      this.logger.log('Utilisation du briefing matinal mocké.');
-      const listTasksStr =
-        assignedTasks.length > 0
-          ? assignedTasks
-              .slice(0, 3)
-              .map(
-                (t) =>
-                  `   - **${t.title}** (${t.project?.name || 'Inbox'}) - Priorité : ${t.priority}`,
-              )
-              .join('\n')
-          : '   - Aucun tâche prioritaire assignée.';
+      return `Résumé automatique — IA indisponible
 
-      return `Bonjour ${userName} ! Voici votre briefing matinal de productivité.
+Bonjour ${userName},
 
-📅 **Aperçu de votre journée :**
-Vous avez actuellement **${assignedTasks.length} tâches actives** à réaliser dans votre espace de travail. Vos 3 tâches les plus urgentes pour aujourd'hui sont :
-${listTasksStr}
+📅 Vos tâches actives assignées : ${assignedTasks.length}
+${taskLines.length > 0 ? taskLines.join('\n') : '- Aucune tâche active assignée.'}
 
-⚠️ **Alertes prédictives & Risques détectés :**
-Nous avons détecté **${criticalAlertsCount} alerte(s) critique(s)** et **${highAlertsCount} risque(s) élevé(s)** sur le workspace. Notamment, la configuration de sécurité bloque 2 jalons et Alice est en surrégime cette semaine.
+⚠️ Alertes détectées : ${alerts.length}
+${
+  alerts.length > 0
+    ? alerts
+        .slice(0, 3)
+        .map((alert) => `- ${alert.message}`)
+        .join('\n')
+    : '- Aucune alerte détectée par les règles de suivi.'
+}
 
-💡 **Recommandations du Copilote :**
-- Pensez à déléguer ou à replanifier la tâche d'audit de sécurité pour éviter de retarder la mise en production prévue cette semaine.
-- Prenez un temps de synchronisation avec Alice pour soulager sa charge.
+📌 Jalons à venir dans les 7 jours : ${upcomingMilestones.length}
+${milestoneLines.length > 0 ? milestoneLines.join('\n') : '- Aucun jalon à venir.'}`;
+    };
 
-Passez une excellente journée productive ! ✨`;
+    if (!this.geminiService.isAvailable()) {
+      this.logger.warn('Briefing IA indisponible ; génération du résumé basé sur les données.');
+      return { briefing: buildRulesBriefing(), source: 'rules' };
     }
 
-    // Mode IA Réel via Gemini
     try {
       this.logger.log('Appel à Gemini 1.5 Flash pour générer le briefing matinal...');
       const model = this.geminiService.getGenerativeModel();
@@ -328,14 +335,13 @@ Consignes d'écriture :
 `;
 
       const response = await model.generateContent(prompt);
-      return response.response.text().trim();
+      return { briefing: response.response.text().trim(), source: 'ai' };
     } catch (error: unknown) {
       this.logger.error(
         `Erreur lors de la génération du briefing matinal via Gemini: ${error instanceof Error ? error.message : String(error)}`,
         error instanceof Error ? error.stack : undefined,
       );
-      // Fallback sur le texte de démo en cas d'erreur de clé d'API
-      return `Bonjour ${userName} ! Vos tâches prioritaires du jour incluent ${assignedTasks.length > 0 ? `"${assignedTasks[0].title}"` : 'des revues de projets'}. Pensez à consulter votre tableau Kanban. Bon travail !`;
+      return { briefing: buildRulesBriefing(), source: 'rules' };
     }
   }
 }

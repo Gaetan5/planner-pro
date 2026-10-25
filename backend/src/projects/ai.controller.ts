@@ -179,17 +179,10 @@ export class AiController {
   async getCopilotBriefing(
     @Req() req: AuthenticatedRequest,
     @Query('workspaceId') workspaceId: string,
-    @Query('isMock') isMock?: string,
   ) {
     if (!workspaceId) {
       throw new BadRequestException('workspaceId requis.');
     }
-    const mockBool = isMock === 'true' || isMock === '1';
-    const briefingText = await this.copilotService.generateBriefing(
-      req.user.id,
-      workspaceId,
-      mockBool,
-    );
-    return { briefing: briefingText };
+    return this.copilotService.generateBriefing(req.user.id, workspaceId);
   }
 }
