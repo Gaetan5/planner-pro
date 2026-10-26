@@ -3,6 +3,7 @@ import { CommentsService } from '../../../src/projects/comments.service';
 import { PrismaService } from '../../../src/prisma/prisma.service';
 import { IntegrationService } from '../../../src/projects/integration.service';
 import { NotificationsService } from '../../../src/notifications/notifications.service';
+import { FirestoreSyncService } from '../../../src/firestore-sync/firestore-sync.service';
 import { WorkspaceRole } from '@prisma/client';
 
 describe('CommentsService', () => {
@@ -10,6 +11,7 @@ describe('CommentsService', () => {
   let prisma: PrismaService;
 
   const mockPrisma = {
+    $transaction: jest.fn(),
     membership: {
       findFirst: jest.fn(),
       findMany: jest.fn(),
@@ -41,13 +43,22 @@ describe('CommentsService', () => {
     createNotification: jest.fn().mockResolvedValue(undefined),
   };
 
+  const mockFirestoreSync = {
+    enqueue: jest.fn().mockResolvedValue(undefined),
+  };
+
   beforeEach(async () => {
+    mockPrisma.$transaction.mockImplementation((callback: (tx: typeof mockPrisma) => unknown) =>
+      callback(mockPrisma),
+    );
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CommentsService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: IntegrationService, useValue: mockIntegration },
         { provide: NotificationsService, useValue: mockNotifications },
+        { provide: FirestoreSyncService, useValue: mockFirestoreSync },
       ],
     }).compile();
 
@@ -96,6 +107,9 @@ describe('CommentsService', () => {
         content: 'Hello @alice, regarde ça.',
         taskId,
         userId,
+        createdAt: new Date('2026-10-26T00:00:00.000Z'),
+        updatedAt: new Date('2026-10-26T00:00:00.000Z'),
+        attachments: [],
         user: { id: userId, name: 'Auteur', email: 'auteur@test.com' },
       };
       mockPrisma.comment.create.mockResolvedValue(mockCreatedComment);
@@ -114,6 +128,15 @@ describe('CommentsService', () => {
       expect(result.comment).toEqual(mockCreatedComment);
       expect(result.mentionedUserIds).toContain('alice-id');
       expect(result.mentionedUserIds).not.toContain('bob-id');
+      expect(mockFirestoreSync.enqueue).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          entityType: 'comment',
+          entityId: 'comment-123',
+          workspaceId,
+          operation: 'upsert',
+        }),
+      );
       expect(mockPrisma.comment.create).toHaveBeenCalledWith({
         data: {
           content: 'Hello @alice, regarde ça.',

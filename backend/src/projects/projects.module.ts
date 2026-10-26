@@ -24,9 +24,16 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { NotesModule } from '../notes/notes.module';
 import { TrackingModule } from '../tracking/tracking.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { FirestoreSyncModule } from '../firestore-sync/firestore-sync.module';
 
 @Module({
-  imports: [PrismaModule, NotesModule, forwardRef(() => TrackingModule), NotificationsModule],
+  imports: [
+    PrismaModule,
+    NotesModule,
+    forwardRef(() => TrackingModule),
+    NotificationsModule,
+    FirestoreSyncModule,
+  ],
   providers: [
     // Sous-services spécialisés (SRP)
     TasksService,

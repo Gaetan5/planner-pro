@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { SprintService } from '../../../src/projects/sprint.service';
 import { PrismaService } from '../../../src/prisma/prisma.service';
+import { FirestoreSyncService } from '../../../src/firestore-sync/firestore-sync.service';
 import { SprintStatus } from '@prisma/client';
 import { ForbiddenException, NotFoundException, BadRequestException } from '@nestjs/common';
 
@@ -9,6 +10,7 @@ describe('SprintService', () => {
   let prisma: PrismaService;
 
   const mockPrisma = {
+    $transaction: jest.fn(),
     membership: {
       findFirst: jest.fn(),
     },
@@ -26,9 +28,21 @@ describe('SprintService', () => {
     },
   };
 
+  const mockFirestoreSync = {
+    enqueue: jest.fn().mockResolvedValue(undefined),
+  };
+
   beforeEach(async () => {
+    mockPrisma.$transaction.mockImplementation((callback: (tx: typeof mockPrisma) => unknown) =>
+      callback(mockPrisma),
+    );
+
     const module: TestingModule = await Test.createTestingModule({
-      providers: [SprintService, { provide: PrismaService, useValue: mockPrisma }],
+      providers: [
+        SprintService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: FirestoreSyncService, useValue: mockFirestoreSync },
+      ],
     }).compile();
 
     service = module.get<SprintService>(SprintService);
@@ -63,6 +77,15 @@ describe('SprintService', () => {
         where: { workspaceId, userId, workspace: { deletedAt: null } },
       });
       expect(mockPrisma.sprint.create).toHaveBeenCalled();
+      expect(mockFirestoreSync.enqueue).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          entityType: 'sprint',
+          entityId: 'sprint-1',
+          workspaceId,
+          operation: 'upsert',
+        }),
+      );
     });
 
     it("devrait rejeter si l'utilisateur n'est pas membre", async () => {

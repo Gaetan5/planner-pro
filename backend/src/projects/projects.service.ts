@@ -20,6 +20,7 @@ import {
 import * as crypto from 'crypto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
+import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
 
 /**
  * ProjectsService — Façade d'Orchestration
@@ -42,6 +43,7 @@ export class ProjectsService {
     private readonly resourcesService: ResourcesService,
     private readonly financesService: FinancesService,
     private readonly projectPermissionsService: ProjectPermissionsService,
+    private readonly firestoreSync: FirestoreSyncService,
   ) {}
 
   // ═══════════════════════════════════════════════════════════════════
@@ -157,27 +159,32 @@ export class ProjectsService {
       throw new ForbiddenException('Unauthorized: read-only access (VIEWER)');
     }
 
-    const project = await this.prisma.project.create({
-      data: {
-        name,
-        description,
-        userId,
-        workspaceId: workspace.id,
-        status,
-        startDate: startDate ? new Date(startDate) : undefined,
-        dueDate: dueDate ? new Date(dueDate) : undefined,
-        budgetCents: budgetCents !== undefined ? budgetCents : null,
-        billingType: billingType !== undefined ? billingType : 'TIME_AND_MATERIALS',
-      },
-    });
+    const project = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.project.create({
+        data: {
+          name,
+          description,
+          userId,
+          workspaceId: workspace.id,
+          status,
+          startDate: startDate ? new Date(startDate) : undefined,
+          dueDate: dueDate ? new Date(dueDate) : undefined,
+          budgetCents: budgetCents !== undefined ? budgetCents : null,
+          billingType: billingType !== undefined ? billingType : 'TIME_AND_MATERIALS',
+        },
+      });
 
-    // Assigner le créateur comme MANAGER
-    await this.prisma.projectMembership.create({
-      data: {
-        projectId: project.id,
-        userId,
-        role: 'MANAGER',
-      },
+      await tx.projectMembership.create({
+        data: { projectId: created.id, userId, role: 'MANAGER' },
+      });
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'project',
+        entityId: created.id,
+        workspaceId: workspace.id,
+        operation: 'upsert',
+        payload: this.projectSyncPayload(created),
+      });
+      return created;
     });
 
     await this.projectPermissionsService.logAction(
@@ -263,40 +270,61 @@ export class ProjectsService {
       'CONTRIBUTOR',
     ]);
 
-    const oldProject = await this.prisma.project.findUnique({ where: { id: projectId } });
-
-    const updated = await this.prisma.project.update({
-      where: { id: projectId },
-      data: {
-        ...(data.name !== undefined ? { name: data.name } : {}),
-        ...(data.description !== undefined ? { description: data.description } : {}),
-        ...(data.status !== undefined ? { status: data.status } : {}),
-        ...(data.startDate !== undefined ? { startDate: new Date(data.startDate) } : {}),
-        ...(data.dueDate !== undefined ? { dueDate: new Date(data.dueDate) } : {}),
-        ...(data.budgetCents !== undefined ? { budgetCents: data.budgetCents } : {}),
-        ...(data.billingType !== undefined ? { billingType: data.billingType } : {}),
-      },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const oldProject = await tx.project.findUniqueOrThrow({ where: { id: projectId } });
+      const saved = await tx.project.update({
+        where: { id: projectId },
+        data: {
+          ...(data.name !== undefined ? { name: data.name } : {}),
+          ...(data.description !== undefined ? { description: data.description } : {}),
+          ...(data.status !== undefined ? { status: data.status } : {}),
+          ...(data.startDate !== undefined ? { startDate: new Date(data.startDate) } : {}),
+          ...(data.dueDate !== undefined ? { dueDate: new Date(data.dueDate) } : {}),
+          ...(data.budgetCents !== undefined ? { budgetCents: data.budgetCents } : {}),
+          ...(data.billingType !== undefined ? { billingType: data.billingType } : {}),
+        },
+      });
+      const targetWorkspaceId = saved.workspaceId ?? `personal-${saved.userId}`;
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'project',
+        entityId: saved.id,
+        workspaceId: targetWorkspaceId,
+        operation: saved.deletedAt ? 'delete' : 'upsert',
+        payload: this.projectSyncPayload(saved),
+      });
+      return { oldProject, saved };
     });
+    const { oldProject, saved } = updated;
 
     await this.projectPermissionsService.logAction(userId, 'PROJECT_UPDATE', 'Project', projectId, {
       before: oldProject,
-      after: updated,
+      after: saved,
     });
 
-    return updated;
+    return saved;
   }
 
   async deleteProject(projectId: string, userId: string) {
     await this.projectPermissionsService.assertProjectRole(projectId, userId, ['MANAGER']);
 
-    await this.prisma.task.updateMany({
-      where: { projectId },
-      data: { deletedAt: new Date() },
-    });
+    const deleted = await this.prisma.$transaction(async (tx) => {
+      await tx.task.updateMany({
+        where: { projectId },
+        data: { deletedAt: new Date() },
+      });
 
-    const deleted = await this.prisma.project.update({
-      where: { id: projectId },
-      data: { deletedAt: new Date() },
+      const saved = await tx.project.update({
+        where: { id: projectId },
+        data: { deletedAt: new Date() },
+      });
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'project',
+        entityId: saved.id,
+        workspaceId: saved.workspaceId ?? `personal-${saved.userId}`,
+        operation: 'delete',
+        payload: this.projectSyncPayload(saved),
+      });
+      return saved;
     });
 
     await this.projectPermissionsService.logAction(userId, 'PROJECT_DELETE', 'Project', projectId, {
@@ -304,6 +332,40 @@ export class ProjectsService {
     });
 
     return deleted;
+  }
+
+  private projectSyncPayload(project: {
+    id: string;
+    name: string;
+    description: string | null;
+    githubRepo: string | null;
+    status: string;
+    startDate: Date | null;
+    dueDate: Date | null;
+    userId: string;
+    workspaceId: string | null;
+    budgetCents: number | null;
+    billingType: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+    deletedAt: Date | null;
+  }) {
+    return {
+      id: project.id,
+      name: project.name,
+      description: project.description,
+      githubRepo: project.githubRepo,
+      status: project.status,
+      startDate: project.startDate?.toISOString() ?? null,
+      dueDate: project.dueDate?.toISOString() ?? null,
+      userId: project.userId,
+      workspaceId: project.workspaceId,
+      budgetCents: project.budgetCents,
+      billingType: project.billingType,
+      createdAt: project.createdAt.toISOString(),
+      updatedAt: project.updatedAt.toISOString(),
+      deletedAt: project.deletedAt?.toISOString() ?? null,
+    };
   }
 
   // ═══════════════════════════════════════════════════════════════════

@@ -10,6 +10,7 @@ import { MilestonesService } from '../../../src/projects/milestones.service';
 import { ResourcesService } from '../../../src/projects/resources.service';
 import { FinancesService } from '../../../src/projects/finances.service';
 import { ProjectPermissionsService } from '../../../src/projects/project-permissions.service';
+import { FirestoreSyncService } from '../../../src/firestore-sync/firestore-sync.service';
 import * as crypto from 'crypto';
 
 describe('ProjectsService - GitHub Webhooks', () => {
@@ -109,6 +110,7 @@ describe('ProjectsService - GitHub Webhooks', () => {
         { provide: ResourcesService, useValue: mockResourcesService },
         { provide: FinancesService, useValue: mockFinancesService },
         { provide: ProjectPermissionsService, useValue: mockProjectPermissionsService },
+        { provide: FirestoreSyncService, useValue: { enqueue: jest.fn() } },
       ],
     }).compile();
 

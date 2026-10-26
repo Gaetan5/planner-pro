@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { InvitationsService } from '../../../src/projects/invitations.service';
 import { PrismaService } from '../../../src/prisma/prisma.service';
 import { MailService } from '../../../src/mail/mail.service';
+import { FirestoreSyncService } from '../../../src/firestore-sync/firestore-sync.service';
 import { WorkspaceRole, InvitationStatus } from '@prisma/client';
 import * as crypto from 'crypto';
 
@@ -34,22 +35,31 @@ describe('InvitationsService', () => {
     user: {
       findUnique: jest.fn().mockResolvedValue({ name: 'Admin User', email: 'admin@test.com' }),
     },
-    $transaction: jest.fn((promises) => Promise.all(promises)),
+    $transaction: jest.fn(),
+  };
+
+  const mockFirestoreSync = {
+    enqueue: jest.fn().mockResolvedValue(undefined),
   };
 
   beforeEach(async () => {
+    jest.clearAllMocks();
+
+    mockPrisma.$transaction.mockImplementation(
+      (callback: (tx: typeof mockPrisma) => Promise<unknown>) => callback(mockPrisma),
+    );
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         InvitationsService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: MailService, useValue: mockMailService },
+        { provide: FirestoreSyncService, useValue: mockFirestoreSync },
       ],
     }).compile();
 
     service = module.get<InvitationsService>(InvitationsService);
     prisma = module.get<PrismaService>(PrismaService);
-
-    jest.clearAllMocks();
   });
 
   describe('createInvitation', () => {
@@ -83,6 +93,12 @@ describe('InvitationsService', () => {
         id: 'invite-id',
         email: 'guest@guest.com',
         role: WorkspaceRole.MEMBER,
+        workspaceId,
+        invitedById,
+        projectId: null,
+        status: InvitationStatus.PENDING,
+        expiresAt: new Date(),
+        createdAt: new Date(),
       });
 
       const result = await service.createInvitation(
@@ -130,7 +146,14 @@ describe('InvitationsService', () => {
 
       mockPrisma.invitation.update.mockResolvedValue({
         id: invitationId,
+        workspaceId: 'workspace-123',
         status: InvitationStatus.REVOKED,
+        role: WorkspaceRole.MEMBER,
+        invitedById: 'user-admin',
+        projectId: null,
+        email: 'guest@guest.com',
+        expiresAt: new Date(),
+        createdAt: new Date(),
       });
 
       const result = await service.revokeInvitation(invitationId, userId);
@@ -139,6 +162,15 @@ describe('InvitationsService', () => {
         where: { id: invitationId },
         data: { status: InvitationStatus.REVOKED },
       });
+      expect(mockFirestoreSync.enqueue).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          entityType: 'invitation',
+          entityId: invitationId,
+          workspaceId: 'workspace-123',
+          operation: 'upsert',
+        }),
+      );
     });
   });
 
@@ -160,8 +192,21 @@ describe('InvitationsService', () => {
 
       mockPrisma.invitation.findUnique.mockResolvedValue({
         id: 'invite-id',
+        workspaceId: 'workspace-123',
         status: InvitationStatus.PENDING,
         expiresAt: pastDate,
+      });
+
+      mockPrisma.invitation.update.mockResolvedValue({
+        id: 'invite-id',
+        workspaceId: 'workspace-123',
+        status: InvitationStatus.EXPIRED,
+        role: WorkspaceRole.MEMBER,
+        invitedById: 'user-admin',
+        projectId: null,
+        email: 'guest@guest.com',
+        expiresAt: pastDate,
+        createdAt: new Date(),
       });
 
       await expect(service.validateAndAcceptInvitation(rawToken, loggedUser)).rejects.toThrow(
@@ -172,6 +217,14 @@ describe('InvitationsService', () => {
         where: { id: 'invite-id' },
         data: { status: InvitationStatus.EXPIRED },
       });
+      expect(mockFirestoreSync.enqueue).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          entityType: 'invitation',
+          entityId: 'invite-id',
+          operation: 'upsert',
+        }),
+      );
     });
 
     it("devrait accepter l'invitation et créer un membership en BDD", async () => {
@@ -182,11 +235,31 @@ describe('InvitationsService', () => {
         id: 'invite-id',
         workspaceId: 'workspace-123',
         role: WorkspaceRole.MEMBER,
+        invitedById: 'user-admin',
         status: InvitationStatus.PENDING,
         expiresAt: futureDate,
       });
 
       mockPrisma.membership.findFirst.mockResolvedValue(null);
+      mockPrisma.membership.create.mockResolvedValue({
+        id: 'membership-1',
+        workspaceId: 'workspace-123',
+        userId: loggedUser.id,
+        role: WorkspaceRole.MEMBER,
+        createdAt: new Date(),
+      });
+      mockPrisma.invitation.update.mockResolvedValue({
+        id: 'invite-id',
+        workspaceId: 'workspace-123',
+        status: InvitationStatus.ACCEPTED,
+        role: WorkspaceRole.MEMBER,
+        invitedById: 'user-admin',
+        projectId: null,
+        email: 'guest@guest.com',
+        expiresAt: futureDate,
+        acceptedAt: new Date(),
+        createdAt: new Date(),
+      });
 
       const result = await service.validateAndAcceptInvitation(rawToken, loggedUser);
 
@@ -202,6 +275,22 @@ describe('InvitationsService', () => {
         where: { id: 'invite-id' },
         data: { status: InvitationStatus.ACCEPTED, acceptedAt: expect.any(Date) },
       });
+      expect(mockFirestoreSync.enqueue).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          entityType: 'membership',
+          entityId: 'membership-1',
+          operation: 'upsert',
+        }),
+      );
+      expect(mockFirestoreSync.enqueue).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          entityType: 'invitation',
+          entityId: 'invite-id',
+          operation: 'upsert',
+        }),
+      );
     });
   });
 });

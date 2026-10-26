@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
+import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
 import { AdminService } from './admin.service';
 
 describe('AdminService', () => {
@@ -15,11 +16,22 @@ describe('AdminService', () => {
     platformAuditLog: { findMany: jest.fn(), count: jest.fn() },
   };
   const redis = { ping: jest.fn() };
+  const firestoreSync = { getStatus: jest.fn() };
   let service: AdminService;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new AdminService(prisma as unknown as PrismaService, redis as unknown as RedisService);
+    service = new AdminService(
+      prisma as unknown as PrismaService,
+      redis as unknown as RedisService,
+      firestoreSync as unknown as FirestoreSyncService,
+    );
+    firestoreSync.getStatus.mockResolvedValue({
+      state: 'disabled',
+      pendingEvents: null,
+      retryingEvents: null,
+      oldestPendingAt: null,
+    });
   });
 
   it('returns only aggregated platform totals', async () => {
@@ -46,13 +58,39 @@ describe('AdminService', () => {
 
     expect(health).toMatchObject({
       status: 'degraded',
-      dependencies: { database: 'healthy', redis: 'unavailable' },
+      dependencies: {
+        database: 'healthy',
+        redis: 'unavailable',
+        firestoreSync: { state: 'disabled' },
+      },
     });
     expect(loggerSpy).toHaveBeenCalledWith(
       'La vérification de santé de redis a échoué.',
       expect.any(String),
     );
     loggerSpy.mockRestore();
+  });
+
+  it('degrades health when Firestore mirror events are retrying', async () => {
+    prisma.$queryRaw.mockResolvedValue([{ 1: 1 }]);
+    redis.ping.mockResolvedValue('PONG');
+    firestoreSync.getStatus.mockResolvedValue({
+      state: 'active',
+      pendingEvents: 2,
+      retryingEvents: 1,
+      oldestPendingAt: '2026-10-26T03:00:00.000Z',
+    });
+
+    await expect(service.getHealth()).resolves.toMatchObject({
+      status: 'degraded',
+      dependencies: {
+        firestoreSync: {
+          state: 'active',
+          pendingEvents: 2,
+          retryingEvents: 1,
+        },
+      },
+    });
   });
 
   it('returns a bounded activity page with its total count', async () => {

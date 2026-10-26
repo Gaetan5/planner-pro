@@ -7,6 +7,7 @@ import { UpdateTaskDto } from './dto/update-task.dto';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ProjectPermissionsService } from './project-permissions.service';
+import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
 
 export const TASK_INCLUDE = {
   assignees: {
@@ -24,6 +25,7 @@ export class TasksService {
     private readonly integrationService: IntegrationService,
     private readonly notificationsService: NotificationsService,
     private readonly projectPermissionsService: ProjectPermissionsService,
+    private readonly firestoreSync: FirestoreSyncService,
   ) {}
 
   parseTaskDates(data: CreateTaskDto | UpdateTaskDto) {
@@ -74,24 +76,41 @@ export class TasksService {
     const allowedUserIds = workspaceId ? await this.getAccessibleUserIds(workspaceId) : [];
     const uniqueAssigneeIds = [...new Set(assigneeIds)].filter((id) => allowedUserIds.includes(id));
 
-    const existingAssignees = await this.prisma.taskAssignee.findMany({
-      where: { taskId },
-      select: { userId: true },
-    });
-    const existingUserIds = existingAssignees.map((a) => a.userId);
-
-    await this.prisma.taskAssignee.deleteMany({ where: { taskId } });
-
-    if (uniqueAssigneeIds.length > 0) {
-      await this.prisma.taskAssignee.createMany({
-        data: uniqueAssigneeIds.map((userId) => ({ taskId, userId })),
-        skipDuplicates: true,
+    const { existingUserIds, task } = await this.prisma.$transaction(async (tx) => {
+      const existingAssignees = await tx.taskAssignee.findMany({
+        where: { taskId },
+        select: { userId: true },
       });
-    }
+      const existingUserIds = existingAssignees.map((assignee) => assignee.userId);
 
-    const task = await this.prisma.task.findUnique({
-      where: { id: taskId },
-      select: { title: true, projectId: true },
+      await tx.taskAssignee.deleteMany({ where: { taskId } });
+      if (uniqueAssigneeIds.length > 0) {
+        await tx.taskAssignee.createMany({
+          data: uniqueAssigneeIds.map((userId) => ({ taskId, userId })),
+          skipDuplicates: true,
+        });
+      }
+
+      const task = await tx.task.findUnique({
+        where: { id: taskId },
+        include: {
+          assignees: { select: { userId: true } },
+          project: { select: { workspaceId: true, userId: true } },
+        },
+      });
+      if (task) {
+        await this.firestoreSync.enqueue(tx, {
+          entityType: 'task',
+          entityId: task.id,
+          workspaceId: task.project.workspaceId ?? `personal-${task.project.userId}`,
+          operation: task.deletedAt ? 'delete' : 'upsert',
+          payload: this.taskSyncPayload(
+            task,
+            task.assignees.map((assignee) => assignee.userId),
+          ),
+        });
+      }
+      return { existingUserIds, task };
     });
 
     if (task && actingUserId) {
@@ -178,22 +197,32 @@ export class TasksService {
     ]);
 
     const dates = this.parseTaskDates(options);
-    const task = await this.prisma.task.create({
-      data: {
-        title,
-        description,
-        priority,
-        startDate: dates.startDate,
-        dueDate: dates.dueDate,
-        estimatedMinutes: options.estimatedMinutes,
-        progress: options.progress ?? 0,
-        labels: options.labels,
-        projectId,
-        userId,
-        storyPoints: options.storyPoints,
-        sprintId: options.sprintId,
-      },
-      include: TASK_INCLUDE,
+    const task = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.task.create({
+        data: {
+          title,
+          description,
+          priority,
+          startDate: dates.startDate,
+          dueDate: dates.dueDate,
+          estimatedMinutes: options.estimatedMinutes,
+          progress: options.progress ?? 0,
+          labels: options.labels,
+          projectId,
+          userId,
+          storyPoints: options.storyPoints,
+          sprintId: options.sprintId,
+        },
+        include: TASK_INCLUDE,
+      });
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'task',
+        entityId: created.id,
+        workspaceId: project.workspaceId ?? `personal-${project.userId}`,
+        operation: 'upsert',
+        payload: this.taskSyncPayload(created, []),
+      });
+      return created;
     });
 
     await this.replaceTaskAssignees(task.id, project.workspaceId, options.assigneeIds, userId);
@@ -277,6 +306,36 @@ export class TasksService {
         await this.propagateScheduleUpdates(taskId, newDue, visited, tx, impactedTaskIds);
       }
 
+      const workspaceId = task.project.workspaceId ?? `personal-${task.project.userId}`;
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'task',
+        entityId: updated.id,
+        workspaceId,
+        operation: updated.deletedAt ? 'delete' : 'upsert',
+        payload: this.taskSyncPayload(
+          updated,
+          updated.assignees.map((assignee) => assignee.userId),
+        ),
+      });
+      for (const impactedTaskId of impactedTaskIds) {
+        const impactedTask = await tx.task.findUnique({
+          where: { id: impactedTaskId },
+          include: { assignees: { select: { userId: true } } },
+        });
+        if (impactedTask) {
+          await this.firestoreSync.enqueue(tx, {
+            entityType: 'task',
+            entityId: impactedTask.id,
+            workspaceId,
+            operation: impactedTask.deletedAt ? 'delete' : 'upsert',
+            payload: this.taskSyncPayload(
+              impactedTask,
+              impactedTask.assignees.map((assignee) => assignee.userId),
+            ),
+          });
+        }
+      }
+
       return updated;
     });
 
@@ -320,9 +379,23 @@ export class TasksService {
       'CONTRIBUTOR',
     ]);
 
-    const deleted = await this.prisma.task.update({
-      where: { id: taskId },
-      data: { deletedAt: new Date() },
+    const deleted = await this.prisma.$transaction(async (tx) => {
+      const saved = await tx.task.update({
+        where: { id: taskId },
+        data: { deletedAt: new Date() },
+        include: { assignees: { select: { userId: true } } },
+      });
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'task',
+        entityId: saved.id,
+        workspaceId: task.project.workspaceId ?? `personal-${task.project.userId}`,
+        operation: 'delete',
+        payload: this.taskSyncPayload(
+          saved,
+          saved.assignees.map((assignee) => assignee.userId),
+        ),
+      });
+      return saved;
     });
 
     await this.projectPermissionsService.logAction(userId, 'TASK_DELETE', 'Task', taskId, {
@@ -330,6 +403,50 @@ export class TasksService {
     });
 
     return deleted;
+  }
+
+  private taskSyncPayload(
+    task: {
+      id: string;
+      projectId: string;
+      title: string;
+      description: string | null;
+      priority: string;
+      status: string;
+      startDate: Date | null;
+      dueDate: Date | null;
+      estimatedMinutes: number | null;
+      progress: number;
+      labels: string | null;
+      storyPoints: number | null;
+      sprintId: string | null;
+      userId: string;
+      createdAt: Date;
+      updatedAt: Date;
+      deletedAt: Date | null;
+    },
+    assigneeIds: string[],
+  ) {
+    return {
+      id: task.id,
+      projectId: task.projectId,
+      title: task.title,
+      description: task.description,
+      priority: task.priority,
+      status: task.status,
+      startDate: task.startDate?.toISOString() ?? null,
+      dueDate: task.dueDate?.toISOString() ?? null,
+      estimatedMinutes: task.estimatedMinutes,
+      progress: task.progress,
+      labels: task.labels,
+      storyPoints: task.storyPoints,
+      sprintId: task.sprintId,
+      userId: task.userId,
+      assigneeIds,
+      createdAt: task.createdAt.toISOString(),
+      updatedAt: task.updatedAt.toISOString(),
+      deletedAt: task.deletedAt?.toISOString() ?? null,
+    };
   }
 
   /**

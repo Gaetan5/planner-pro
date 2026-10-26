@@ -1,9 +1,13 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
 
 @Injectable()
 export class TrackingService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly firestoreSync: FirestoreSyncService,
+  ) {}
 
   async startTracking(userId: string, taskId: string) {
     // Vérifier si la tâche existe et si l'utilisateur y a accès
@@ -22,44 +26,100 @@ export class TrackingService {
     await this.stopActiveTracking(userId);
 
     // Créer la nouvelle session de tracking
-    return this.prisma.timeLog.create({
-      data: {
-        startTime: new Date(),
-        taskId,
-        userId,
-      },
-      include: {
-        task: true,
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const created = await tx.timeLog.create({
+        data: {
+          startTime: new Date(),
+          taskId,
+          userId,
+        },
+        include: {
+          task: {
+            include: { project: { select: { workspaceId: true, userId: true } } },
+          },
+        },
+      });
+
+      const workspaceId =
+        created.task?.project?.workspaceId ?? `personal-${created.task?.project?.userId ?? userId}`;
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'timeLog',
+        entityId: created.id,
+        workspaceId,
+        operation: 'upsert',
+        payload: this.timeLogSyncPayload(created),
+      });
+
+      return created;
     });
   }
 
   async stopActiveTracking(userId: string) {
-    // Trouver le log actif (où endTime est null) pour cet utilisateur
-    const activeLog = await this.prisma.timeLog.findFirst({
-      where: {
-        endTime: null,
-        OR: [{ userId }, { userId: null, task: { userId } }],
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const activeLog = await tx.timeLog.findFirst({
+        where: {
+          endTime: null,
+          OR: [{ userId }, { userId: null, task: { userId } }],
+        },
+        include: {
+          task: {
+            include: { project: { select: { workspaceId: true, userId: true } } },
+          },
+        },
+      });
+
+      if (!activeLog) {
+        return null;
+      }
+
+      const endTime = new Date();
+      const duration = Math.floor((endTime.getTime() - activeLog.startTime.getTime()) / 1000);
+
+      const updated = await tx.timeLog.update({
+        where: { id: activeLog.id },
+        data: {
+          endTime,
+          duration,
+        },
+        include: {
+          task: true,
+        },
+      });
+
+      const workspaceId =
+        activeLog.task?.project?.workspaceId ??
+        `personal-${activeLog.task?.project?.userId ?? userId}`;
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'timeLog',
+        entityId: updated.id,
+        workspaceId,
+        operation: 'upsert',
+        payload: this.timeLogSyncPayload(updated),
+      });
+
+      return updated;
     });
+  }
 
-    if (!activeLog) {
-      return null;
-    }
-
-    const endTime = new Date();
-    const duration = Math.floor((endTime.getTime() - activeLog.startTime.getTime()) / 1000);
-
-    return this.prisma.timeLog.update({
-      where: { id: activeLog.id },
-      data: {
-        endTime,
-        duration,
-      },
-      include: {
-        task: true,
-      },
-    });
+  private timeLogSyncPayload(log: {
+    id: string;
+    startTime?: Date | string | null;
+    endTime?: Date | string | null;
+    duration?: number | null;
+    taskId: string;
+    userId?: string | null;
+    createdAt?: Date | string | null;
+  }) {
+    const startTimeDate = log.startTime ? new Date(log.startTime) : new Date();
+    return {
+      id: log.id,
+      startTime: startTimeDate.toISOString(),
+      endTime: log.endTime ? new Date(log.endTime).toISOString() : null,
+      duration: log.duration ?? null,
+      taskId: log.taskId,
+      userId: log.userId ?? null,
+      createdAt: log.createdAt ? new Date(log.createdAt).toISOString() : new Date().toISOString(),
+    };
   }
 
   async getActiveTracking(userId: string) {

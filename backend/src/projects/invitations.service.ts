@@ -8,12 +8,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { WorkspaceRole, InvitationStatus } from '@prisma/client';
 import * as crypto from 'crypto';
 import { MailService } from '../mail/mail.service';
+import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
 
 @Injectable()
 export class InvitationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mailService: MailService,
+    private readonly firestoreSync: FirestoreSyncService,
   ) {}
 
   private hashToken(token: string): string {
@@ -67,16 +69,26 @@ export class InvitationsService {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + durationDays);
 
-    const invitation = await this.prisma.invitation.create({
-      data: {
-        email: email || null,
-        tokenHash,
-        role,
+    const invitation = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.invitation.create({
+        data: {
+          email: email || null,
+          tokenHash,
+          role,
+          workspaceId,
+          projectId: projectId || null,
+          invitedById,
+          expiresAt,
+        },
+      });
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'invitation',
+        entityId: created.id,
         workspaceId,
-        projectId: projectId || null,
-        invitedById,
-        expiresAt,
-      },
+        operation: 'upsert',
+        payload: this.invitationSyncPayload(created),
+      });
+      return created;
     });
 
     if (email) {
@@ -146,9 +158,19 @@ export class InvitationsService {
       throw new BadRequestException("Cette invitation n'est plus active.");
     }
 
-    return this.prisma.invitation.update({
-      where: { id: invitationId },
-      data: { status: InvitationStatus.REVOKED },
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.invitation.update({
+        where: { id: invitationId },
+        data: { status: InvitationStatus.REVOKED },
+      });
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'invitation',
+        entityId: updated.id,
+        workspaceId: invitation.workspaceId,
+        operation: 'upsert',
+        payload: this.invitationSyncPayload(updated),
+      });
+      return updated;
     });
   }
 
@@ -170,9 +192,18 @@ export class InvitationsService {
       throw new BadRequestException('Cette invitation a déjà été acceptée.');
     }
     if (new Date() > invitation.expiresAt) {
-      await this.prisma.invitation.update({
-        where: { id: invitation.id },
-        data: { status: InvitationStatus.EXPIRED },
+      await this.prisma.$transaction(async (tx) => {
+        const expired = await tx.invitation.update({
+          where: { id: invitation.id },
+          data: { status: InvitationStatus.EXPIRED },
+        });
+        await this.firestoreSync.enqueue(tx, {
+          entityType: 'invitation',
+          entityId: expired.id,
+          workspaceId: invitation.workspaceId,
+          operation: 'upsert',
+          payload: this.invitationSyncPayload(expired),
+        });
       });
       throw new BadRequestException("Ce lien d'invitation a expiré.");
     }
@@ -185,9 +216,18 @@ export class InvitationsService {
     });
 
     if (existingMembership) {
-      await this.prisma.invitation.update({
-        where: { id: invitation.id },
-        data: { status: InvitationStatus.ACCEPTED, acceptedAt: new Date() },
+      await this.prisma.$transaction(async (tx) => {
+        const accepted = await tx.invitation.update({
+          where: { id: invitation.id },
+          data: { status: InvitationStatus.ACCEPTED, acceptedAt: new Date() },
+        });
+        await this.firestoreSync.enqueue(tx, {
+          entityType: 'invitation',
+          entityId: accepted.id,
+          workspaceId: invitation.workspaceId,
+          operation: 'upsert',
+          payload: this.invitationSyncPayload(accepted),
+        });
       });
       return {
         workspaceId: invitation.workspaceId,
@@ -195,23 +235,73 @@ export class InvitationsService {
       };
     }
 
-    await this.prisma.$transaction([
-      this.prisma.membership.create({
+    await this.prisma.$transaction(async (tx) => {
+      const membership = await tx.membership.create({
         data: {
           workspaceId: invitation.workspaceId,
           userId: loggedUser.id,
           role: invitation.role,
         },
-      }),
-      this.prisma.invitation.update({
+      });
+      const accepted = await tx.invitation.update({
         where: { id: invitation.id },
         data: { status: InvitationStatus.ACCEPTED, acceptedAt: new Date() },
-      }),
-    ]);
+      });
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'membership',
+        entityId: membership.id,
+        workspaceId: invitation.workspaceId,
+        operation: 'upsert',
+        payload: {
+          id: membership.id,
+          workspaceId: membership.workspaceId,
+          userId: membership.userId,
+          role: membership.role,
+          createdAt: membership.createdAt
+            ? new Date(membership.createdAt).toISOString()
+            : new Date().toISOString(),
+        },
+      });
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'invitation',
+        entityId: accepted.id,
+        workspaceId: invitation.workspaceId,
+        operation: 'upsert',
+        payload: this.invitationSyncPayload(accepted),
+      });
+    });
 
     return {
       workspaceId: invitation.workspaceId,
       message: "Félicitations, vous avez rejoint l'espace de travail !",
+    };
+  }
+
+  private invitationSyncPayload(invitation: {
+    id: string;
+    email: string | null;
+    role: string;
+    workspaceId: string;
+    projectId: string | null;
+    invitedById: string;
+    status: string;
+    expiresAt: Date | string;
+    acceptedAt?: Date | string | null;
+    createdAt?: Date | string | null;
+  }) {
+    return {
+      id: invitation.id,
+      email: invitation.email,
+      role: invitation.role,
+      workspaceId: invitation.workspaceId,
+      projectId: invitation.projectId,
+      invitedById: invitation.invitedById,
+      status: invitation.status,
+      expiresAt: new Date(invitation.expiresAt).toISOString(),
+      acceptedAt: invitation.acceptedAt ? new Date(invitation.acceptedAt).toISOString() : null,
+      createdAt: invitation.createdAt
+        ? new Date(invitation.createdAt).toISOString()
+        : new Date().toISOString(),
     };
   }
 }

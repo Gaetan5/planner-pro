@@ -27,11 +27,21 @@ L'espace admin initial est volontairement en lecture seule : indicateurs agrég�
 seront ajoutées après la mise en place de leurs contrôles d'accès, d'audit et de
 révocation de session.
 
-## Firebase Auth en développement
+## Firebase Auth et synchronisation Firestore
 
-Firebase sert uniquement à vérifier l’identité. Les comptes Planner Pro, projets,
-tâches et autres données métier restent dans MySQL via Prisma ; Firestore n’est pas
-utilisé.
+Firebase Auth sert à vérifier l’identité. MySQL reste la source de vérité des données
+métier. La synchronisation Firestore est une étape de miroir optionnelle, désactivée
+par défaut, et couvre actuellement uniquement les mutations de projets et de tâches.
+Elle ne migre pas les données existantes, n’inclut pas les autres modèles métier et ne
+fournit pas encore de synchronisation hors ligne. Ne pas activer le flag comme une
+bascule de source de vérité.
+
+Les règles `firestore.rules` refusent actuellement tous les accès directs depuis les
+clients. Le worker serveur utilise le compte de service Firebase Admin, qui contourne
+les règles Firestore. Ce refus est volontaire tant qu’une stratégie complète
+d’autorisation par espace et une liaison vérifiée entre les utilisateurs Planner Pro et
+les UID Firebase ne sont pas déployées. Ne pas ouvrir les règles pour débloquer un test
+client.
 
 1. Dans Firebase Console, créer une application Web, activer le fournisseur
    e-mail/mot de passe et autoriser `localhost`.
@@ -43,7 +53,13 @@ utilisé.
    `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL` et `FIREBASE_PRIVATE_KEY` dans
    `backend/.env` ou dans l’environnement du backend. La clé privée reste côté
    serveur ; dans un fichier `.env`, représenter ses sauts de ligne avec `\n`.
-4. Mettre à jour le schéma local puis démarrer le backend et le frontend. Le Compose de
+4. Pour tester le miroir en préproduction uniquement, appliquer la migration outbox,
+   vérifier la configuration Admin et définir `FIRESTORE_SYNC_ENABLED=true`. Les
+   erreurs de connexion au démarrage sont explicites ; les échecs d’écriture sont
+   conservés dans l’outbox avec reprise exponentielle. Contrôler cette file et comparer
+   les documents avant toute extension de périmètre. Laisser la valeur à `false` en
+   production jusque-là.
+5. Mettre à jour le schéma local puis démarrer le backend et le frontend. Le Compose de
    développement applique le modèle Prisma avec `prisma db push`; en production,
    utiliser uniquement la migration versionnée avec `prisma migrate deploy`. Les
    nouveaux comptes doivent confirmer leur adresse e-mail avant d’accéder à Planner

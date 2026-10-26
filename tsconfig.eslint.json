@@ -12,13 +12,6 @@
     "skipLibCheck": true,
     "types": ["node", "jest"]
   },
-  "include": [
-    "backend/src/**/*.ts",
-    "backend/tests/**/*.ts"
-  ],
-  "exclude": [
-    "node_modules",
-    "backend/dist",
-    "frontend/dist"
-  ]
+  "include": ["backend/src/**/*.ts", "backend/tests/**/*.ts", "backend/*.ts"],
+  "exclude": ["node_modules", "backend/dist", "frontend/dist"]
 }

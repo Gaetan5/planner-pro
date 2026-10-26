@@ -13,6 +13,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { MailModule } from './mail/mail.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AdminModule } from './admin/admin.module';
+import { FirestoreSyncModule } from './firestore-sync/firestore-sync.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { AdminModule } from './admin/admin.module';
     NotificationsModule,
     MailModule,
     AdminModule,
+    FirestoreSyncModule,
   ],
   controllers: [AppController],
   providers: [

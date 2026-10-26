@@ -98,6 +98,25 @@ model AuditLog {
   @@index([userId])
 }
 
+model FirestoreSyncOutbox {
+  id            String    @id @default(uuid())
+  sequence      Int       @unique @default(autoincrement())
+  entityType    String
+  entityId      String
+  workspaceId   String
+  operation     String
+  payload       Json
+  createdAt     DateTime  @default(now())
+  processedAt   DateTime?
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now())
+  claimedAt     DateTime?
+  lastError     String?   @db.Text
+
+  @@index([processedAt, nextAttemptAt, sequence])
+  @@index([entityType, entityId, sequence])
+}
+
 model Note {
   id        String    @id @default(uuid())
   title     String

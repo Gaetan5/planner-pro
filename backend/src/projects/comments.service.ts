@@ -4,9 +4,24 @@ import {
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { IntegrationService } from './integration.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
+
+export type CommentWithRelations = Prisma.CommentGetPayload<{
+  include: {
+    user: {
+      select: { id: true; name: true; email: true };
+    };
+    attachments: true;
+  };
+}>;
+
+export type CommentWithReplies = CommentWithRelations & {
+  replies: CommentWithReplies[];
+};
 
 @Injectable()
 export class CommentsService {
@@ -14,6 +29,7 @@ export class CommentsService {
     private readonly prisma: PrismaService,
     private readonly integrationService: IntegrationService,
     private readonly notificationsService: NotificationsService,
+    private readonly firestoreSync: FirestoreSyncService,
   ) {}
 
   private async assertWorkspaceAccess(workspaceId: string, userId: string) {
@@ -64,26 +80,48 @@ export class CommentsService {
     }
 
     // Enregistrer le commentaire
-    const comment = await this.prisma.comment.create({
-      data: {
-        content,
-        taskId,
-        userId,
-        parentId,
-        attachments: attachments
-          ? {
-              createMany: {
-                data: attachments,
-              },
-            }
-          : undefined,
-      },
-      include: {
-        user: {
-          select: { id: true, name: true, email: true },
+    const comment = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.comment.create({
+        data: {
+          content,
+          taskId,
+          userId,
+          parentId,
+          attachments: attachments
+            ? {
+                createMany: {
+                  data: attachments,
+                },
+              }
+            : undefined,
         },
-        attachments: true,
-      },
+        include: {
+          user: {
+            select: { id: true, name: true, email: true },
+          },
+          attachments: true,
+        },
+      });
+
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'comment',
+        entityId: created.id,
+        workspaceId: task.project.workspaceId!,
+        operation: 'upsert',
+        payload: this.commentSyncPayload(created, task.projectId),
+      });
+
+      for (const att of created.attachments) {
+        await this.firestoreSync.enqueue(tx, {
+          entityType: 'attachment',
+          entityId: att.id,
+          workspaceId: task.project.workspaceId!,
+          operation: 'upsert',
+          payload: this.attachmentSyncPayload(att, task.projectId),
+        });
+      }
+
+      return created;
     });
 
     // Détecter les mentions
@@ -146,14 +184,15 @@ export class CommentsService {
       orderBy: { createdAt: 'asc' },
     });
 
-    const commentMap = new Map<string, any>();
+    const commentMap = new Map<string, CommentWithReplies>();
     allDbComments.forEach((c) => {
       commentMap.set(c.id, { ...c, replies: [] });
     });
 
-    const roots: any[] = [];
+    const roots: CommentWithReplies[] = [];
     allDbComments.forEach((c) => {
       const mapped = commentMap.get(c.id);
+      if (!mapped) return;
       if (c.parentId) {
         const parent = commentMap.get(c.parentId);
         if (parent) {
@@ -201,8 +240,23 @@ export class CommentsService {
       }
     }
 
-    return this.prisma.comment.delete({
-      where: { id: commentId },
+    return this.prisma.$transaction(async (tx) => {
+      const deleted = await tx.comment.delete({
+        where: { id: commentId },
+      });
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'comment',
+        entityId: commentId,
+        workspaceId,
+        operation: 'delete',
+        payload: {
+          id: commentId,
+          taskId: comment.taskId,
+          projectId: comment.task.projectId,
+          deletedAt: new Date().toISOString(),
+        },
+      });
+      return deleted;
     });
   }
 
@@ -213,7 +267,7 @@ export class CommentsService {
         task: {
           include: {
             project: {
-              select: { workspaceId: true },
+              select: { workspaceId: true, id: true },
             },
           },
         },
@@ -234,14 +288,24 @@ export class CommentsService {
       throw new ForbiddenException("Vous n'êtes pas autorisé à modifier ce commentaire.");
     }
 
-    const updatedComment = await this.prisma.comment.update({
-      where: { id: commentId },
-      data: { content },
-      include: {
-        user: {
-          select: { id: true, name: true, email: true },
+    const updatedComment = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.comment.update({
+        where: { id: commentId },
+        data: { content },
+        include: {
+          user: {
+            select: { id: true, name: true, email: true },
+          },
         },
-      },
+      });
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'comment',
+        entityId: updated.id,
+        workspaceId,
+        operation: 'upsert',
+        payload: this.commentSyncPayload(updated, comment.task.projectId),
+      });
+      return updated;
     });
 
     // Détecter de nouvelles mentions dans le contenu modifié
@@ -319,14 +383,24 @@ export class CommentsService {
     }
     await this.assertWorkspaceAccess(task.project.workspaceId, userId);
 
-    return this.prisma.attachment.create({
-      data: {
-        fileName,
-        fileUrl,
-        fileType,
-        fileSize,
-        taskId,
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const created = await tx.attachment.create({
+        data: {
+          fileName,
+          fileUrl,
+          fileType,
+          fileSize,
+          taskId,
+        },
+      });
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'attachment',
+        entityId: created.id,
+        workspaceId: task.project.workspaceId!,
+        operation: 'upsert',
+        payload: this.attachmentSyncPayload(created, task.projectId),
+      });
+      return created;
     });
   }
 
@@ -373,12 +447,76 @@ export class CommentsService {
     }
 
     await this.assertWorkspaceAccess(workspaceId, userId);
-    // Autoriser le créateur/admin/owner
-    // Pour simplifier, permettons à tout membre d'écrire/supprimer s'il est ADMIN/OWNER, ou si l'utilisateur y a accès (puisqu'il a accès au workspace).
-    // Mais restreignons pour la sécurité : ADMIN, OWNER, ou n'importe quel membre du projet si on ne stocke pas le créateur de l'attachment
-    // (Puisque l'attachment n'a pas de userId, tout membre autorisé du workspace peut le supprimer, ce qui est standard pour les fichiers partagés de projet).
-    return this.prisma.attachment.delete({
-      where: { id: attachmentId },
+
+    return this.prisma.$transaction(async (tx) => {
+      const deleted = await tx.attachment.delete({
+        where: { id: attachmentId },
+      });
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'attachment',
+        entityId: attachmentId,
+        workspaceId,
+        operation: 'delete',
+        payload: {
+          id: attachmentId,
+          taskId: attachment.taskId,
+          deletedAt: new Date().toISOString(),
+        },
+      });
+      return deleted;
     });
+  }
+
+  private commentSyncPayload(
+    comment: {
+      id: string;
+      content: string;
+      taskId: string;
+      userId: string;
+      parentId?: string | null;
+      createdAt?: Date | string | null;
+      updatedAt?: Date | string | null;
+    },
+    projectId: string,
+  ) {
+    const createdAtDate = comment.createdAt ? new Date(comment.createdAt) : new Date();
+    const updatedAtDate = comment.updatedAt ? new Date(comment.updatedAt) : createdAtDate;
+    return {
+      id: comment.id,
+      content: comment.content,
+      taskId: comment.taskId,
+      projectId,
+      userId: comment.userId,
+      parentId: comment.parentId ?? null,
+      createdAt: createdAtDate.toISOString(),
+      updatedAt: updatedAtDate.toISOString(),
+    };
+  }
+
+  private attachmentSyncPayload(
+    attachment: {
+      id: string;
+      fileName: string;
+      fileUrl: string;
+      fileType: string;
+      fileSize: number;
+      taskId?: string | null;
+      commentId?: string | null;
+      createdAt?: Date | string | null;
+    },
+    projectId: string,
+  ) {
+    const createdAtDate = attachment.createdAt ? new Date(attachment.createdAt) : new Date();
+    return {
+      id: attachment.id,
+      fileName: attachment.fileName,
+      fileUrl: attachment.fileUrl,
+      fileType: attachment.fileType,
+      fileSize: attachment.fileSize,
+      taskId: attachment.taskId ?? null,
+      commentId: attachment.commentId ?? null,
+      projectId,
+      createdAt: createdAtDate.toISOString(),
+    };
   }
 }

@@ -4,6 +4,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotesService } from './notes.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
+import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
 
 import { GeminiService } from './gemini.service';
 
@@ -16,11 +17,13 @@ describe('NotesService', () => {
   };
 
   const mockPrisma = {
+    $transaction: jest.fn(),
     note: {
       create: jest.fn(),
       update: jest.fn(),
       findFirst: jest.fn(),
       findUnique: jest.fn(),
+      findMany: jest.fn(),
     },
     task: {
       create: jest.fn(),
@@ -49,13 +52,22 @@ describe('NotesService', () => {
     del: jest.fn(),
   };
 
+  const mockFirestoreSync = {
+    enqueue: jest.fn().mockResolvedValue(undefined),
+  };
+
   beforeEach(async () => {
+    mockPrisma.$transaction.mockImplementation((callback: (tx: typeof mockPrisma) => unknown) =>
+      callback(mockPrisma),
+    );
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         NotesService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: RedisService, useValue: mockRedis },
         { provide: GeminiService, useValue: mockGemini },
+        { provide: FirestoreSyncService, useValue: mockFirestoreSync },
       ],
     }).compile();
 
@@ -95,6 +107,16 @@ describe('NotesService', () => {
             userId,
             noteId,
           }),
+        }),
+      );
+
+      expect(mockFirestoreSync.enqueue).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          entityType: 'note',
+          entityId: noteId,
+          workspaceId: `personal-${userId}`,
+          operation: 'upsert',
         }),
       );
 

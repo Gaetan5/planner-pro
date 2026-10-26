@@ -33,7 +33,16 @@ describe('AdminConsole', () => {
         json: async () => ({
           status: 'healthy',
           checkedAt: '2026-11-07T12:00:00.000Z',
-          dependencies: { database: 'healthy', redis: 'healthy' },
+          dependencies: {
+            database: 'healthy',
+            redis: 'healthy',
+            firestoreSync: {
+              state: 'disabled',
+              pendingEvents: null,
+              retryingEvents: null,
+              oldestPendingAt: null,
+            },
+          },
         }),
       } as Response)
       .mockResolvedValueOnce({
@@ -61,6 +70,8 @@ describe('AdminConsole', () => {
     });
     expect(screen.getByText('8')).toBeInTheDocument();
     expect(screen.getAllByText('Opérationnel')).toHaveLength(2);
+    expect(screen.getByText('Miroir Firestore')).toBeInTheDocument();
+    expect(screen.getByText('Désactivé')).toBeInTheDocument();
     expect(screen.getByText('admin@example.com')).toBeInTheDocument();
     expect(global.fetch).toHaveBeenCalledTimes(3);
     expect(global.fetch).toHaveBeenCalledWith(
