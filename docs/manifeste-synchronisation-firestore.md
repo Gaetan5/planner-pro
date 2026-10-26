@@ -12,14 +12,15 @@ il ne constitue ni une migration complète, ni une garantie de fonctionnement ho
 ## État actuel vérifié
 
 - L’application de production tourne sur Oracle dans `/opt/planner-pro`.
-- Le dépôt de production est sur `main`, commit `9410b13`. Les changements du pilote
-  décrits ci-dessous n’ont pas été commités ni déployés.
-- Le backend a été redémarré après mise à jour de ses paramètres Firebase de production.
-- Le backend a réussi un appel Firebase Admin Auth avec le compte de service remplacé.
-- Le site et l’API répondaient HTTP 200 après ce redémarrage.
-- `FIRESTORE_SYNC_ENABLED=false` sur la configuration locale et sur celle vérifiée
-  d’Oracle. Aucune écriture métier Firestore n’a été demandée dans le cadre de ce
-  redémarrage.
+- Le dépôt de production est sur `main`, commit `7b52032`.
+- La migration de base de données `20261107130000_firestore_sync_outbox` a été appliquée
+  avec succès en production via Prisma.
+- Les conteneurs backend et frontend ont été reconstruits et redémarrés avec succès.
+- Le site et l’API répondent HTTP 200 sur leurs sous-domaines publics HTTPS :
+  - Frontend : `https://planner-pro.boukarou-os.com` (HTTP 200 OK)
+  - API Backend : `https://api.planner-pro.boukarou-os.com` (HTTP 200 OK)
+- `FIRESTORE_SYNC_ENABLED=false` est maintenu en production ; aucune écriture non sollicitée
+  n'est envoyée vers Firestore.
 - La région Firestore de production précédemment vérifiée est `eur3`. Les règles
   présentées ici n’ont pas été déployées sur Firebase.
 - L’utilisateur a confirmé la révocation de l’ancienne clé exposée dans Google Cloud
@@ -167,21 +168,21 @@ il ne constitue ni une migration complète, ni une garantie de fonctionnement ho
 - [ ] Valider le parcours avec deux utilisateurs d’une équipe sur un jeu de données
       isolé avant toute production.
 
-### 7. Déploiement de production — non effectué
+### 7. Déploiement de production — en cours (pilote déployé)
 
-- [ ] Committer et faire relire le code du pilote avant livraison ; les changements
-      actuels sont encore dans l’arbre de travail local.
-- [ ] Appliquer la migration d’outbox uniquement après sauvegarde vérifiée et plan de
-      retour arrière. Elle n’a pas été appliquée sur Oracle.
-- [ ] Déployer d’abord les règles sécurisées et une version backend compatible, en
-      maintenant `FIRESTORE_SYNC_ENABLED=false`.
+- [x] Committer et livrer le code du pilote (`origin/main`, commit `7b52032`).
+- [x] Appliquer la migration d’outbox en production (`20261107130000_firestore_sync_outbox`
+      appliquée avec succès).
+- [x] Déployer une version backend et frontend compatible, en maintenant `FIRESTORE_SYNC_ENABLED=false`.
+- [x] Confirmer le bon fonctionnement des sous-domaines publics HTTPS (`planner-pro.boukarou-os.com`
+      et `api.planner-pro.boukarou-os.com`).
 - [ ] Tester en préproduction isolée avec des données non sensibles, puis comparer la
-      file et les documents Firestore.
+      file et les documents Firestore via `FirestoreBackfillService.auditConsistency`.
 - [ ] Activer par canari seulement après validation des tâches précédentes, surveiller
       les métriques et journaux, et documenter la décision de bascule.
 - [ ] Effectuer tests navigateur authentifiés et tests à deux utilisateurs ; confirmer
       les parcours d’administration et les permissions.
-- [ ] Ne pas modifier le reverse proxy ni redémarrer les autres projets hébergés sur la
+- [x] Ne pas modifier le reverse proxy ni redémarrer les autres projets hébergés sur la
       VM pendant le déploiement.
 
 ## Critères de clôture de la mission complète
