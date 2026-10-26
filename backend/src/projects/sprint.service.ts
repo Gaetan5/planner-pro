@@ -8,10 +8,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SprintStatus, Sprint, Prisma } from '@prisma/client';
 import { CreateSprintDto } from './dto/create-sprint.dto';
 import { UpdateSprintDto } from './dto/update-sprint.dto';
+import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
 
 @Injectable()
 export class SprintService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly firestoreSync: FirestoreSyncService,
+  ) {}
 
   private async assertWorkspaceMember(workspaceId: string, userId: string) {
     const membership = await this.prisma.membership.findFirst({
@@ -40,14 +44,24 @@ export class SprintService {
       );
     }
 
-    return this.prisma.sprint.create({
-      data: {
-        name: data.name,
-        startDate: start,
-        endDate: end,
-        status: data.status || SprintStatus.PLANNED,
+    return this.prisma.$transaction(async (tx) => {
+      const created = await tx.sprint.create({
+        data: {
+          name: data.name,
+          startDate: start,
+          endDate: end,
+          status: data.status || SprintStatus.PLANNED,
+          workspaceId,
+        },
+      });
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'sprint',
+        entityId: created.id,
         workspaceId,
-      },
+        operation: 'upsert',
+        payload: this.sprintSyncPayload(created),
+      });
+      return created;
     });
   }
 
@@ -77,28 +91,40 @@ export class SprintService {
       );
     }
 
-    if (data.status !== undefined) {
-      updateData.status = data.status;
+    return this.prisma.$transaction(async (tx) => {
+      if (data.status !== undefined) {
+        updateData.status = data.status;
 
-      // Logique de transition intelligente si le sprint est clôturé (COMPLETED)
-      if (data.status === SprintStatus.COMPLETED && sprint.status !== SprintStatus.COMPLETED) {
-        // Déplacer toutes les tâches non terminées de ce sprint vers le backlog (sprintId = null)
-        await this.prisma.task.updateMany({
-          where: {
-            sprintId,
-            status: { not: 'DONE' },
-            deletedAt: null,
-          },
-          data: {
-            sprintId: null,
-          },
-        });
+        // Logique de transition intelligente si le sprint est clôturé (COMPLETED)
+        if (data.status === SprintStatus.COMPLETED && sprint.status !== SprintStatus.COMPLETED) {
+          // Déplacer toutes les tâches non terminées de ce sprint vers le backlog (sprintId = null)
+          await tx.task.updateMany({
+            where: {
+              sprintId,
+              status: { not: 'DONE' },
+              deletedAt: null,
+            },
+            data: {
+              sprintId: null,
+            },
+          });
+        }
       }
-    }
 
-    return this.prisma.sprint.update({
-      where: { id: sprintId },
-      data: updateData,
+      const updated = await tx.sprint.update({
+        where: { id: sprintId },
+        data: updateData,
+      });
+
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'sprint',
+        entityId: updated.id,
+        workspaceId: sprint.workspaceId,
+        operation: 'upsert',
+        payload: this.sprintSyncPayload(updated),
+      });
+
+      return updated;
     });
   }
 
@@ -113,14 +139,30 @@ export class SprintService {
 
     await this.assertWorkspaceMember(sprint.workspaceId, userId);
 
-    // Mettre à null le sprintId des tâches liées avant de supprimer
-    await this.prisma.task.updateMany({
-      where: { sprintId },
-      data: { sprintId: null },
-    });
+    return this.prisma.$transaction(async (tx) => {
+      // Mettre à null le sprintId des tâches liées avant de supprimer
+      await tx.task.updateMany({
+        where: { sprintId },
+        data: { sprintId: null },
+      });
 
-    return this.prisma.sprint.delete({
-      where: { id: sprintId },
+      const deleted = await tx.sprint.delete({
+        where: { id: sprintId },
+      });
+
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'sprint',
+        entityId: sprintId,
+        workspaceId: sprint.workspaceId,
+        operation: 'delete',
+        payload: {
+          id: sprintId,
+          workspaceId: sprint.workspaceId,
+          deletedAt: new Date().toISOString(),
+        },
+      });
+
+      return deleted;
     });
   }
 
@@ -182,15 +224,66 @@ export class SprintService {
       }
     }
 
-    await this.prisma.task.updateMany({
-      where: {
-        id: { in: taskIds },
-        deletedAt: null,
-      },
-      data: {
-        sprintId,
-      },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.task.updateMany({
+        where: {
+          id: { in: taskIds },
+          deletedAt: null,
+        },
+        data: {
+          sprintId,
+        },
+      });
+
+      if (taskIds.length > 0) {
+        const tasks =
+          (await tx.task.findMany({
+            where: { id: { in: taskIds }, deletedAt: null },
+            include: { project: { select: { workspaceId: true, userId: true } } },
+          })) ?? [];
+        for (const t of tasks) {
+          const wId = t.project?.workspaceId ?? `personal-${t.project?.userId}`;
+          await this.firestoreSync.enqueue(tx, {
+            entityType: 'task',
+            entityId: t.id,
+            workspaceId: wId,
+            operation: 'upsert',
+            payload: {
+              id: t.id,
+              projectId: t.projectId,
+              sprintId: t.sprintId,
+              updatedAt: new Date().toISOString(),
+            },
+          });
+        }
+      }
     });
+  }
+
+  private sprintSyncPayload(sprint: {
+    id: string;
+    name: string;
+    startDate: Date | string;
+    endDate: Date | string;
+    status: string;
+    workspaceId: string;
+    createdAt?: Date | string | null;
+    updatedAt?: Date | string | null;
+  }) {
+    return {
+      id: sprint.id,
+      name: sprint.name,
+      startDate: new Date(sprint.startDate).toISOString(),
+      endDate: new Date(sprint.endDate).toISOString(),
+      status: sprint.status,
+      workspaceId: sprint.workspaceId,
+      createdAt: sprint.createdAt
+        ? new Date(sprint.createdAt).toISOString()
+        : new Date().toISOString(),
+      updatedAt: sprint.updatedAt
+        ? new Date(sprint.updatedAt).toISOString()
+        : new Date().toISOString(),
+    };
   }
 
   async getAverageVelocity(workspaceId: string, userId: string): Promise<number> {

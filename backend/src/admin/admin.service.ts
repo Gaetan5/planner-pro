@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
+import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
 
 @Injectable()
 export class AdminService {
@@ -9,6 +10,7 @@ export class AdminService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
+    private readonly firestoreSync: FirestoreSyncService,
   ) {}
 
   async getOverview() {
@@ -27,19 +29,25 @@ export class AdminService {
   }
 
   async getHealth() {
-    const [database, redis] = await Promise.all([
+    const [database, redis, firestoreSync] = await Promise.all([
       this.checkDependency('database', async () => {
         await this.prisma.$queryRaw`SELECT 1`;
       }),
       this.checkDependency('redis', async () => {
         await this.redis.ping();
       }),
+      this.firestoreSync.getStatus(),
     ]);
 
     return {
-      status: database === 'healthy' && redis === 'healthy' ? 'healthy' : 'degraded',
+      status:
+        database === 'healthy' &&
+        redis === 'healthy' &&
+        !(firestoreSync.retryingEvents !== null && firestoreSync.retryingEvents > 0)
+          ? 'healthy'
+          : 'degraded',
       checkedAt: new Date().toISOString(),
-      dependencies: { database, redis },
+      dependencies: { database, redis, firestoreSync },
     };
   }
 

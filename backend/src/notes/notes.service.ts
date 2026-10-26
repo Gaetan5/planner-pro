@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
+import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
 import { randomUUID } from 'crypto';
 
 import { GeminiService } from './gemini.service';
@@ -12,6 +13,7 @@ export class NotesService {
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly gemini: GeminiService,
+    private readonly firestoreSync: FirestoreSyncService,
   ) {}
 
   private getCacheKey(userId: string): string {
@@ -45,12 +47,22 @@ export class NotesService {
   }
 
   async createNote(userId: string, title: string, content: string) {
-    const note = await this.prisma.note.create({
-      data: {
-        title,
-        content,
-        userId,
-      },
+    const note = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.note.create({
+        data: {
+          title,
+          content,
+          userId,
+        },
+      });
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'note',
+        entityId: created.id,
+        workspaceId: `personal-${userId}`,
+        operation: 'upsert',
+        payload: this.noteSyncPayload(created),
+      });
+      return created;
     });
 
     // Invalider le cache
@@ -70,12 +82,22 @@ export class NotesService {
       throw new NotFoundException('Note introuvable.');
     }
 
-    const note = await this.prisma.note.update({
-      where: { id: noteId },
-      data: {
-        title,
-        content,
-      },
+    const note = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.note.update({
+        where: { id: noteId },
+        data: {
+          title,
+          content,
+        },
+      });
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'note',
+        entityId: updated.id,
+        workspaceId: `personal-${userId}`,
+        operation: 'upsert',
+        payload: this.noteSyncPayload(updated),
+      });
+      return updated;
     });
 
     // Invalider le cache
@@ -139,19 +161,51 @@ export class NotesService {
     });
 
     if (note) {
-      await this.prisma.note.update({
-        where: { id: noteId },
-        data: { deletedAt: new Date() },
-      });
-      // Supprimer logiquement les tâches associées à la note
-      await this.prisma.task.updateMany({
-        where: { noteId },
-        data: { deletedAt: new Date() },
+      await this.prisma.$transaction(async (tx) => {
+        await tx.note.update({
+          where: { id: noteId },
+          data: { deletedAt: new Date() },
+        });
+        await tx.task.updateMany({
+          where: { noteId },
+          data: { deletedAt: new Date() },
+        });
+        await this.firestoreSync.enqueue(tx, {
+          entityType: 'note',
+          entityId: noteId,
+          workspaceId: `personal-${note.userId}`,
+          operation: 'delete',
+          payload: {
+            id: noteId,
+            userId: note.userId,
+            deletedAt: new Date().toISOString(),
+          },
+        });
       });
       // Invalider le cache de l'utilisateur
       await this.redis.del(this.getCacheKey(note.userId));
     }
     return note;
+  }
+
+  private noteSyncPayload(note: {
+    id: string;
+    title: string;
+    content: string;
+    userId: string;
+    createdAt?: Date | string | null;
+    updatedAt?: Date | string | null;
+    deletedAt?: Date | string | null;
+  }) {
+    return {
+      id: note.id,
+      title: note.title,
+      content: note.content,
+      userId: note.userId,
+      createdAt: note.createdAt ? new Date(note.createdAt).toISOString() : new Date().toISOString(),
+      updatedAt: note.updatedAt ? new Date(note.updatedAt).toISOString() : new Date().toISOString(),
+      deletedAt: note.deletedAt ? new Date(note.deletedAt).toISOString() : null,
+    };
   }
 
   /**

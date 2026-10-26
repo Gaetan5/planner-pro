@@ -1,18 +1,22 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { FinancesService } from '../../../src/projects/finances.service';
 import { MilestonesService } from '../../../src/projects/milestones.service';
+import { DependenciesService } from '../../../src/projects/dependencies.service';
 import { TimeBlocksService } from '../../../src/projects/timeblocks.service';
 import { PrismaService } from '../../../src/prisma/prisma.service';
 import { WorkspaceRole, DeliverableStatus } from '@prisma/client';
 import { ForbiddenException, BadRequestException } from '@nestjs/common';
+import { FirestoreSyncService } from '../../../src/firestore-sync/firestore-sync.service';
 
 describe('Projects Modular Subservices', () => {
   let financesService: FinancesService;
   let milestonesService: MilestonesService;
+  let dependenciesService: DependenciesService;
   let timeBlocksService: TimeBlocksService;
   let prisma: PrismaService;
 
   const mockPrisma = {
+    $transaction: jest.fn(),
     membership: {
       findFirst: jest.fn(),
     },
@@ -39,29 +43,45 @@ describe('Projects Modular Subservices', () => {
     },
     timeBlock: {
       create: jest.fn(),
+      findFirst: jest.fn(),
       findMany: jest.fn(),
+      findUniqueOrThrow: jest.fn(),
       update: jest.fn(),
+      delete: jest.fn(),
+    },
+    taskDependency: {
+      findMany: jest.fn(),
+      findFirst: jest.fn(),
+      create: jest.fn(),
       delete: jest.fn(),
     },
     task: {
       findFirst: jest.fn(),
+      findUniqueOrThrow: jest.fn(),
       findMany: jest.fn(),
       update: jest.fn(),
     },
   };
+  const mockFirestoreSync = { enqueue: jest.fn() };
 
   beforeEach(async () => {
+    mockPrisma.$transaction.mockImplementation((callback: (tx: typeof mockPrisma) => unknown) =>
+      callback(mockPrisma),
+    );
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         FinancesService,
         MilestonesService,
+        DependenciesService,
         TimeBlocksService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: FirestoreSyncService, useValue: mockFirestoreSync },
       ],
     }).compile();
 
     financesService = module.get<FinancesService>(FinancesService);
     milestonesService = module.get<MilestonesService>(MilestonesService);
+    dependenciesService = module.get<DependenciesService>(DependenciesService);
     timeBlocksService = module.get<TimeBlocksService>(TimeBlocksService);
     prisma = module.get<PrismaService>(PrismaService);
 
@@ -164,6 +184,7 @@ describe('Projects Modular Subservices', () => {
         id: 'mil-1',
         name: 'Jalon MVP',
         projectId: 'proj-1',
+        createdAt: new Date(),
       });
 
       const result = await milestonesService.createMilestone('proj-1', 'user-owner', 'Jalon MVP');
@@ -171,6 +192,15 @@ describe('Projects Modular Subservices', () => {
       expect(result).toBeDefined();
       expect(result.name).toBe('Jalon MVP');
       expect(mockPrisma.milestone.create).toHaveBeenCalled();
+      expect(mockFirestoreSync.enqueue).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          entityType: 'milestone',
+          entityId: 'mil-1',
+          workspaceId: 'workspace-1',
+          operation: 'upsert',
+        }),
+      );
     });
 
     it('devrait générer un rapport de livraison cohérent', async () => {
@@ -220,6 +250,11 @@ describe('Projects Modular Subservices', () => {
         startTime: new Date(),
         endTime: new Date(),
       });
+      mockPrisma.task.findUniqueOrThrow.mockResolvedValue({
+        userId: 'user-owner',
+        projectId: 'proj-1',
+        project: { workspaceId: 'workspace-1' },
+      });
 
       const start = new Date();
       const end = new Date(start.getTime() + 7200000);
@@ -228,6 +263,126 @@ describe('Projects Modular Subservices', () => {
       expect(result).toBeDefined();
       expect(result.id).toBe('tb-1');
       expect(mockPrisma.timeBlock.create).toHaveBeenCalled();
+      expect(mockFirestoreSync.enqueue).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          entityType: 'timeBlock',
+          workspaceId: 'workspace-1',
+          operation: 'upsert',
+        }),
+      );
+    });
+
+    it('devrait synchroniser les mises à jour et suppressions de blocs horaires', async () => {
+      mockPrisma.timeBlock.findFirst.mockResolvedValue({ id: 'tb-1' });
+      mockPrisma.timeBlock.update.mockResolvedValue({
+        id: 'tb-1',
+        taskId: 'task-1',
+        startTime: new Date('2026-10-01T09:00:00.000Z'),
+        endTime: new Date('2026-10-01T10:00:00.000Z'),
+      });
+      mockPrisma.task.findUniqueOrThrow.mockResolvedValue({
+        userId: 'user-owner',
+        projectId: 'proj-1',
+        project: { workspaceId: 'workspace-1' },
+      });
+
+      await timeBlocksService.updateTimeBlock(
+        'tb-1',
+        'user-member',
+        new Date('2026-10-01T09:00:00.000Z'),
+        new Date('2026-10-01T10:00:00.000Z'),
+      );
+
+      expect(mockFirestoreSync.enqueue).toHaveBeenLastCalledWith(
+        mockPrisma,
+        expect.objectContaining({ entityType: 'timeBlock', operation: 'upsert' }),
+      );
+
+      mockPrisma.timeBlock.findUniqueOrThrow.mockResolvedValue({
+        id: 'tb-1',
+        taskId: 'task-1',
+        startTime: new Date('2026-10-01T09:00:00.000Z'),
+        endTime: new Date('2026-10-01T10:00:00.000Z'),
+        task: {
+          userId: 'user-owner',
+          projectId: 'proj-1',
+          project: { workspaceId: 'workspace-1' },
+        },
+      });
+      mockPrisma.timeBlock.delete.mockResolvedValue({
+        id: 'tb-1',
+        taskId: 'task-1',
+        startTime: new Date('2026-10-01T09:00:00.000Z'),
+        endTime: new Date('2026-10-01T10:00:00.000Z'),
+      });
+
+      await timeBlocksService.deleteTimeBlock('tb-1', 'user-member');
+
+      expect(mockFirestoreSync.enqueue).toHaveBeenLastCalledWith(
+        mockPrisma,
+        expect.objectContaining({ entityType: 'timeBlock', operation: 'delete' }),
+      );
+    });
+  });
+
+  describe('DependenciesService', () => {
+    it('devrait écrire les créations et suppressions de dépendances dans l’outbox', async () => {
+      mockPrisma.task.findFirst.mockResolvedValue({
+        id: 'task-1',
+        userId: 'user-owner',
+        projectId: 'proj-1',
+        project: { workspaceId: 'workspace-1' },
+      });
+      mockPrisma.taskDependency.findMany.mockResolvedValue([]);
+      mockPrisma.taskDependency.create.mockResolvedValue({
+        id: 'dependency-1',
+        taskId: 'task-1',
+        dependsOnTaskId: 'task-2',
+        type: 'FINISH_TO_START',
+        createdAt: new Date('2026-10-01T09:00:00.000Z'),
+      });
+
+      await dependenciesService.addTaskDependency('task-1', 'user-member', 'task-2');
+
+      expect(mockFirestoreSync.enqueue).toHaveBeenLastCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          entityType: 'taskDependency',
+          workspaceId: 'workspace-1',
+          operation: 'upsert',
+        }),
+      );
+
+      mockPrisma.taskDependency.findFirst.mockResolvedValue({
+        id: 'dependency-1',
+        taskId: 'task-1',
+        dependsOnTaskId: 'task-2',
+      });
+      mockPrisma.taskDependency.delete.mockResolvedValue({
+        id: 'dependency-1',
+        taskId: 'task-1',
+        dependsOnTaskId: 'task-2',
+        type: 'FINISH_TO_START',
+        createdAt: new Date('2026-10-01T09:00:00.000Z'),
+      });
+      mockPrisma.task.findUniqueOrThrow.mockResolvedValue({
+        id: 'task-1',
+        userId: 'user-owner',
+        projectId: 'proj-1',
+        project: { workspaceId: 'workspace-1' },
+      });
+
+      await dependenciesService.removeTaskDependency('task-1', 'user-member', 'task-2');
+
+      expect(mockFirestoreSync.enqueue).toHaveBeenLastCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          entityType: 'taskDependency',
+          workspaceId: 'workspace-1',
+          operation: 'delete',
+        }),
+      );
     });
   });
 });

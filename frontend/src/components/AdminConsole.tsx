@@ -5,6 +5,7 @@ import {
   Bell,
   Boxes,
   CheckCircle2,
+  Cloud,
   Database,
   ListTodo,
   LoaderCircle,
@@ -34,6 +35,12 @@ interface Health {
   dependencies: {
     database: 'healthy' | 'unavailable';
     redis: 'healthy' | 'unavailable';
+    firestoreSync: {
+      state: 'active' | 'disabled';
+      pendingEvents: number | null;
+      retryingEvents: number | null;
+      oldestPendingAt: string | null;
+    };
   };
 }
 
@@ -201,10 +208,28 @@ export function AdminConsole() {
             );
           })}
         </div>
+        <div className="admin-console__sync-status">
+          <Cloud size={18} aria-hidden="true" />
+          <span>Miroir Firestore</span>
+          {health?.dependencies.firestoreSync.state === 'active' ? (
+            <strong>
+              Actif · {health.dependencies.firestoreSync.pendingEvents} en attente ·{' '}
+              {health.dependencies.firestoreSync.retryingEvents} en reprise
+            </strong>
+          ) : (
+            <strong>Désactivé</strong>
+          )}
+          {health?.dependencies.firestoreSync.oldestPendingAt && (
+            <small>
+              Événement en attente depuis{' '}
+              {formatDate(health.dependencies.firestoreSync.oldestPendingAt)} UTC
+            </small>
+          )}
+        </div>
         {health?.status === 'degraded' && (
           <p className="admin-console__health-note" role="status">
-            Une dépendance ne répond pas. Les détails techniques sont conservés dans les journaux
-            du serveur.
+            Une dépendance ne répond pas. Les détails techniques sont conservés dans les journaux du
+            serveur.
           </p>
         )}
       </section>

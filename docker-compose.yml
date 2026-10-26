@@ -41,6 +41,7 @@ services:
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
       FIREBASE_CLIENT_EMAIL: ${FIREBASE_CLIENT_EMAIL:-}
       FIREBASE_PRIVATE_KEY: ${FIREBASE_PRIVATE_KEY:-}
+      FIRESTORE_SYNC_ENABLED: ${FIRESTORE_SYNC_ENABLED:-false}
     extra_hosts:
       - 'host.docker.internal:host-gateway'
     volumes:

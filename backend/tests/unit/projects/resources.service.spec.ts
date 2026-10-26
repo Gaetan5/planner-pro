@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ResourcesService } from '../../../src/projects/resources.service';
 import { PrismaService } from '../../../src/prisma/prisma.service';
+import { FirestoreSyncService } from '../../../src/firestore-sync/firestore-sync.service';
 import { ForbiddenException, BadRequestException } from '@nestjs/common';
 import { WorkspaceRole } from '@prisma/client';
 
@@ -9,6 +10,7 @@ describe('ResourcesService', () => {
   let prisma: PrismaService;
 
   const mockPrisma = {
+    $transaction: jest.fn(),
     workspace: {
       create: jest.fn(),
     },
@@ -42,9 +44,21 @@ describe('ResourcesService', () => {
     },
   };
 
+  const mockFirestoreSync = {
+    enqueue: jest.fn().mockResolvedValue(undefined),
+  };
+
   beforeEach(async () => {
+    mockPrisma.$transaction.mockImplementation((callback: (tx: typeof mockPrisma) => unknown) =>
+      callback(mockPrisma),
+    );
+
     const module: TestingModule = await Test.createTestingModule({
-      providers: [ResourcesService, { provide: PrismaService, useValue: mockPrisma }],
+      providers: [
+        ResourcesService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: FirestoreSyncService, useValue: mockFirestoreSync },
+      ],
     }).compile();
 
     service = module.get<ResourcesService>(ResourcesService);
@@ -81,6 +95,15 @@ describe('ResourcesService', () => {
           reason: 'Vacances',
         },
       });
+      expect(mockFirestoreSync.enqueue).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          entityType: 'resourceLeave',
+          entityId: 'leave-1',
+          workspaceId: 'personal-user-1',
+          operation: 'upsert',
+        }),
+      );
     });
 
     it('devrait lever une erreur si la date de fin est antérieure à la date de début', async () => {
@@ -134,18 +157,20 @@ describe('ResourcesService', () => {
       const RealDate = global.Date;
       const mockDate = new RealDate('2026-06-15T09:00:00.000Z');
 
-      (global as any).Date = class extends RealDate {
-        constructor(...args: any[]) {
+      const MockDate = class extends RealDate {
+        constructor(...args: Array<string | number | Date>) {
           if (args.length > 0) {
-            super(args[0]);
+            super(args[0] as string | number);
           } else {
             super(mockDate.getTime());
           }
         }
-      };
-      (global as any).Date.now = () => mockDate.getTime();
-      (global as any).Date.UTC = RealDate.UTC;
-      (global as any).Date.parse = RealDate.parse;
+      } as unknown as DateConstructor;
+      MockDate.now = () => mockDate.getTime();
+      MockDate.UTC = RealDate.UTC;
+      MockDate.parse = RealDate.parse;
+
+      global.Date = MockDate;
 
       const report = await service.getResourceCapacityReport('user-1', 'workspace-1');
 

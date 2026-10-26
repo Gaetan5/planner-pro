@@ -1,10 +1,14 @@
 import { Injectable, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { WorkspaceRole, DeliverableStatus, DeliveryStatus, ProjectStatus } from '@prisma/client';
+import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
 
 @Injectable()
 export class MilestonesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly firestoreSync: FirestoreSyncService,
+  ) {}
 
   private async assertWorkspaceRole(
     workspaceId: string,
@@ -59,13 +63,23 @@ export class MilestonesService {
       WorkspaceRole.ADMIN,
     ]);
 
-    return this.prisma.milestone.create({
-      data: {
-        projectId,
-        name,
-        description,
-        dueDate: dueDate ? new Date(dueDate) : undefined,
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const created = await tx.milestone.create({
+        data: {
+          projectId,
+          name,
+          description,
+          dueDate: dueDate ? new Date(dueDate) : undefined,
+        },
+      });
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'milestone',
+        entityId: created.id,
+        workspaceId: project.workspaceId!,
+        operation: 'upsert',
+        payload: this.milestoneSyncPayload(created),
+      });
+      return created;
     });
   }
 
@@ -85,9 +99,19 @@ export class MilestonesService {
       WorkspaceRole.ADMIN,
     ]);
 
-    return this.prisma.milestone.update({
-      where: { id: milestoneId },
-      data: { completedAt: new Date() },
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.milestone.update({
+        where: { id: milestoneId },
+        data: { completedAt: new Date() },
+      });
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'milestone',
+        entityId: updated.id,
+        workspaceId: milestone.project.workspaceId!,
+        operation: 'upsert',
+        payload: this.milestoneSyncPayload(updated),
+      });
+      return updated;
     });
   }
 
@@ -110,14 +134,24 @@ export class MilestonesService {
       WorkspaceRole.ADMIN,
     ]);
 
-    return this.prisma.deliverable.create({
-      data: {
-        projectId,
-        title,
-        description,
-        status,
-        dueDate: dueDate ? new Date(dueDate) : undefined,
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const created = await tx.deliverable.create({
+        data: {
+          projectId,
+          title,
+          description,
+          status,
+          dueDate: dueDate ? new Date(dueDate) : undefined,
+        },
+      });
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'deliverable',
+        entityId: created.id,
+        workspaceId: project.workspaceId!,
+        operation: 'upsert',
+        payload: this.deliverableSyncPayload(created),
+      });
+      return created;
     });
   }
 
@@ -137,12 +171,22 @@ export class MilestonesService {
       WorkspaceRole.ADMIN,
     ]);
 
-    return this.prisma.deliverable.update({
-      where: { id: deliverableId },
-      data: {
-        status,
-        acceptedAt: status === DeliverableStatus.ACCEPTED ? new Date() : deliverable.acceptedAt,
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.deliverable.update({
+        where: { id: deliverableId },
+        data: {
+          status,
+          acceptedAt: status === DeliverableStatus.ACCEPTED ? new Date() : deliverable.acceptedAt,
+        },
+      });
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'deliverable',
+        entityId: updated.id,
+        workspaceId: deliverable.project.workspaceId!,
+        operation: 'upsert',
+        payload: this.deliverableSyncPayload(updated),
+      });
+      return updated;
     });
   }
 
@@ -163,15 +207,34 @@ export class MilestonesService {
       WorkspaceRole.ADMIN,
     ]);
 
-    return this.prisma.deliveryRecord.create({
-      data: {
-        projectId,
-        summary,
-        checklist: {
-          create: checklist.map((title) => ({ title })),
+    return this.prisma.$transaction(async (tx) => {
+      const created = await tx.deliveryRecord.create({
+        data: {
+          projectId,
+          summary,
+          checklist: {
+            create: checklist.map((title) => ({ title })),
+          },
         },
-      },
-      include: { checklist: true },
+        include: { checklist: true },
+      });
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'deliveryRecord',
+        entityId: created.id,
+        workspaceId: project.workspaceId!,
+        operation: 'upsert',
+        payload: this.deliveryRecordSyncPayload(created),
+      });
+      for (const item of created.checklist) {
+        await this.firestoreSync.enqueue(tx, {
+          entityType: 'deliveryChecklistItem',
+          entityId: item.id,
+          workspaceId: project.workspaceId!,
+          operation: 'upsert',
+          payload: this.deliveryChecklistItemSyncPayload(item, projectId),
+        });
+      }
+      return created;
     });
   }
 
@@ -192,24 +255,34 @@ export class MilestonesService {
     ]);
 
     const now = new Date();
-    const updated = await this.prisma.deliveryRecord.update({
-      where: { id: deliveryId },
-      data: {
-        status,
-        deliveredAt: status === DeliveryStatus.READY_FOR_ACCEPTANCE ? now : delivery.deliveredAt,
-        acceptedAt: status === DeliveryStatus.ACCEPTED ? now : delivery.acceptedAt,
-      },
-      include: { checklist: true },
-    });
-
-    if (status === DeliveryStatus.ACCEPTED) {
-      await this.prisma.project.update({
-        where: { id: delivery.projectId },
-        data: { status: ProjectStatus.DELIVERED },
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.deliveryRecord.update({
+        where: { id: deliveryId },
+        data: {
+          status,
+          deliveredAt: status === DeliveryStatus.READY_FOR_ACCEPTANCE ? now : delivery.deliveredAt,
+          acceptedAt: status === DeliveryStatus.ACCEPTED ? now : delivery.acceptedAt,
+        },
+        include: { checklist: true },
       });
-    }
 
-    return updated;
+      if (status === DeliveryStatus.ACCEPTED) {
+        await tx.project.update({
+          where: { id: delivery.projectId },
+          data: { status: ProjectStatus.DELIVERED },
+        });
+      }
+
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'deliveryRecord',
+        entityId: updated.id,
+        workspaceId: delivery.project.workspaceId!,
+        operation: 'upsert',
+        payload: this.deliveryRecordSyncPayload(updated),
+      });
+
+      return updated;
+    });
   }
 
   async toggleDeliveryChecklistItem(itemId: string, userId: string) {
@@ -231,10 +304,108 @@ export class MilestonesService {
       WorkspaceRole.MEMBER,
     ]);
 
-    return this.prisma.deliveryChecklistItem.update({
-      where: { id: itemId },
-      data: { checked: !item.checked },
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.deliveryChecklistItem.update({
+        where: { id: itemId },
+        data: { checked: !item.checked },
+      });
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'deliveryChecklistItem',
+        entityId: updated.id,
+        workspaceId: item.delivery.project.workspaceId!,
+        operation: 'upsert',
+        payload: this.deliveryChecklistItemSyncPayload(updated, item.delivery.projectId),
+      });
+      return updated;
     });
+  }
+
+  private milestoneSyncPayload(milestone: {
+    id: string;
+    projectId: string;
+    name: string;
+    description: string | null;
+    dueDate?: Date | string | null;
+    completedAt?: Date | string | null;
+    createdAt?: Date | string | null;
+  }) {
+    return {
+      id: milestone.id,
+      projectId: milestone.projectId,
+      name: milestone.name,
+      description: milestone.description,
+      dueDate: milestone.dueDate ? new Date(milestone.dueDate).toISOString() : null,
+      completedAt: milestone.completedAt ? new Date(milestone.completedAt).toISOString() : null,
+      createdAt: milestone.createdAt
+        ? new Date(milestone.createdAt).toISOString()
+        : new Date().toISOString(),
+    };
+  }
+
+  private deliverableSyncPayload(deliverable: {
+    id: string;
+    projectId: string;
+    title: string;
+    description: string | null;
+    status: string;
+    dueDate?: Date | string | null;
+    acceptedAt?: Date | string | null;
+    createdAt?: Date | string | null;
+  }) {
+    return {
+      id: deliverable.id,
+      projectId: deliverable.projectId,
+      title: deliverable.title,
+      description: deliverable.description,
+      status: deliverable.status,
+      dueDate: deliverable.dueDate ? new Date(deliverable.dueDate).toISOString() : null,
+      acceptedAt: deliverable.acceptedAt ? new Date(deliverable.acceptedAt).toISOString() : null,
+      createdAt: deliverable.createdAt
+        ? new Date(deliverable.createdAt).toISOString()
+        : new Date().toISOString(),
+    };
+  }
+
+  private deliveryRecordSyncPayload(delivery: {
+    id: string;
+    projectId: string;
+    summary: string | null;
+    status: string;
+    deliveredAt?: Date | string | null;
+    acceptedAt?: Date | string | null;
+    createdAt?: Date | string | null;
+  }) {
+    return {
+      id: delivery.id,
+      projectId: delivery.projectId,
+      summary: delivery.summary,
+      status: delivery.status,
+      deliveredAt: delivery.deliveredAt ? new Date(delivery.deliveredAt).toISOString() : null,
+      acceptedAt: delivery.acceptedAt ? new Date(delivery.acceptedAt).toISOString() : null,
+      createdAt: delivery.createdAt
+        ? new Date(delivery.createdAt).toISOString()
+        : new Date().toISOString(),
+    };
+  }
+
+  private deliveryChecklistItemSyncPayload(
+    item: {
+      id: string;
+      deliveryId: string;
+      title: string;
+      checked: boolean;
+      createdAt?: Date | string | null;
+    },
+    projectId: string,
+  ) {
+    return {
+      id: item.id,
+      deliveryId: item.deliveryId,
+      projectId,
+      title: item.title,
+      checked: item.checked,
+      createdAt: item.createdAt ? new Date(item.createdAt).toISOString() : new Date().toISOString(),
+    };
   }
 
   // ─── Delivery Report ──────────────────────────────────────────────

@@ -20,7 +20,7 @@ export class PlatformAdminGuard implements CanActivate {
     const userId = request.user?.id;
 
     if (!userId) {
-      throw new UnauthorizedException("Utilisateur authentifié introuvable.");
+      throw new UnauthorizedException('Utilisateur authentifié introuvable.');
     }
 
     const user = await this.prisma.user.findUnique({

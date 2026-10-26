@@ -1,10 +1,14 @@
 import { Injectable, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { WorkspaceRole } from '@prisma/client';
+import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
 
 @Injectable()
 export class ResourcesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly firestoreSync: FirestoreSyncService,
+  ) {}
 
   private async assertWorkspaceMember(workspaceId: string, userId: string) {
     const membership = await this.prisma.membership.findFirst({
@@ -400,13 +404,23 @@ export class ResourcesService {
       throw new BadRequestException('End date must be after start date');
     }
 
-    return this.prisma.resourceLeave.create({
-      data: {
-        userId,
-        startDate: start,
-        endDate: end,
-        reason,
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const created = await tx.resourceLeave.create({
+        data: {
+          userId,
+          startDate: start,
+          endDate: end,
+          reason,
+        },
+      });
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'resourceLeave',
+        entityId: created.id,
+        workspaceId: `personal-${userId}`,
+        operation: 'upsert',
+        payload: this.resourceLeaveSyncPayload(created),
+      });
+      return created;
     });
   }
 
@@ -458,9 +472,43 @@ export class ResourcesService {
       }
     }
 
-    return this.prisma.resourceLeave.delete({
-      where: { id: leaveId },
+    return this.prisma.$transaction(async (tx) => {
+      const deleted = await tx.resourceLeave.delete({
+        where: { id: leaveId },
+      });
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'resourceLeave',
+        entityId: leaveId,
+        workspaceId: `personal-${leave.userId}`,
+        operation: 'delete',
+        payload: {
+          id: leaveId,
+          userId: leave.userId,
+          deletedAt: new Date().toISOString(),
+        },
+      });
+      return deleted;
     });
+  }
+
+  private resourceLeaveSyncPayload(leave: {
+    id: string;
+    userId: string;
+    startDate: Date | string;
+    endDate: Date | string;
+    reason: string | null;
+    createdAt?: Date | string | null;
+  }) {
+    return {
+      id: leave.id,
+      userId: leave.userId,
+      startDate: new Date(leave.startDate).toISOString(),
+      endDate: new Date(leave.endDate).toISOString(),
+      reason: leave.reason,
+      createdAt: leave.createdAt
+        ? new Date(leave.createdAt).toISOString()
+        : new Date().toISOString(),
+    };
   }
 
   private getAdjustedCapacity(
@@ -468,7 +516,7 @@ export class ResourcesService {
     userId: string,
     windowStart: Date,
     windowEnd: Date,
-    leaves: any[],
+    leaves: Array<{ userId: string; startDate: Date | string; endDate: Date | string }>,
   ): number {
     let activeDays = 0;
     let workdayCount = 0;

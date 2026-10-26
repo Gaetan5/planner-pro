@@ -6,6 +6,7 @@ import { IntegrationService } from '../../../src/projects/integration.service';
 import { NotificationsService } from '../../../src/notifications/notifications.service';
 import { ProjectPermissionsService } from '../../../src/projects/project-permissions.service';
 import { BadRequestException } from '@nestjs/common';
+import { FirestoreSyncService } from '../../../src/firestore-sync/firestore-sync.service';
 
 describe('TasksService - Critical Path Method (CPM)', () => {
   let service: TasksService;
@@ -58,6 +59,7 @@ describe('TasksService - Critical Path Method (CPM)', () => {
         { provide: IntegrationService, useValue: mockIntegration },
         { provide: NotificationsService, useValue: mockNotifications },
         { provide: ProjectPermissionsService, useValue: mockPermissions },
+        { provide: FirestoreSyncService, useValue: { enqueue: jest.fn() } },
       ],
     }).compile();
 
@@ -179,9 +181,21 @@ describe('TasksService - Critical Path Method (CPM)', () => {
         id: 'task-1',
         projectId: 'project-1',
         title: 'Tâche Test',
+        description: null,
+        priority: 'MEDIUM',
         status: 'TODO',
         startDate: null,
         dueDate: null,
+        estimatedMinutes: null,
+        progress: 0,
+        labels: null,
+        storyPoints: null,
+        sprintId: null,
+        userId: 'user-1',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        deletedAt: null,
+        assignees: [],
         project: { workspaceId: 'ws-1', name: 'Projet 1' },
       };
 
@@ -213,9 +227,21 @@ describe('TasksService - Critical Path Method (CPM)', () => {
         id: 'task-2',
         projectId: 'project-1',
         title: 'Tâche Test 2',
+        description: null,
+        priority: 'MEDIUM',
         status: 'TODO',
         startDate: null,
         dueDate: null,
+        estimatedMinutes: null,
+        progress: 0,
+        labels: null,
+        storyPoints: null,
+        sprintId: null,
+        userId: 'user-1',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        deletedAt: null,
+        assignees: [],
         project: { workspaceId: 'ws-1', name: 'Projet 1' },
       };
 

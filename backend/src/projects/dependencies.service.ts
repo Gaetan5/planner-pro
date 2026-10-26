@@ -1,10 +1,14 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { DependencyType } from '@prisma/client';
+import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
 
 @Injectable()
 export class DependenciesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly firestoreSync: FirestoreSyncService,
+  ) {}
 
   private async hasPath(
     startTaskId: string,
@@ -59,6 +63,7 @@ export class DependenciesService {
           deletedAt: null,
           OR: [{ userId }, { project: { workspace: { memberships: { some: { userId } } } } }],
         },
+        include: { project: { select: { workspaceId: true } } },
       }),
       this.prisma.task.findFirst({
         where: {
@@ -66,6 +71,7 @@ export class DependenciesService {
           deletedAt: null,
           OR: [{ userId }, { project: { workspace: { memberships: { some: { userId } } } } }],
         },
+        include: { project: { select: { workspaceId: true } } },
       }),
     ]);
 
@@ -83,8 +89,25 @@ export class DependenciesService {
       );
     }
 
-    return this.prisma.taskDependency.create({
-      data: { taskId, dependsOnTaskId, type },
+    return this.prisma.$transaction(async (tx) => {
+      const created = await tx.taskDependency.create({
+        data: { taskId, dependsOnTaskId, type },
+      });
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'taskDependency',
+        entityId: created.id,
+        workspaceId: task.project?.workspaceId ?? `personal-${task.userId}`,
+        operation: 'upsert',
+        payload: {
+          id: created.id,
+          taskId: created.taskId,
+          dependsOnTaskId: created.dependsOnTaskId,
+          projectId: task.projectId,
+          type: created.type,
+          createdAt: created.createdAt.toISOString(),
+        },
+      });
+      return created;
     });
   }
 
@@ -103,6 +126,32 @@ export class DependenciesService {
       throw new Error('Dependency not found or unauthorized');
     }
 
-    return this.prisma.taskDependency.delete({ where: { id: dependency.id } });
+    return this.prisma.$transaction(async (tx) => {
+      const deleted = await tx.taskDependency.delete({ where: { id: dependency.id } });
+      const task = await tx.task.findUniqueOrThrow({
+        where: { id: taskId },
+        select: {
+          id: true,
+          projectId: true,
+          userId: true,
+          project: { select: { workspaceId: true } },
+        },
+      });
+      await this.firestoreSync.enqueue(tx, {
+        entityType: 'taskDependency',
+        entityId: deleted.id,
+        workspaceId: task.project?.workspaceId ?? `personal-${task.userId}`,
+        operation: 'delete',
+        payload: {
+          id: deleted.id,
+          taskId: deleted.taskId,
+          dependsOnTaskId: deleted.dependsOnTaskId,
+          projectId: task.projectId,
+          type: deleted.type,
+          createdAt: deleted.createdAt.toISOString(),
+        },
+      });
+      return deleted;
+    });
   }
 }
