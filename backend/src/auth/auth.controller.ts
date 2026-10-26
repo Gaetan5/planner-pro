@@ -7,6 +7,12 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { FirebaseLoginDto } from './dto/firebase-login.dto';
 
+interface AuthenticatedUserRequest {
+  user: {
+    id: string;
+  };
+}
+
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
@@ -72,6 +78,16 @@ export class AuthController {
   }
 
   /**
+   * Endpoint de liaison de compte Firebase pour un utilisateur déjà authentifié
+   */
+  @Post('firebase/link')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  async linkFirebase(@Body() body: FirebaseLoginDto, @Req() req: AuthenticatedUserRequest) {
+    return this.authService.linkFirebaseAccount(req.user.id, body.idToken);
+  }
+
+  /**
    * Endpoint de login simulé pour le développement local
    */
   @Post('mock/login')
@@ -84,7 +100,7 @@ export class AuthController {
    */
   @Get('github/repos')
   @UseGuards(JwtAuthGuard)
-  getGitHubRepositories(@Req() req: any) {
+  getGitHubRepositories(@Req() req: AuthenticatedUserRequest) {
     const userId = req.user.id;
     return this.authService.getGitHubRepositories(userId);
   }
@@ -94,7 +110,10 @@ export class AuthController {
    */
   @Post('github/sync')
   @UseGuards(JwtAuthGuard)
-  syncRepository(@Body() body: { projectId: string; repoFullName: string }, @Req() req: any) {
+  syncRepository(
+    @Body() body: { projectId: string; repoFullName: string },
+    @Req() req: AuthenticatedUserRequest,
+  ) {
     const userId = req.user.id;
     return this.authService.syncRepositoryToProject(userId, body.projectId, body.repoFullName);
   }

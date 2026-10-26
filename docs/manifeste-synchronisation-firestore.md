@@ -67,7 +67,7 @@ il ne constitue ni une migration complète, ni une garantie de fonctionnement ho
 - [x] Ajouter le service de reprise et d'audit de cohérence `FirestoreBackfillService`
       avec pagination par curseur, contrôle de débit (`delayMs`), détection des divergences
       sans secrets et protection contre l'écrasement des documents plus récents (`syncSequence > 0`).
-- [x] Résultats des suites vérifiées : 29 suites et 169 tests backend réussis, 8 suites et 18 tests frontend réussis, compilation complète `pnpm build` validée.
+- [x] Résultats des suites vérifiées : 29 suites et 172 tests backend réussis, 8 suites et 18 tests frontend réussis, compilation complète `pnpm build` validée.
 
 ## Limites connues du pilote
 
@@ -135,10 +135,11 @@ il ne constitue ni une migration complète, ni une garantie de fonctionnement ho
 
 ### 4. Autorisation et règles Firestore — bloquant avant accès client
 
-- [ ] Établir la liaison fiable entre les UID Firebase vérifiés et les comptes Planner
-      Pro ; traiter les comptes historiques et changements d’identité.
-- [ ] Concevoir des règles d’accès par espace/projet, rôle et propriétaire ; couvrir
-      lecture, création, modification, suppression et requêtes de listes.
+- [x] Établir la liaison fiable entre les UID Firebase vérifiés et les comptes Planner
+      Pro ; traiter les comptes historiques et changements d’identité (`/api/auth/firebase/login`
+      et `/api/auth/firebase/link` avec tests unitaires).
+- [x] Concevoir des règles d’accès par espace/projet, rôle et propriétaire ; couvrir
+      lecture, création, modification, suppression et requêtes de listes (`docs/conception-regles-firestore.md`).
 - [ ] Ajouter des tests automatisés Firebase Emulator pour accès autorisé, accès refusé,
       escalade de rôle et isolation entre deux équipes.
 - [ ] Déployer les règles seulement après revue et tests ; ne pas remplacer « deny all »
