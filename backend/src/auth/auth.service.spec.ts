@@ -178,4 +178,61 @@ describe('AuthService', () => {
     });
     expect(result.user.id).toBe('firebase-user-1');
   });
+
+  describe('linkFirebaseAccount', () => {
+    it('associe de manière vérifiée un UID Firebase à un compte utilisateur existant', async () => {
+      firebaseIdentity.verifyIdToken.mockResolvedValue({
+        uid: 'firebase-linked-1',
+        email: 'ada@example.com',
+        email_verified: true,
+      });
+      prisma.user.findUnique.mockResolvedValue(null); // aucun autre utilisateur avec cet UID
+      prisma.user.update.mockResolvedValue({
+        id: 'user-1',
+        email: 'ada@example.com',
+        name: 'Ada',
+        firebaseUid: 'firebase-linked-1',
+        platformRole: 'USER',
+      });
+
+      const res = await service.linkFirebaseAccount('user-1', 'valid-firebase-token');
+
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+        data: { firebaseUid: 'firebase-linked-1' },
+        select: expect.any(Object),
+      });
+      expect(res.user.firebaseUid).toBe('firebase-linked-1');
+    });
+
+    it('refuse si l’adresse email Firebase n’est pas vérifiée', async () => {
+      firebaseIdentity.verifyIdToken.mockResolvedValue({
+        uid: 'firebase-linked-1',
+        email: 'ada@example.com',
+        email_verified: false,
+      });
+
+      await expect(service.linkFirebaseAccount('user-1', 'unverified-token')).rejects.toThrow(
+        'Une adresse e-mail Firebase vérifiée est requise.',
+      );
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('refuse si le compte Firebase est déjà lié à un autre utilisateur', async () => {
+      firebaseIdentity.verifyIdToken.mockResolvedValue({
+        uid: 'firebase-linked-1',
+        email: 'other@example.com',
+        email_verified: true,
+      });
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'other-user-99',
+        firebaseUid: 'firebase-linked-1',
+      });
+
+      await expect(service.linkFirebaseAccount('user-1', 'conflict-token')).rejects.toThrow(
+        'Cet identifiant Firebase est déjà lié à un autre compte.',
+      );
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+  });
 });

@@ -11,6 +11,36 @@ import { Prisma } from '@prisma/client';
 import { encrypt, decrypt, hashPassword, verifyPassword } from './encryption.util';
 import { FirebaseIdentityService } from './firebase-identity.service';
 
+interface GitHubTokenResponse {
+  access_token?: string;
+  error?: string;
+  error_description?: string;
+}
+
+interface GitHubUserResponse {
+  id: number;
+  login: string;
+  name?: string | null;
+  email?: string | null;
+}
+
+interface GitHubEmailResponse {
+  email: string;
+  primary: boolean;
+  verified: boolean;
+}
+
+interface GitHubRepoResponse {
+  id: number;
+  name: string;
+  full_name: string;
+  description: string | null;
+  html_url: string;
+  private: boolean;
+  stargazers_count: number;
+  language: string | null;
+}
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -76,6 +106,44 @@ export class AuthService {
   }
 
   /**
+   * Associe de manière vérifiée un UID Firebase à un compte utilisateur existant.
+   * Valide l'e-mail vérifié et prévient les collisions d'identités.
+   */
+  async linkFirebaseAccount(userId: string, idToken: string) {
+    const identity = await this.firebaseIdentity.verifyIdToken(idToken);
+    const email = identity.email?.toLowerCase().trim();
+
+    if (!email || !identity.email_verified) {
+      throw new BadRequestException('Une adresse e-mail Firebase vérifiée est requise.');
+    }
+
+    const existingWithUid = await this.prisma.user.findUnique({
+      where: { firebaseUid: identity.uid },
+    });
+
+    if (existingWithUid && existingWithUid.id !== userId) {
+      throw new ConflictException('Cet identifiant Firebase est déjà lié à un autre compte.');
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: { firebaseUid: identity.uid },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        firebaseUid: true,
+        platformRole: true,
+      },
+    });
+
+    return {
+      message: 'Compte Firebase associé avec succès.',
+      user: updated,
+    };
+  }
+
+  /**
    * Échange le code d'autorisation GitHub contre un token d'accès,
    * récupère le profil utilisateur GitHub, crée ou met à jour l'utilisateur
    * en base de données et renvoie un JWT.
@@ -104,7 +172,7 @@ export class AuthService {
       }),
     });
 
-    const tokenData = (await tokenResponse.json()) as any;
+    const tokenData = (await tokenResponse.json()) as GitHubTokenResponse;
     if (tokenData.error) {
       throw new UnauthorizedException(
         `Échec OAuth GitHub : ${tokenData.error_description || tokenData.error}`,
@@ -112,6 +180,9 @@ export class AuthService {
     }
 
     const accessToken = tokenData.access_token;
+    if (!accessToken) {
+      throw new UnauthorizedException("Jeton d'accès GitHub non fourni.");
+    }
 
     // 2. Récupérer le profil utilisateur GitHub
     const userResponse = await fetch('https://api.github.com/user', {
@@ -120,7 +191,7 @@ export class AuthService {
         'User-Agent': 'Planner-Pro-App',
       },
     });
-    const userData = (await userResponse.json()) as any;
+    const userData = (await userResponse.json()) as GitHubUserResponse;
 
     // 3. Récupérer l'adresse e-mail (si elle n'est pas publique)
     let email = userData.email;
@@ -131,8 +202,8 @@ export class AuthService {
           'User-Agent': 'Planner-Pro-App',
         },
       });
-      const emails = (await emailResponse.json()) as any[];
-      const primaryEmail = emails?.find((e: any) => e.primary);
+      const emails = (await emailResponse.json()) as GitHubEmailResponse[];
+      const primaryEmail = emails?.find((e: GitHubEmailResponse) => e.primary);
       email = primaryEmail ? primaryEmail.email : `${userData.login}@github.planner.pro`;
     }
 
@@ -228,8 +299,8 @@ export class AuthService {
       );
     }
 
-    const repos = (await response.json()) as any[];
-    return repos.map((repo: any) => ({
+    const repos = (await response.json()) as GitHubRepoResponse[];
+    return repos.map((repo: GitHubRepoResponse) => ({
       id: repo.id,
       name: repo.name,
       fullName: repo.full_name,
