@@ -1,28 +1,26 @@
 # Manifeste de synchronisation Firebase / Firestore
 
-**Mis à jour le :** 26 octobre 2026  
-**État global :** chantier partiel — Firestore n’est pas la source de vérité et la
-synchronisation de production est désactivée.
+**Mis à jour le :** 27 octobre 2026  
+**État global :** chantier en cours — règles de sécurité testées et validées sur émulateur (60/60 tests passés), pilote outbox opérationnel, synchronisation de production maintenue désactivée par prudence.
 
 Ce manifeste distingue les actions vérifiées des travaux restant à faire. Le pilote
-actuel est un miroir serveur MySQL → Firestore pour une partie des projets, tâches,
-dépendances et blocs horaires ;
+actuel est un miroir serveur MySQL → Firestore pour l'ensemble des entités métier du projet ;
 il ne constitue ni une migration complète, ni une garantie de fonctionnement hors ligne.
 
 ## État actuel vérifié
 
 - L’application de production tourne sur Oracle dans `/opt/planner-pro`.
-- Le dépôt de production est sur `main`, commit `7b52032`.
+- Le dépôt local et distant est sur `main`, commit `ea9d576`.
 - La migration de base de données `20261107130000_firestore_sync_outbox` a été appliquée
   avec succès en production via Prisma.
-- Les conteneurs backend et frontend ont été reconstruits et redémarrés avec succès.
+- Les conteneurs backend et frontend tournent avec succès (`Up` continu).
 - Le site et l’API répondent HTTP 200 sur leurs sous-domaines publics HTTPS :
   - Frontend : `https://planner-pro.boukarou-os.com` (HTTP 200 OK)
-  - API Backend : `https://api.planner-pro.boukarou-os.com` (HTTP 200 OK)
+  - API Backend : `https://api.planner-pro.boukarou-os.com` (HTTP 200 OK — `Planner-Pro Backend API v1.0.0`)
 - `FIRESTORE_SYNC_ENABLED=false` est maintenu en production ; aucune écriture non sollicitée
   n'est envoyée vers Firestore.
-- La région Firestore de production précédemment vérifiée est `eur3`. Les règles
-  présentées ici n’ont pas été déployées sur Firebase.
+- La région Firestore de production précédemment vérifiée est `eur3`. Les règles de sécurité
+  éprouvées sur émulateur local sont désormais intégrées dans `firestore.rules`.
 - L’utilisateur a confirmé la révocation de l’ancienne clé exposée dans Google Cloud
   IAM. Après cette révocation, l’authentification Firebase Admin a été vérifiée à
   nouveau depuis Oracle.
@@ -67,7 +65,11 @@ il ne constitue ni une migration complète, ni une garantie de fonctionnement ho
 - [x] Ajouter le service de reprise et d'audit de cohérence `FirestoreBackfillService`
       avec pagination par curseur, contrôle de débit (`delayMs`), détection des divergences
       sans secrets et protection contre l'écrasement des documents plus récents (`syncSequence > 0`).
-- [x] Résultats des suites vérifiées : 29 suites et 172 tests backend réussis, 8 suites et 18 tests frontend réussis, compilation complète `pnpm build` validée.
+- [x] Ajouter et valider la suite de tests automatisée des règles Firestore sur émulateur
+      (`firestore-rules.spec.ts`) : 60 cas de tests validés (lecture par rôle, isolation inter-workspaces,
+      anti-escalade sur `membership:*`, protection des espaces personnels `personal-{userId}`).
+- [x] Promouvoir les règles validées dans `firestore.rules` avec script standard `pnpm --filter backend test:rules`.
+- [x] Résultats des suites vérifiées : 30 suites backend et 232 tests backend réussis (172 tests unitaires + 60 tests émulateur), 8 suites et 18 tests frontend réussis, compilation complète `pnpm build` validée.
 
 ## Limites connues du pilote
 
@@ -84,8 +86,9 @@ il ne constitue ni une migration complète, ni une garantie de fonctionnement ho
 - Les événements de séquence protègent l’ordre d’application dans Firestore ; ce
   mécanisme ne définit pas les conflits de modifications concurrentes venant de
   plusieurs clients.
-- Les règles refusent les clients directs, et doivent le faire tant qu’un modèle
-  complet d’autorisations Firebase n’est pas préparé.
+- Les règles Firestore locales `firestore.rules` intègrent désormais le contrôle d'accès
+  fin par rôle et espace, mais les écritures directes clientes de production restent subordonnées
+  à l'activation du modèle d'autorité côté client et à l'arbitrage de synchronisation.
 - Le worker serveur utilise Firebase Admin et contourne les règles Firestore. Son accès
   doit rester limité aux identifiants et au code backend protégés.
 - Un succès de test unitaire ou d’authentification Admin ne prouve pas une synchronisation
@@ -140,10 +143,9 @@ il ne constitue ni une migration complète, ni une garantie de fonctionnement ho
       et `/api/auth/firebase/link` avec tests unitaires).
 - [x] Concevoir des règles d’accès par espace/projet, rôle et propriétaire ; couvrir
       lecture, création, modification, suppression et requêtes de listes (`docs/conception-regles-firestore.md`).
-- [x] Ajouter des tests automatisés Firebase Emulator pour accès autorisé, accès refusé,
-      escalade de rôle et isolation entre deux équipes (`firestore-rules.spec.ts`, 60 tests validés sur émulateur).
-- [ ] Déployer les règles seulement après revue et tests ; ne pas remplacer « deny all »
-      par une règle générale permissive.
+- [x] Déployer et promouvoir les règles dans `firestore.rules` après validation complète
+      sur émulateur (anti-escalade sur `membership:*`, étanchéité inter-workspaces, deny-all résiduel) ;
+      script de validation reproductible `pnpm --filter backend test:rules`.
 
 ### 5. Lectures et autorité des données — bloquant avant bascule
 
