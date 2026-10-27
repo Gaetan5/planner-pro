@@ -9,6 +9,8 @@ import {
   TaskPriority,
 } from '@prisma/client';
 import { PrismaMariaDb } from '@prisma/adapter-mariadb';
+import { cert, getApps, initializeApp, type App } from 'firebase-admin/app';
+import { getAuth, type Auth } from 'firebase-admin/auth';
 import * as argon2 from 'argon2';
 
 function createPrismaClient(): PrismaClient {
@@ -25,6 +27,70 @@ function createPrismaClient(): PrismaClient {
   return new PrismaClient({ adapter });
 }
 
+function initFirebaseAuth(): Auth | null {
+  const projectId = process.env.FIREBASE_PROJECT_ID;
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+  const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+
+  if (!projectId || !clientEmail || !privateKey) {
+    console.log('ℹ️ Firebase Auth non configuré (variables manquantes), seed MySQL uniquement.');
+    return null;
+  }
+
+  const appName = 'planner-pro-seed-auth';
+  const existingApp = getApps().find((a: App) => a.name === appName);
+  const app =
+    existingApp ??
+    initializeApp(
+      {
+        credential: cert({ projectId, clientEmail, privateKey }),
+      },
+      appName,
+    );
+
+  return getAuth(app);
+}
+
+async function ensureFirebaseAuthUser(
+  auth: Auth | null,
+  email: string,
+  password: string,
+  displayName: string,
+): Promise<string | null> {
+  if (!auth) return null;
+
+  try {
+    let userRecord;
+    try {
+      userRecord = await auth.getUserByEmail(email);
+      await auth.updateUser(userRecord.uid, {
+        password,
+        displayName,
+        emailVerified: true,
+      });
+      console.log(`🔥 Compte Firebase Auth mis à jour : ${email} (UID: ${userRecord.uid})`);
+    } catch (error: unknown) {
+      const code =
+        typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : '';
+      if (code === 'auth/user-not-found') {
+        userRecord = await auth.createUser({
+          email,
+          password,
+          displayName,
+          emailVerified: true,
+        });
+        console.log(`🔥 Compte Firebase Auth créé : ${email} (UID: ${userRecord.uid})`);
+      } else {
+        throw error;
+      }
+    }
+    return userRecord.uid;
+  } catch (error) {
+    console.warn(`⚠️ Impossible de synchroniser ${email} avec Firebase Auth :`, error);
+    return null;
+  }
+}
+
 const prisma = createPrismaClient();
 
 async function hashPassword(password: string): Promise<string> {
@@ -33,6 +99,8 @@ async function hashPassword(password: string): Promise<string> {
 
 async function main() {
   console.log('🌱 Amorçage de la base de données Planner Pro...');
+
+  const firebaseAuth = initFirebaseAuth();
 
   // ─── 1. Mots de passe par défaut ─────────────────────────────────────
   const adminPassword = process.env.SEED_ADMIN_PASSWORD || 'Admin123!Secure';
@@ -45,6 +113,28 @@ async function main() {
     hashPassword(userPassword),
   ]);
 
+  // Synchronisation Firebase Auth
+  const [adminFirebaseUid, managerFirebaseUid, userFirebaseUid] = await Promise.all([
+    ensureFirebaseAuthUser(
+      firebaseAuth,
+      'admin@planner-pro.com',
+      adminPassword,
+      'Administrateur Système',
+    ),
+    ensureFirebaseAuthUser(
+      firebaseAuth,
+      'manager@planner-pro.com',
+      managerPassword,
+      'Sarah Connor (Project Manager)',
+    ),
+    ensureFirebaseAuthUser(
+      firebaseAuth,
+      'user@planner-pro.com',
+      userPassword,
+      'Alexandre Martin (Développeur)',
+    ),
+  ]);
+
   // ─── 2. Utilisateurs ──────────────────────────────────────────────────
   // A. Administrateur plateforme
   const admin = await prisma.user.upsert({
@@ -52,12 +142,14 @@ async function main() {
     update: {
       name: 'Administrateur Système',
       platformRole: PlatformRole.SUPER_ADMIN,
+      ...(adminFirebaseUid ? { firebaseUid: adminFirebaseUid } : {}),
     },
     create: {
       email: 'admin@planner-pro.com',
       name: 'Administrateur Système',
       passwordHash: adminHash,
       platformRole: PlatformRole.SUPER_ADMIN,
+      ...(adminFirebaseUid ? { firebaseUid: adminFirebaseUid } : {}),
     },
   });
 
@@ -66,11 +158,13 @@ async function main() {
     where: { email: 'manager@planner-pro.com' },
     update: {
       name: 'Sarah Connor (Project Manager)',
+      ...(managerFirebaseUid ? { firebaseUid: managerFirebaseUid } : {}),
     },
     create: {
       email: 'manager@planner-pro.com',
       name: 'Sarah Connor (Project Manager)',
       passwordHash: managerHash,
+      ...(managerFirebaseUid ? { firebaseUid: managerFirebaseUid } : {}),
     },
   });
 
@@ -79,11 +173,13 @@ async function main() {
     where: { email: 'user@planner-pro.com' },
     update: {
       name: 'Alexandre Martin (Développeur)',
+      ...(userFirebaseUid ? { firebaseUid: userFirebaseUid } : {}),
     },
     create: {
       email: 'user@planner-pro.com',
       name: 'Alexandre Martin (Développeur)',
       passwordHash: userHash,
+      ...(userFirebaseUid ? { firebaseUid: userFirebaseUid } : {}),
     },
   });
 
