@@ -151,23 +151,14 @@ il ne constitue ni une migration complète, ni une garantie de fonctionnement ho
 
 - [x] Choisir et documenter explicitement le modèle d’autorité : **Option B actée — MySQL reste la source de vérité autoritaire unique (SSOT)**.
       Firestore agit comme miroir de projection temps réel (Read Model CQRS).
-- [x] Définir les rôles respectifs :
-      - **Écritures & Mutations (Command)** : toutes les écritures transitent par l'API NestJS avec transactions atomiques Prisma (`prisma.$transaction`) et enregistrement dans la table `FirestoreSyncOutbox`.
-      - **Lectures métier denses** : calculs financiers, budgets, dépendances DAG (CPM), allocations et rapports restent servis par MySQL avec performances relationnelles indexées.
-      - **Lectures & Projections Temps Réel (Query)** : le client s'abonne aux documents Firestore (`onSnapshot`) pour l'actualisation dynamique du Kanban, du Gantt et des notifications sans polling API.
-- [x] Définir la cohérence, les délais de propagation et la résilience :
-      - La cohérence est à terme (*eventual consistency*) avec ordre garanti par séquences monotones (`syncSequence`).
-      - En cas d'indisponibilité de Firestore, l'application reste 100% opérationnelle en mode dégradé via l'API NestJS/MySQL.
+- [x] Définir les rôles respectifs : - **Écritures & Mutations (Command)** : toutes les écritures transitent par l'API NestJS avec transactions atomiques Prisma (`prisma.$transaction`) et enregistrement dans la table `FirestoreSyncOutbox`. - **Lectures métier denses** : calculs financiers, budgets, dépendances DAG (CPM), allocations et rapports restent servis par MySQL avec performances relationnelles indexées. - **Lectures & Projections Temps Réel (Query)** : le client s'abonne aux documents Firestore (`onSnapshot`) pour l'actualisation dynamique du Kanban, du Gantt et des notifications sans polling API.
+- [x] Définir la cohérence, les délais de propagation et la résilience : - La cohérence est à terme (_eventual consistency_) avec ordre garanti par séquences monotones (`syncSequence`). - En cas d'indisponibilité de Firestore, l'application reste 100% opérationnelle en mode dégradé via l'API NestJS/MySQL.
 - [x] Procédure de repli (Rollback) : MySQL étant la source de vérité inaltérée, la désactivation instantanée de Firestore (`FIRESTORE_SYNC_ENABLED=false`) ne provoque aucune perte de données ni divergence métier.
 
 ### 6. Mode hors ligne et conflits — stratégie client CQRS
 
-- [x] Définir la stratégie hors ligne :
-      - File d'attente locale client (IndexedDB) pour les mutations en attente lors des coupures réseau.
-      - Soumission ordonnée à l'API NestJS dès le rétablissement de la connexion.
-- [x] Politique de résolution de conflits :
-      - Arbitrage côté serveur basé sur l'horodatage (`updatedAt`) et verrouillage optimiste.
-      - Priorité aux modifications les plus récentes (Last-Write-Wins au niveau champ) avec notification en cas de collision critique.
+- [x] Définir la stratégie hors ligne : - File d'attente locale client (IndexedDB) pour les mutations en attente lors des coupures réseau. - Soumission ordonnée à l'API NestJS dès le rétablissement de la connexion.
+- [x] Politique de résolution de conflits : - Arbitrage côté serveur basé sur l'horodatage (`updatedAt`) et verrouillage optimiste. - Priorité aux modifications les plus récentes (Last-Write-Wins au niveau champ) avec notification en cas de collision critique.
 - [ ] Tester en environnement isolé la reconnexion d'un client avec mutations en attente et valider l'absence d'écrasement silencieux.
 - [ ] Valider le parcours complet avec deux utilisateurs d'une même équipe sur un jeu de données de test.
 

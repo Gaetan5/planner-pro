@@ -73,13 +73,13 @@ Les données sont partitionnées par espace de travail (`workspaceId`) :
 
 ## 3. Matrice des droits par rôle
 
-| Rôle | Lecture (Projets/Tâches/Notes) | Création/Édition Tâche & Note | Suppression Projets/Tâches | Gestion Membres & Rôles |
-| :--- | :---: | :---: | :---: | :---: |
-| **OWNER** | Oui | Oui | Oui | Oui |
-| **ADMIN** | Oui | Oui | Oui | Oui (sauf OWNER) |
-| **MEMBER** | Oui | Oui | Non | Non |
-| **VIEWER** | Oui (lecture seule) | Non | Non | Non |
-| **Non-membre** | Refusé | Refusé | Refusé | Refusé |
+| Rôle           | Lecture (Projets/Tâches/Notes) | Création/Édition Tâche & Note | Suppression Projets/Tâches | Gestion Membres & Rôles |
+| :------------- | :----------------------------: | :---------------------------: | :------------------------: | :---------------------: |
+| **OWNER**      |              Oui               |              Oui              |            Oui             |           Oui           |
+| **ADMIN**      |              Oui               |              Oui              |            Oui             |    Oui (sauf OWNER)     |
+| **MEMBER**     |              Oui               |              Oui              |            Non             |           Non           |
+| **VIEWER**     |      Oui (lecture seule)       |              Non              |            Non             |           Non           |
+| **Non-membre** |             Refusé             |            Refusé             |           Refusé           |         Refusé          |
 
 ---
 
