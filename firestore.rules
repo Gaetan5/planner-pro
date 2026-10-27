@@ -2,8 +2,68 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    function isAuthenticated() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isPersonalSpace(workspaceId) {
+      return isAuthenticated() && workspaceId == ('personal-' + request.auth.uid);
+    }
+
+    function isMember(workspaceId) {
+      return isPersonalSpace(workspaceId) || (
+        isAuthenticated() &&
+        exists(/databases/$(database)/documents/workspaces/$(workspaceId)/entities/$('membership:' + request.auth.uid))
+      );
+    }
+
+    function getRole(workspaceId) {
+      return isPersonalSpace(workspaceId)
+        ? 'OWNER'
+        : get(/databases/$(database)/documents/workspaces/$(workspaceId)/entities/$('membership:' + request.auth.uid)).data.role;
+    }
+
+    function isOwnerOrAdmin(workspaceId) {
+      return isMember(workspaceId) && (getRole(workspaceId) in ['OWNER', 'ADMIN']);
+    }
+
+    // Protection globale par défaut
     match /{document=**} {
       allow read, write: if false;
+    }
+
+    // Gestion des workspaces
+    match /workspaces/{workspaceId} {
+      allow read: if isMember(workspaceId);
+      allow write: if isOwnerOrAdmin(workspaceId);
+
+      // Projets
+      match /projects/{projectId} {
+        allow read: if isMember(workspaceId);
+        allow create, update: if isOwnerOrAdmin(workspaceId) || getRole(workspaceId) == 'MEMBER';
+        allow delete: if isOwnerOrAdmin(workspaceId);
+
+        // Tâches du projet
+        match /tasks/{taskId} {
+          allow read: if isMember(workspaceId);
+          allow create, update: if isMember(workspaceId) && getRole(workspaceId) != 'VIEWER';
+          allow delete: if isOwnerOrAdmin(workspaceId);
+        }
+      }
+
+      // Entités diverses (commentaires, jalons, livrables, notes, etc.)
+      match /entities/{entityKey} {
+        allow read: if isMember(workspaceId);
+        // Seuls OWNER et ADMIN peuvent créer/modifier une adhésion (membership:*)
+        // Les autres entités sont modifiables par tout membre non-VIEWER
+        allow create, update: if isMember(workspaceId) && (
+          entityKey.matches('^membership:.*')
+            ? isOwnerOrAdmin(workspaceId)
+            : getRole(workspaceId) != 'VIEWER'
+        );
+        allow delete: if isOwnerOrAdmin(workspaceId);
+      }
     }
   }
 }
