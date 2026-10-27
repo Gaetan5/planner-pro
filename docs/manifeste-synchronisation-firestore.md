@@ -140,8 +140,8 @@ il ne constitue ni une migration complète, ni une garantie de fonctionnement ho
       et `/api/auth/firebase/link` avec tests unitaires).
 - [x] Concevoir des règles d’accès par espace/projet, rôle et propriétaire ; couvrir
       lecture, création, modification, suppression et requêtes de listes (`docs/conception-regles-firestore.md`).
-- [ ] Ajouter des tests automatisés Firebase Emulator pour accès autorisé, accès refusé,
-      escalade de rôle et isolation entre deux équipes.
+- [x] Ajouter des tests automatisés Firebase Emulator pour accès autorisé, accès refusé,
+      escalade de rôle et isolation entre deux équipes (`firestore-rules.spec.ts`, 60 tests validés sur émulateur).
 - [ ] Déployer les règles seulement après revue et tests ; ne pas remplacer « deny all »
       par une règle générale permissive.
 

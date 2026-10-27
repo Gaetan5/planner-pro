@@ -140,7 +140,13 @@ service cloud.firestore {
       // Entités diverses (commentaires, jalons, livrables, notes, etc.)
       match /entities/{entityKey} {
         allow read: if isMember(workspaceId);
-        allow create, update: if isMember(workspaceId) && getRole(workspaceId) != 'VIEWER';
+        // Seuls OWNER et ADMIN peuvent créer/modifier une adhésion (membership:*)
+        // Les autres entités sont modifiables par tout membre non-VIEWER
+        allow create, update: if isMember(workspaceId) && (
+          entityKey.matches('^membership:.*')
+            ? isOwnerOrAdmin(workspaceId)
+            : getRole(workspaceId) != 'VIEWER'
+        );
         allow delete: if isOwnerOrAdmin(workspaceId);
       }
     }
