@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
@@ -17,6 +18,7 @@ describe('AdminService', () => {
   };
   const redis = { ping: jest.fn() };
   const firestoreSync = { getStatus: jest.fn() };
+  const jwtService = { sign: jest.fn() };
   let service: AdminService;
 
   beforeEach(() => {
@@ -25,6 +27,7 @@ describe('AdminService', () => {
       prisma as unknown as PrismaService,
       redis as unknown as RedisService,
       firestoreSync as unknown as FirestoreSyncService,
+      jwtService as unknown as JwtService,
     );
     firestoreSync.getStatus.mockResolvedValue({
       state: 'disabled',
