@@ -476,7 +476,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [user?.token]);
 
+  const logout = useCallback(() => {
+    void import('../firebase-auth')
+      .then(({ signOutFirebase }) => signOutFirebase())
+      .catch((error: unknown) => {
+        setApiError(error instanceof Error ? error.message : 'Échec de la déconnexion Firebase.');
+      });
+    setUser(null);
+    localStorage.removeItem('planner_user');
+    setProjects([]);
+    setNotes([]);
+    setWorkspaces([]);
+    setActiveWorkspaceId('');
+    setWorkspaceRoles({});
+    setWorkspaceMembers([]);
+    setTimeBlocks([]);
+    setActiveTimer(null);
+    if (socket) socket.disconnect();
+  }, [socket]);
+
   const reportApiError = async (res: Response, action: string): Promise<never> => {
+    if (res.status === 401) {
+      console.warn(`Session expirée (401) lors de l'action : ${action}`);
+      logout();
+    }
     const responseBody = await res.text();
     let detail = responseBody;
     try {
@@ -681,6 +704,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             fetch(`${BACKEND_URL}/projects/resources/capacity`, { headers: getHeaders() }),
           ]);
 
+        const anyUnauthorized = [
+          projRes,
+          noteRes,
+          membersRes,
+          tbRes,
+          activeRes,
+          workspacesRes,
+          capacityRes,
+        ].some((res) => res.status === 401);
+
+        if (anyUnauthorized) {
+          console.warn('Session expirée ou révoquée détectée par le serveur.');
+          logout();
+          return;
+        }
+
         if (projRes.ok) setProjects(await projRes.json());
         if (noteRes.ok) setNotes(await noteRes.json());
         if (membersRes.ok) setWorkspaceMembers(await membersRes.json());
@@ -707,7 +746,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         console.error('Erreur lors du chargement des données depuis le backend :', e);
       }
     }, 200);
-  }, [user, isConnected, getHeaders]);
+  }, [user, isConnected, getHeaders, logout]);
 
   useEffect(() => {
     refreshData();
@@ -736,25 +775,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       console.error(e);
       throw e;
     }
-  };
-
-  const logout = () => {
-    void import('../firebase-auth')
-      .then(({ signOutFirebase }) => signOutFirebase())
-      .catch((error: unknown) => {
-        setApiError(error instanceof Error ? error.message : 'Échec de la déconnexion Firebase.');
-      });
-    setUser(null);
-    localStorage.removeItem('planner_user');
-    setProjects([]);
-    setNotes([]);
-    setWorkspaces([]);
-    setActiveWorkspaceId('');
-    setWorkspaceRoles({});
-    setWorkspaceMembers([]);
-    setTimeBlocks([]);
-    setActiveTimer(null);
-    if (socket) socket.disconnect();
   };
 
   const mockLogin = async (name: string) => {

@@ -29,10 +29,22 @@ export class TasksService {
   ) {}
 
   parseTaskDates(data: CreateTaskDto | UpdateTaskDto) {
-    return {
-      startDate: data.startDate ? new Date(data.startDate) : undefined,
-      dueDate: data.dueDate ? new Date(data.dueDate) : undefined,
+    const parse = (val?: string) => {
+      if (!val) return undefined;
+      const d = new Date(val);
+      if (isNaN(d.getTime())) {
+        throw new BadRequestException(`Date invalide fournie : ${val}`);
+      }
+      return d;
     };
+    const startDate = parse(data.startDate);
+    const dueDate = parse(data.dueDate);
+    if (startDate && dueDate && startDate > dueDate) {
+      throw new BadRequestException(
+        'La date de début ne peut pas être postérieure à la date d’échéance.',
+      );
+    }
+    return { startDate, dueDate };
   }
 
   buildTaskMutationData(data: CreateTaskDto | UpdateTaskDto): Prisma.TaskUpdateInput {
