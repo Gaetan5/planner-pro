@@ -11,6 +11,26 @@ module.exports = [
   js.configs.recommended,
   ...compat.extends('plugin:@typescript-eslint/recommended', 'plugin:prettier/recommended'),
   {
+    files: ['**/*.cjs', '**/*.js'],
+    languageOptions: {
+      sourceType: 'commonjs',
+      globals: {
+        require: 'readonly',
+        module: 'readonly',
+        exports: 'readonly',
+        __dirname: 'readonly',
+        __filename: 'readonly',
+        process: 'readonly',
+        console: 'readonly',
+      },
+    },
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off',
+      '@typescript-eslint/no-var-requires': 'off',
+      'no-undef': 'off',
+    },
+  },
+  {
     files: ['**/*.ts', '**/*.tsx'],
     languageOptions: {
       parser: tsParser,
@@ -18,6 +38,7 @@ module.exports = [
         tsconfigRootDir: __dirname,
         project: [
           './backend/tsconfig.json',
+          './backend/prisma/tsconfig.json',
           './tsconfig.eslint.json',
           './backend/tests/tsconfig.json',
           './frontend/tsconfig.json',
@@ -35,12 +56,14 @@ module.exports = [
     },
   },
   {
-    files: ['backend/tests/**/*.ts', 'backend/src/**/*.spec.ts'],
+    files: ['backend/tests/**/*.ts', 'backend/src/**/*.spec.ts', 'backend/prisma/**/*.ts'],
     languageOptions: {
       parserOptions: {
         project: false,
       },
       globals: {
+        process: 'readonly',
+        console: 'readonly',
         beforeEach: 'readonly',
         afterEach: 'readonly',
         describe: 'readonly',

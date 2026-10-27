@@ -10,6 +10,7 @@ Ce document définit le modèle de sécurité et d'autorisation d'accès direct 
 ## 1. Modèle d'identité et de correspondance
 
 Pour qu'un client direct (application Web, mobile) puisse interagir avec Firestore de manière sécurisée :
+
 1. **Authentification obligatoire** : `request.auth != null`.
 2. **Adresse e-mail vérifiée** : `request.auth.token.email_verified == true`.
 3. **Liaison d'identité** : Le compte MySQL Planner Pro détient le `firebaseUid` correspondant. L'endpoint `/api/auth/firebase/link` et la connexion `/api/auth/firebase/login` garantissent cette correspondance univoque.
@@ -34,7 +35,9 @@ Les données sont partitionnées par espace de travail (`workspaceId`) :
 ```
 
 ### Espaces personnels (`personal-{userId}`)
+
 - Un utilisateur accède en lecture et écriture complètes à son espace personnel :
+
   ```firestore
   function isPersonalSpace(workspaceId) {
     return request.auth != null && workspaceId == ('personal-' + request.auth.uid);
@@ -42,7 +45,9 @@ Les données sont partitionnées par espace de travail (`workspaceId`) :
   ```
 
 ### Espaces partagés (`workspaceId` standard)
+
 - La vérification d'appartenance s'appuie sur la présence de l'adhésion :
+
   ```firestore
   function getMembership(workspaceId) {
     return get(/databases/$(database)/documents/workspaces/$(workspaceId)/entities/$('membership:' + request.auth.uid));
@@ -70,11 +75,11 @@ Les données sont partitionnées par espace de travail (`workspaceId`) :
 
 | Rôle | Lecture (Projets/Tâches/Notes) | Création/Édition Tâche & Note | Suppression Projets/Tâches | Gestion Membres & Rôles |
 | :--- | :---: | :---: | :---: | :---: |
-| **OWNER** |  Oui |  Oui |  Oui |  Oui |
-| **ADMIN** |  Oui |  Oui |  Oui |  Oui (sauf OWNER) |
-| **MEMBER** |  Oui |  Oui |  Non |  Non |
-| **VIEWER** |  Oui (lecture seule) |  Non |  Non |  Non |
-| **Non-membre** |  Refusé |  Refusé |  Refusé |  Refusé |
+| **OWNER** | Oui | Oui | Oui | Oui |
+| **ADMIN** | Oui | Oui | Oui | Oui (sauf OWNER) |
+| **MEMBER** | Oui | Oui | Non | Non |
+| **VIEWER** | Oui (lecture seule) | Non | Non | Non |
+| **Non-membre** | Refusé | Refusé | Refusé | Refusé |
 
 ---
 
@@ -159,6 +164,7 @@ service cloud.firestore {
 ## 5. Plan de validation sur Firebase Emulator
 
 Avant déploiement en production :
+
 1. **Scénario 1 : Accès autorisé** — Un utilisateur `MEMBER` accède aux projets et tâches de son workspace.
 2. **Scénario 2 : Isolation inter-équipes** — L'utilisateur d'un workspace A ne peut ni lire ni lister les documents du workspace B.
 3. **Scénario 3 : Escalade de privilèges** — Un `VIEWER` ou un `MEMBER` ne peut pas modifier un rôle `membership` ni supprimer un projet.
