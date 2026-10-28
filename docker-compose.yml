@@ -47,7 +47,7 @@ services:
     volumes:
       - ./backend:/home/node/app/backend
       - /home/node/app/backend/node_modules
-    command: sh -c 'pnpm install --filter backend... --frozen-lockfile && node wait-for-db.js && pnpm exec prisma db push && pnpm --filter backend start:dev'
+    command: sh -c 'pnpm install --filter backend... --frozen-lockfile && node wait-for-db.js && pnpm exec prisma db push --accept-data-loss && pnpm --filter backend start:dev'
     depends_on:
       - db
       - cache

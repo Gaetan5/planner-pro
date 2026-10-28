@@ -1,0 +1,95 @@
+import { Test, TestingModule } from '@nestjs/testing';
+import { SsoService } from './sso.service';
+import { PrismaService } from '../../prisma/prisma.service';
+import { JwtService } from '@nestjs/jwt';
+import { SSOProvider, WorkspaceRole } from '@prisma/client';
+
+describe('SsoService', () => {
+  let service: SsoService;
+
+  const prisma = {
+    sSOConfiguration: {
+      findUnique: jest.fn(),
+      upsert: jest.fn(),
+      delete: jest.fn(),
+    },
+    user: {
+      findFirst: jest.fn(),
+      findUnique: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+    },
+    membership: {
+      findUnique: jest.fn(),
+      create: jest.fn(),
+    },
+  };
+
+  const jwtService = {
+    sign: jest.fn().mockReturnValue('jwt-sso-token'),
+  };
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        SsoService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: JwtService, useValue: jwtService },
+      ],
+    }).compile();
+
+    service = module.get<SsoService>(SsoService);
+    jest.clearAllMocks();
+  });
+
+  describe('extractDomain', () => {
+    it('extraie correctement le nom de domaine en minuscules', () => {
+      expect(service.extractDomain('Alice.Dupont@Sonatrach.DZ')).toBe('sonatrach.dz');
+    });
+
+    it('rejette les emails mal formatés', () => {
+      expect(() => service.extractDomain('invalid-email')).toThrow();
+    });
+  });
+
+  describe('discover', () => {
+    it('renvoie ssoAvailable: false si le domaine n’est pas configuré', async () => {
+      prisma.sSOConfiguration.findUnique.mockResolvedValue(null);
+      const res = await service.discover('test@inconnu.com');
+      expect(res.ssoAvailable).toBe(false);
+    });
+
+    it('renvoie les détails SSO si le domaine est configuré et actif', async () => {
+      prisma.sSOConfiguration.findUnique.mockResolvedValue({
+        domain: 'totalenergies.com',
+        provider: SSOProvider.OIDC_AZURE_AD,
+        enforceSSO: true,
+        enabled: true,
+        workspace: { name: 'TotalEnergies Exploration' },
+      });
+
+      const res = await service.discover('cadre@totalenergies.com');
+      expect(res.ssoAvailable).toBe(true);
+      expect(res.domain).toBe('totalenergies.com');
+      expect(res.provider).toBe(SSOProvider.OIDC_AZURE_AD);
+      expect(res.enforceSSO).toBe(true);
+      expect(res.workspaceName).toBe('TotalEnergies Exploration');
+    });
+  });
+
+  describe('getAuthorizationUrl', () => {
+    it('génère une URL d’autorisation Azure AD valide', async () => {
+      prisma.sSOConfiguration.findUnique.mockResolvedValue({
+        domain: 'mtn.com',
+        provider: SSOProvider.OIDC_AZURE_AD,
+        clientId: 'client-123',
+        issuer: 'tenant-456',
+        enabled: true,
+      });
+
+      const res = await service.getAuthorizationUrl('mtn.com');
+      expect(res.url).toContain('login.microsoftonline.com/tenant-456/oauth2/v2.0/authorize');
+      expect(res.url).toContain('client_id=client-123');
+    });
+  });
+});
