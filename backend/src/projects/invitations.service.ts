@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { WorkspaceRole, InvitationStatus } from '@prisma/client';
+import { WorkspaceRole, InvitationStatus, ProjectRole } from '@prisma/client';
 import * as crypto from 'crypto';
 import { MailService } from '../mail/mail.service';
 import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
@@ -217,6 +217,32 @@ export class InvitationsService {
 
     if (existingMembership) {
       await this.prisma.$transaction(async (tx) => {
+        if (invitation.projectId) {
+          const projectRole =
+            invitation.role === 'VIEWER'
+              ? ProjectRole.CLIENT
+              : invitation.role === 'ADMIN' || invitation.role === 'OWNER'
+                ? ProjectRole.MANAGER
+                : ProjectRole.CONTRIBUTOR;
+
+          await tx.projectMembership.upsert({
+            where: {
+              projectId_userId: {
+                projectId: invitation.projectId,
+                userId: loggedUser.id,
+              },
+            },
+            create: {
+              projectId: invitation.projectId,
+              userId: loggedUser.id,
+              role: projectRole,
+            },
+            update: {
+              role: projectRole,
+            },
+          });
+        }
+
         const accepted = await tx.invitation.update({
           where: { id: invitation.id },
           data: { status: InvitationStatus.ACCEPTED, acceptedAt: new Date() },
@@ -231,7 +257,10 @@ export class InvitationsService {
       });
       return {
         workspaceId: invitation.workspaceId,
-        message: 'Vous êtes déjà membre de cet espace de travail.',
+        projectId: invitation.projectId || undefined,
+        message: invitation.projectId
+          ? 'Félicitations, vous avez rejoint le projet !'
+          : 'Vous êtes déjà membre de cet espace de travail.',
       };
     }
 
@@ -243,6 +272,33 @@ export class InvitationsService {
           role: invitation.role,
         },
       });
+
+      if (invitation.projectId) {
+        const projectRole =
+          invitation.role === 'VIEWER'
+            ? ProjectRole.CLIENT
+            : invitation.role === 'ADMIN' || invitation.role === 'OWNER'
+              ? ProjectRole.MANAGER
+              : ProjectRole.CONTRIBUTOR;
+
+        await tx.projectMembership.upsert({
+          where: {
+            projectId_userId: {
+              projectId: invitation.projectId,
+              userId: loggedUser.id,
+            },
+          },
+          create: {
+            projectId: invitation.projectId,
+            userId: loggedUser.id,
+            role: projectRole,
+          },
+          update: {
+            role: projectRole,
+          },
+        });
+      }
+
       const accepted = await tx.invitation.update({
         where: { id: invitation.id },
         data: { status: InvitationStatus.ACCEPTED, acceptedAt: new Date() },
@@ -273,7 +329,10 @@ export class InvitationsService {
 
     return {
       workspaceId: invitation.workspaceId,
-      message: "Félicitations, vous avez rejoint l'espace de travail !",
+      projectId: invitation.projectId || undefined,
+      message: invitation.projectId
+        ? 'Félicitations, vous avez rejoint le projet et son espace de travail !'
+        : "Félicitations, vous avez rejoint l'espace de travail !",
     };
   }
 

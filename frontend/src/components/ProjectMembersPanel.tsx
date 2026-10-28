@@ -11,6 +11,10 @@ import {
   MessageSquare,
   Wrench,
   Crown,
+  Mail,
+  Copy,
+  Clock,
+  ExternalLink,
 } from 'lucide-react';
 import './ProjectMembersPanel.css';
 
@@ -25,35 +29,62 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
   projectName,
   workspaceMembers,
 }) => {
-  const { getProjectMembers, assignProjectRole, removeProjectRole } = useApp();
+  const {
+    getProjectMembers,
+    assignProjectRole,
+    removeProjectRole,
+    createInvitation,
+    listInvitations,
+    revokeInvitation,
+    activeWorkspaceId,
+  } = useApp();
 
   const [members, setMembers] = useState<ProjectMember[]>([]);
+  const [projectInvitations, setProjectInvitations] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  // Formulaire d'ajout / mise à jour
+  // Form mode : 'existing' ou 'external'
+  const [addMode, setAddMode] = useState<'existing' | 'external'>('existing');
+
+  // Formulaire membre existant
   const [selectedUserId, setSelectedUserId] = useState('');
   const [selectedRole, setSelectedRole] = useState<ProjectRole>('CONTRIBUTOR');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const loadMembers = useCallback(async () => {
+  // Formulaire invité externe
+  const [externalEmail, setExternalEmail] = useState('');
+  const [externalRole, setExternalRole] = useState<'CONTRIBUTOR' | 'COMMENTER' | 'CLIENT'>(
+    'CONTRIBUTOR',
+  );
+  const [generatedInviteLink, setGeneratedInviteLink] = useState<string | null>(null);
+  const [copiedLink, setCopiedLink] = useState(false);
+
+  const loadMembersAndInvitations = useCallback(async () => {
     if (!projectId) return;
     setLoading(true);
     setError(null);
     try {
       const data = await getProjectMembers(projectId);
       setMembers(data);
+
+      if (activeWorkspaceId) {
+        const invs = await listInvitations(activeWorkspaceId);
+        // Filtrer les invitations spécifiques à ce projet
+        const filtered = (invs || []).filter((inv: any) => inv.projectId === projectId);
+        setProjectInvitations(filtered);
+      }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Impossible de charger les membres du projet.');
+      setError(err instanceof Error ? err.message : 'Impossible de charger les données du projet.');
     } finally {
       setLoading(false);
     }
-  }, [projectId, getProjectMembers]);
+  }, [projectId, activeWorkspaceId, getProjectMembers, listInvitations]);
 
   useEffect(() => {
-    loadMembers();
-  }, [loadMembers]);
+    loadMembersAndInvitations();
+  }, [loadMembersAndInvitations]);
 
   const handleAssignRole = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -66,12 +97,74 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
       await assignProjectRole(projectId, selectedUserId, selectedRole);
       setSuccess('Rôle attribué avec succès.');
       setSelectedUserId('');
-      await loadMembers();
+      await loadMembersAndInvitations();
       setTimeout(() => setSuccess(null), 3000);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Erreur lors de l'attribution du rôle.");
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleInviteExternal = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeWorkspaceId || !projectId) return;
+
+    setIsSubmitting(true);
+    setError(null);
+    setSuccess(null);
+    setGeneratedInviteLink(null);
+    try {
+      // Mapper le rôle projet vers le rôle workspace approprié
+      const wsRole = externalRole === 'CLIENT' ? 'VIEWER' : 'MEMBER';
+
+      const res = await createInvitation(
+        activeWorkspaceId,
+        externalEmail.trim() || null,
+        wsRole,
+        projectId,
+        7,
+      );
+
+      if (res && res.rawToken) {
+        const link = `${window.location.origin}/?invite=${res.rawToken}`;
+        setGeneratedInviteLink(link);
+        setSuccess(
+          externalEmail
+            ? `Invitation envoyée par email à ${externalEmail} et lien généré.`
+            : 'Lien d’invitation pour collaborateur externe généré avec succès.',
+        );
+      } else {
+        setSuccess('Invitation créée avec succès.');
+      }
+
+      setExternalEmail('');
+      await loadMembersAndInvitations();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Erreur lors de l'envoi de l'invitation.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleCopyLink = () => {
+    if (!generatedInviteLink) return;
+    navigator.clipboard.writeText(generatedInviteLink);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2500);
+  };
+
+  const handleRevokeInvitation = async (invitationId: string) => {
+    if (!window.confirm("Confirmez-vous l'annulation de cette invitation ?")) return;
+    try {
+      await revokeInvitation(invitationId);
+      setSuccess('Invitation révoquée.');
+      await loadMembersAndInvitations();
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error ? err.message : "Erreur lors de la révocation de l'invitation.",
+      );
     }
   };
 
@@ -89,7 +182,7 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
     try {
       await removeProjectRole(projectId, targetUserId);
       setSuccess('Membre retiré du projet.');
-      await loadMembers();
+      await loadMembersAndInvitations();
       setTimeout(() => setSuccess(null), 3000);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Erreur lors du retrait du membre.');
@@ -131,9 +224,10 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
         <div className="panel-title-group">
           <Shield className="panel-title-icon" size={22} />
           <div>
-            <h3 className="panel-main-title">Gouvernance & Rôles : {projectName}</h3>
+            <h3 className="panel-main-title">Gouvernance & Équipe : {projectName}</h3>
             <p className="panel-subtitle">
-              Contrôlez les accès et permissions spécifiques à ce projet pour chaque collaborateur.
+              Gérez les contributeurs internes et invitez des collaborateurs externes (clients,
+              prestataires).
             </p>
           </div>
         </div>
@@ -151,65 +245,183 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
         </div>
       )}
 
-      {/* Formulaire d'assignation rapide */}
-      <form onSubmit={handleAssignRole} className="assign-role-card">
-        <div className="assign-form-row">
-          <div className="assign-field">
-            <label className="assign-label" htmlFor="member-select">
-              <UserPlus size={14} /> Collaborateur du workspace
-            </label>
-            <select
-              id="member-select"
-              className="assign-select"
-              value={selectedUserId}
-              onChange={(e) => setSelectedUserId(e.target.value)}
-              required
+      {/* Onglets de mode d'ajout */}
+      <div className="add-mode-toggle">
+        <button
+          type="button"
+          onClick={() => {
+            setAddMode('existing');
+            setGeneratedInviteLink(null);
+          }}
+          className={`add-mode-btn ${addMode === 'existing' ? 'active' : ''}`}
+        >
+          <UserPlus size={15} /> Collaborateur du workspace
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setAddMode('external');
+            setGeneratedInviteLink(null);
+          }}
+          className={`add-mode-btn ${addMode === 'external' ? 'active' : ''}`}
+        >
+          <Mail size={15} /> Inviter un externe (Email / Lien)
+        </button>
+      </div>
+
+      {/* Mode 1: Assignation membre workspace existant */}
+      {addMode === 'existing' && (
+        <form onSubmit={handleAssignRole} className="assign-role-card">
+          <div className="assign-form-row">
+            <div className="assign-field">
+              <label className="assign-label" htmlFor="member-select">
+                <UserPlus size={14} /> Collaborateur existant
+              </label>
+              <select
+                id="member-select"
+                className="assign-select"
+                value={selectedUserId}
+                onChange={(e) => setSelectedUserId(e.target.value)}
+                required
+              >
+                <option value="">Sélectionner un membre...</option>
+                {workspaceMembers.map((wm) => {
+                  const isAlready = members.some((m) => m.userId === wm.user.id);
+                  return (
+                    <option key={wm.user.id} value={wm.user.id}>
+                      {wm.user.name || wm.user.email} ({wm.role})
+                      {isAlready ? ' — Déjà assigné (Modifier rôle)' : ''}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+
+            <div className="assign-field">
+              <label className="assign-label" htmlFor="role-select">
+                <Shield size={14} /> Rôle projet
+              </label>
+              <select
+                id="role-select"
+                className="assign-select"
+                value={selectedRole}
+                onChange={(e) => setSelectedRole(e.target.value as ProjectRole)}
+              >
+                <option value="MANAGER">MANAGER (Contrôle total du projet)</option>
+                <option value="CONTRIBUTOR">CONTRIBUTOR (Édition des tâches & jalons)</option>
+                <option value="COMMENTER">COMMENTER (Lecture + Commentaires)</option>
+                <option value="CLIENT">CLIENT (Lecture seule épurée)</option>
+              </select>
+            </div>
+
+            <button
+              type="submit"
+              className="assign-submit-btn"
+              disabled={isSubmitting || !selectedUserId}
             >
-              <option value="">Sélectionner un membre...</option>
-              {workspaceMembers.map((wm) => {
-                const isAlready = members.some((m) => m.userId === wm.user.id);
-                return (
-                  <option key={wm.user.id} value={wm.user.id}>
-                    {wm.user.name || wm.user.email} ({wm.role})
-                    {isAlready ? ' — Déjà membre (Modifier)' : ''}
-                  </option>
-                );
-              })}
-            </select>
+              {isSubmitting ? 'Enregistrement...' : 'Assigner / Mettre à jour'}
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* Mode 2: Invitation utilisateur externe */}
+      {addMode === 'external' && (
+        <form onSubmit={handleInviteExternal} className="assign-role-card">
+          <div className="assign-form-row">
+            <div className="assign-field">
+              <label className="assign-label" htmlFor="external-email-input">
+                <Mail size={14} /> Email du collaborateur externe
+              </label>
+              <input
+                id="external-email-input"
+                type="email"
+                placeholder="ex: consultant@externe.com (ou vide pour lien libre)"
+                className="assign-select"
+                value={externalEmail}
+                onChange={(e) => setExternalEmail(e.target.value)}
+              />
+            </div>
+
+            <div className="assign-field">
+              <label className="assign-label" htmlFor="external-role-select">
+                <Shield size={14} /> Rôle sur ce projet
+              </label>
+              <select
+                id="external-role-select"
+                className="assign-select"
+                value={externalRole}
+                onChange={(e) =>
+                  setExternalRole(e.target.value as 'CONTRIBUTOR' | 'COMMENTER' | 'CLIENT')
+                }
+              >
+                <option value="CONTRIBUTOR">CONTRIBUTOR (Développeur, Prestataire)</option>
+                <option value="COMMENTER">COMMENTER (Partenaire, Validateur)</option>
+                <option value="CLIENT">CLIENT (Client final, Accès lecture seule)</option>
+              </select>
+            </div>
+
+            <button type="submit" className="assign-submit-btn" disabled={isSubmitting}>
+              {isSubmitting ? 'Envoi...' : 'Générer / Envoyer l’invitation'}
+            </button>
           </div>
 
-          <div className="assign-field">
-            <label className="assign-label" htmlFor="role-select">
-              <Shield size={14} /> Rôle projet
-            </label>
-            <select
-              id="role-select"
-              className="assign-select"
-              value={selectedRole}
-              onChange={(e) => setSelectedRole(e.target.value as ProjectRole)}
-            >
-              <option value="MANAGER">MANAGER (Contrôle total du projet)</option>
-              <option value="CONTRIBUTOR">CONTRIBUTOR (Édition des tâches & jalons)</option>
-              <option value="COMMENTER">COMMENTER (Lecture + Commentaires)</option>
-              <option value="CLIENT">CLIENT (Lecture seule épurée)</option>
-            </select>
-          </div>
+          {generatedInviteLink && (
+            <div className="generated-link-card">
+              <div className="generated-link-info">
+                <ExternalLink size={16} color="var(--accent-primary)" />
+                <span className="generated-link-text">{generatedInviteLink}</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleCopyLink}
+                className={`copy-link-btn ${copiedLink ? 'copied' : ''}`}
+              >
+                {copiedLink ? <CheckCircle2 size={14} /> : <Copy size={14} />}
+                <span>{copiedLink ? 'Lien Copié !' : 'Copier le lien'}</span>
+              </button>
+            </div>
+          )}
+        </form>
+      )}
 
-          <button
-            type="submit"
-            className="assign-submit-btn"
-            disabled={isSubmitting || !selectedUserId}
-          >
-            {isSubmitting ? 'Enregistrement...' : 'Assigner / Mettre à jour'}
-          </button>
+      {/* Invitations en attente pour ce projet */}
+      {projectInvitations.length > 0 && (
+        <div className="pending-invitations-card">
+          <h4 className="pending-invitations-title">
+            <Clock size={16} /> Invitations en attente pour ce projet ({projectInvitations.length})
+          </h4>
+          <div className="pending-invitations-list">
+            {projectInvitations.map((inv) => (
+              <div key={inv.id} className="pending-invitation-item">
+                <div className="pending-invitation-details">
+                  <span className="pending-invitation-email">
+                    {inv.email || 'Lien de partage public'}
+                  </span>
+                  <span className="pending-invitation-meta">
+                    Expire le {new Date(inv.expiresAt).toLocaleDateString()} • Invité par{' '}
+                    {inv.invitedBy?.name || inv.invitedBy?.email || 'Admin'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleRevokeInvitation(inv.id)}
+                  className="pending-invitation-revoke-btn"
+                  title="Révoquer l'invitation"
+                >
+                  <Trash2 size={14} /> Annuler
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
-      </form>
+      )}
 
-      {/* Liste des membres du projet */}
+      {/* Liste des membres assignés au projet */}
       <div className="members-table-container">
         <div className="members-table-header">
           <h4 className="members-table-title">
-            <UserCheck size={16} /> Membres assignés ({members.length})
+            <UserCheck size={16} /> Membres actifs du projet ({members.length})
           </h4>
         </div>
 
