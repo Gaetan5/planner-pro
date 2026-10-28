@@ -10,6 +10,8 @@ model Workspace {
   invitations   Invitation[]
   integrations  Integration[]
   sprints       Sprint[]
+  ssoConfiguration SSOConfiguration?
+  scimApiKeys   SCIMApiKey[]
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
   deletedAt   DateTime?
@@ -76,4 +78,45 @@ enum InvitationStatus {
   ACCEPTED
   REVOKED
   EXPIRED
+}
+
+enum SSOProvider {
+  SAML2
+  OIDC_AZURE_AD
+  OIDC_GOOGLE
+  OIDC_GENERIC
+}
+
+model SSOConfiguration {
+  id             String        @id @default(uuid())
+  workspaceId    String        @unique
+  workspace      Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  provider       SSOProvider   @default(OIDC_AZURE_AD)
+  domain         String        @unique // e.g., 'sonatrach.dz', 'mtn.com'
+  clientId       String?
+  clientSecret   String?
+  discoveryUrl   String?
+  entryPoint     String?       // SAML IdP URL
+  cert           String?       @db.Text // SAML X.509 cert
+  issuer         String?       // SAML Issuer / EntityID
+  defaultRole    WorkspaceRole @default(MEMBER)
+  enforceSSO     Boolean       @default(false)
+  autoProvision  Boolean       @default(true) // JIT Provisioning
+  enabled        Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+}
+
+model SCIMApiKey {
+  id          String    @id @default(uuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name        String
+  tokenHash   String    @unique
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([workspaceId])
 }

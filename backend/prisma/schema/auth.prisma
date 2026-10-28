@@ -7,6 +7,10 @@ model User {
   githubId          String?        @unique
   githubUsername    String?
   githubAccessToken String?
+  ssoUid            String?        @unique
+  mfaSecret         String?
+  mfaEnabled        Boolean        @default(false)
+  isSuspended       Boolean        @default(false)
   platformRole       PlatformRole?
   ownedWorkspaces   Workspace[]    @relation("WorkspaceOwner")
   memberships       Membership[]

@@ -3,6 +3,7 @@ import {
   UnauthorizedException,
   BadRequestException,
   ConflictException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { randomUUID } from 'crypto';
@@ -10,6 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 import { encrypt, decrypt, hashPassword, verifyPassword } from './encryption.util';
 import { FirebaseIdentityService } from './firebase-identity.service';
+import { generateTotpSecret, verifyTotpCode, getTotpAuthUri } from './totp.util';
 
 interface GitHubTokenResponse {
   access_token?: string;
@@ -413,6 +415,28 @@ export class AuthService {
       });
     }
 
+    if (user.isSuspended) {
+      throw new ForbiddenException(
+        "Ce compte utilisateur est suspendu. Veuillez contacter l'administrateur.",
+      );
+    }
+
+    // Si le MFA TOTP est activé, émettre un ticket temporaire au lieu du token final
+    if (user.mfaEnabled) {
+      const mfaTicket = this.jwtService.sign(
+        { sub: user.id, mfaPending: true },
+        { expiresIn: '5m' },
+      );
+      return {
+        mfaRequired: true,
+        mfaTicket,
+        user: {
+          id: user.id,
+          email: user.email,
+        },
+      };
+    }
+
     const payload = { sub: user.id, email: user.email, name: user.name };
     const jwt = this.jwtService.sign(payload);
 
@@ -424,6 +448,126 @@ export class AuthService {
         platformRole: user.platformRole,
       },
       accessToken: jwt,
+    };
+  }
+
+  /**
+   * Initialise la configuration MFA TOTP (génère le secret et l'URI pour l'authenticator)
+   */
+  async setupMfa(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new UnauthorizedException('Utilisateur introuvable.');
+    }
+
+    const secret = generateTotpSecret();
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { mfaSecret: secret },
+    });
+
+    const authUri = getTotpAuthUri(user.email, secret);
+    return {
+      secret,
+      authUri,
+    };
+  }
+
+  /**
+   * Confirme et active le MFA après validation d'un premier code TOTP valide
+   */
+  async confirmMfa(userId: string, code: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !user.mfaSecret) {
+      throw new BadRequestException('Aucune configuration MFA en attente.');
+    }
+
+    const isValid = verifyTotpCode(user.mfaSecret, code);
+    if (!isValid) {
+      throw new BadRequestException('Code TOTP à 6 chiffres invalide.');
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { mfaEnabled: true },
+    });
+
+    return { mfaEnabled: true, message: 'Authentification multifacteur activée avec succès.' };
+  }
+
+  /**
+   * Désactive le MFA après vérification du code TOTP
+   */
+  async disableMfa(userId: string, code: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !user.mfaEnabled || !user.mfaSecret) {
+      throw new BadRequestException("Le MFA n'est pas activé sur ce compte.");
+    }
+
+    const isValid = verifyTotpCode(user.mfaSecret, code);
+    if (!isValid) {
+      throw new BadRequestException('Code TOTP invalide.');
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { mfaEnabled: false, mfaSecret: null },
+    });
+
+    return { mfaEnabled: false, message: 'Authentification multifacteur désactivée.' };
+  }
+
+  /**
+   * Valide le challenge MFA lors de la connexion pour émettre le jeton final
+   */
+  async verifyMfaChallenge(mfaTicket: string, code: string) {
+    if (!mfaTicket || !code) {
+      throw new BadRequestException('Le ticket MFA et le code à 6 chiffres sont requis.');
+    }
+
+    let payload: { sub: string; mfaPending: boolean };
+    try {
+      payload = await this.jwtService.verifyAsync(mfaTicket, {
+        secret: process.env.JWT_SECRET,
+      });
+    } catch {
+      throw new UnauthorizedException(
+        'Session de validation MFA expirée. Veuillez vous reconnecter.',
+      );
+    }
+
+    if (!payload.mfaPending || !payload.sub) {
+      throw new UnauthorizedException('Jeton de challenge MFA invalide.');
+    }
+
+    const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
+    if (!user || !user.mfaSecret || !user.mfaEnabled) {
+      throw new UnauthorizedException('Configuration MFA introuvable.');
+    }
+
+    if (user.isSuspended) {
+      throw new ForbiddenException('Ce compte utilisateur est suspendu.');
+    }
+
+    const isValid = verifyTotpCode(user.mfaSecret, code);
+    if (!isValid) {
+      throw new UnauthorizedException('Code de vérification TOTP incorrect.');
+    }
+
+    const accessToken = this.jwtService.sign({
+      sub: user.id,
+      email: user.email,
+      name: user.name,
+    });
+
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        platformRole: user.platformRole,
+      },
+      accessToken,
     };
   }
 

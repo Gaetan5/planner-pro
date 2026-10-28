@@ -58,12 +58,52 @@ export class AuthController {
   @Post('login')
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async login(@Body() loginDto: LoginDto, @Res({ passthrough: true }) res: Response) {
-    const { user, accessToken } = await this.authService.login(
-      loginDto.email,
-      loginDto.passwordRaw,
-    );
-    this.setTokenCookie(res, accessToken);
-    return { user, accessToken };
+    const result = await this.authService.login(loginDto.email, loginDto.passwordRaw);
+    if ('accessToken' in result && result.accessToken) {
+      this.setTokenCookie(res, result.accessToken);
+    }
+    return result;
+  }
+
+  /**
+   * Endpoint de validation du challenge MFA TOTP
+   */
+  @Post('mfa/challenge')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  async verifyMfaChallenge(
+    @Body() body: { mfaTicket: string; code: string },
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.authService.verifyMfaChallenge(body.mfaTicket, body.code);
+    this.setTokenCookie(res, result.accessToken);
+    return result;
+  }
+
+  /**
+   * Endpoint d'initialisation du MFA TOTP (génère la clé et le QR code URI)
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('mfa/setup')
+  async setupMfa(@Req() req: AuthenticatedUserRequest) {
+    return this.authService.setupMfa(req.user.id);
+  }
+
+  /**
+   * Endpoint d'activation du MFA TOTP après saisie du premier code valide
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('mfa/confirm')
+  async confirmMfa(@Body() body: { code: string }, @Req() req: AuthenticatedUserRequest) {
+    return this.authService.confirmMfa(req.user.id, body.code);
+  }
+
+  /**
+   * Endpoint de désactivation du MFA TOTP
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('mfa/disable')
+  async disableMfa(@Body() body: { code: string }, @Req() req: AuthenticatedUserRequest) {
+    return this.authService.disableMfa(req.user.id, body.code);
   }
 
   @Post('firebase/login')
