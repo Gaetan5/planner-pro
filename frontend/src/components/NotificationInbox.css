@@ -55,28 +55,39 @@
 .notification-inbox-overlay {
   position: fixed;
   inset: 0;
-  z-index: 998;
-  background: transparent;
+  z-index: 99998;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
 }
 
 /* Inbox Panel */
 .notification-inbox {
-  position: absolute;
-  top: 48px;
-  right: 0;
+  position: fixed;
   width: 400px;
-  max-height: 520px;
-  background: var(--glass-bg);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  border: 1px solid var(--glass-border);
+  max-width: calc(100vw - 32px);
+  max-height: min(520px, calc(100vh - 100px));
+  background: rgba(18, 20, 30, 0.96);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
-  z-index: 999;
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.65),
+    0 0 0 1px var(--glass-border);
+  z-index: 99999;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  animation: notif-inbox-appear 0.2s ease-out;
+  animation: notif-inbox-appear 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+[data-theme='light'] .notification-inbox {
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.15),
+    0 0 0 1px rgba(0, 0, 0, 0.05);
 }
 
 @keyframes notif-inbox-appear {
@@ -270,13 +281,14 @@
 }
 
 /* Responsive */
-@media (max-width: 480px) {
+@media (max-width: 768px) {
   .notification-inbox {
-    position: fixed;
-    top: 60px;
-    right: var(--space-md);
-    left: var(--space-md);
-    width: auto;
-    max-height: calc(100vh - 140px);
+    top: 68px !important;
+    left: 12px !important;
+    right: 12px !important;
+    width: auto !important;
+    max-width: none !important;
+    max-height: calc(100vh - 140px) !important;
+    border-radius: var(--radius-lg);
   }
 }

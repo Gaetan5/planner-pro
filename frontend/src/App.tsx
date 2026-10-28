@@ -41,6 +41,7 @@ function AppWithSession() {
   const {
     user,
     login,
+    ssoLogin,
     logout,
     activeTab,
     setActiveTab,
@@ -66,6 +67,19 @@ function AppWithSession() {
     const providerError = url.searchParams.get('error');
     if (!code && !providerError) return;
 
+    const rawState = url.searchParams.get('state');
+    let ssoDomain: string | null = null;
+    if (rawState) {
+      try {
+        const parsed = JSON.parse(atob(rawState.replace(/-/g, '+').replace(/_/g, '/')));
+        if (parsed?.domain) {
+          ssoDomain = parsed.domain;
+        }
+      } catch {
+        // Ignorer si le state n'est pas du JSON SSO
+      }
+    }
+
     url.searchParams.delete('code');
     url.searchParams.delete('state');
     url.searchParams.delete('error');
@@ -73,18 +87,21 @@ function AppWithSession() {
     window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
 
     if (providerError) {
-      setOauthError('La connexion GitHub a été annulée ou refusée.');
+      setOauthError("La connexion d'authentification a été annulée ou refusée.");
       return;
     }
 
     setHandlingOAuth(true);
     setOauthError(null);
-    login(code!)
+
+    const authPromise = ssoDomain ? ssoLogin(code!, ssoDomain) : login(code!);
+
+    authPromise
       .catch((error: unknown) => {
-        setOauthError(error instanceof Error ? error.message : 'Échec de la connexion GitHub.');
+        setOauthError(error instanceof Error ? error.message : "Échec de l'authentification.");
       })
       .finally(() => setHandlingOAuth(false));
-  }, [login]);
+  }, [login, ssoLogin]);
 
   useEffect(() => {
     if (user) {

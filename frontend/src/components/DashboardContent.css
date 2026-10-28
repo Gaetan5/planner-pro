@@ -283,13 +283,27 @@
 @media (max-width: 768px) {
   .dashboard-grid {
     grid-template-columns: 1fr;
-    gap: var(--space-lg);
+    gap: var(--space-md);
   }
 
   .timer-bar {
+    padding: var(--space-md);
     flex-direction: column;
     gap: var(--space-md);
-    align-items: flex-start;
+    align-items: stretch;
+  }
+
+  .timer-idle-left {
+    gap: var(--space-sm);
+  }
+
+  .timer-idle-text {
+    font-size: var(--font-xs);
+  }
+
+  .timer-idle-bar .btn-primary {
+    width: 100%;
+    justify-content: center;
   }
 
   .timer-bar-right {
