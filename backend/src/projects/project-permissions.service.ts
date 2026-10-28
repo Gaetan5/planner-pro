@@ -265,4 +265,36 @@ export class ProjectPermissionsService {
       },
     });
   }
+
+  /**
+   * Récupère l'historique d'audit spécifique à un projet.
+   * L'utilisateur doit avoir le rôle MANAGER sur le projet (ou être OWNER/ADMIN du workspace).
+   */
+  async getProjectAuditLogs(projectId: string, userId: string, limit = 50) {
+    await this.assertProjectRole(projectId, userId, ['MANAGER']);
+
+    const tasks = await this.prisma.task.findMany({
+      where: { projectId },
+      select: { id: true },
+    });
+    const memberships = await this.prisma.projectMembership.findMany({
+      where: { projectId },
+      select: { id: true },
+    });
+
+    const entityFilters = [
+      { entityType: 'Project', entityId: projectId },
+      { entityType: 'Task', entityId: { in: tasks.map((t) => t.id) } },
+      { entityType: 'ProjectMembership', entityId: { in: memberships.map((m) => m.id) } },
+    ];
+
+    return this.prisma.auditLog.findMany({
+      where: { OR: entityFilters },
+      take: limit,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        user: { select: { id: true, name: true, email: true } },
+      },
+    });
+  }
 }

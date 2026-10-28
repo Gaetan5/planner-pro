@@ -200,4 +200,38 @@ describe('ProjectPermissionsService', () => {
       );
     });
   });
+
+  describe('getProjectAuditLogs', () => {
+    it('filtre les logs sur les entités du projet spécifique pour un MANAGER', async () => {
+      mockPrisma.project.findFirst.mockResolvedValue({
+        id: 'project-1',
+        userId: 'creator-user',
+        workspaceId: 'workspace-1',
+      });
+      mockPrisma.projectMembership.findUnique.mockResolvedValue({
+        role: 'MANAGER',
+      });
+      mockPrisma.task.findMany.mockResolvedValue([{ id: 'task-1' }]);
+      mockPrisma.projectMembership.findMany.mockResolvedValue([{ id: 'pm-1' }]);
+      mockPrisma.auditLog.findMany.mockResolvedValue([
+        { id: 'log-1', action: 'TASK_CREATE', entityType: 'Task', entityId: 'task-1' },
+      ]);
+
+      const result = await service.getProjectAuditLogs('project-1', 'manager-1', 20);
+
+      expect(result).toHaveLength(1);
+      expect(mockPrisma.auditLog.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            OR: [
+              { entityType: 'Project', entityId: 'project-1' },
+              { entityType: 'Task', entityId: { in: ['task-1'] } },
+              { entityType: 'ProjectMembership', entityId: { in: ['pm-1'] } },
+            ],
+          },
+          take: 20,
+        }),
+      );
+    });
+  });
 });

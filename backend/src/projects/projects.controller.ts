@@ -86,6 +86,19 @@ export class ProjectsController {
     );
   }
 
+  @Get(':id/audit/logs')
+  getProjectAuditLogs(
+    @Req() req: any,
+    @Param('id') projectId: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.projectPermissionsService.getProjectAuditLogs(
+      projectId,
+      req.user.id,
+      limit ? parseInt(limit, 10) : undefined,
+    );
+  }
+
   @Get(':id/members')
   getProjectMembers(@Req() req: any, @Param('id') projectId: string) {
     return this.projectPermissionsService.getProjectMembers(projectId, req.user.id);

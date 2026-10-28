@@ -13,6 +13,7 @@ import {
   DragOverlay,
   useDraggable,
   useDroppable,
+  DragStartEvent,
   DragEndEvent,
   PointerSensor,
   useSensor,
@@ -224,7 +225,7 @@ export const CalendarView: React.FC = () => {
   };
 
   // DnD Handlers
-  const handleDragStart = (event: any) => {
+  const handleDragStart = (event: DragStartEvent) => {
     const taskId = event.active.id as string;
     setActiveDragTaskId(taskId);
     setSelectedTaskId(taskId);

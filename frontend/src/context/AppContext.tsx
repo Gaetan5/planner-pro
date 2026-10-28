@@ -89,6 +89,30 @@ export interface WorkspaceMember {
   user: { id: string; name?: string; email: string };
 }
 
+export type ProjectRole = 'MANAGER' | 'CONTRIBUTOR' | 'COMMENTER' | 'CLIENT';
+
+export interface ProjectMember {
+  id: string;
+  projectId: string;
+  userId: string;
+  role: ProjectRole;
+  user: { id: string; name?: string; email: string };
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ProjectAuditLog {
+  id: string;
+  userId: string;
+  action: string;
+  entityType: string;
+  entityId: string;
+  changes: Record<string, unknown> | string | null;
+  ipAddress?: string | null;
+  createdAt: string;
+  user?: { id: string; name?: string; email: string };
+}
+
 export interface Sprint {
   id: string;
   name: string;
@@ -409,6 +433,11 @@ interface AppContextType {
   isReadOnlyForWorkspace: (workspaceId: string) => boolean;
   currentUserRole: 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER' | null;
   isReadOnly: boolean;
+  // Permissions et Audit Projet
+  getProjectMembers: (projectId: string) => Promise<ProjectMember[]>;
+  assignProjectRole: (projectId: string, targetUserId: string, role: ProjectRole) => Promise<void>;
+  removeProjectRole: (projectId: string, targetUserId: string) => Promise<void>;
+  getProjectAuditLogs: (projectId: string, limit?: number) => Promise<ProjectAuditLog[]>;
 }
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
@@ -1379,6 +1408,51 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return res.json();
   };
 
+  const getProjectMembers = async (projectId: string): Promise<ProjectMember[]> => {
+    const res = await fetch(`${BACKEND_URL}/projects/${projectId}/members`, {
+      headers: getHeaders(),
+    });
+    if (!res.ok) {
+      throw new Error((await res.text()) || 'Impossible de récupérer les membres du projet.');
+    }
+    return res.json();
+  };
+
+  const assignProjectRole = async (
+    projectId: string,
+    targetUserId: string,
+    role: ProjectRole,
+  ): Promise<void> => {
+    const res = await fetch(`${BACKEND_URL}/projects/${projectId}/members`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ targetUserId, role }),
+    });
+    if (!res.ok) {
+      throw new Error((await res.text()) || "Impossible d'assigner le rôle sur le projet.");
+    }
+  };
+
+  const removeProjectRole = async (projectId: string, targetUserId: string): Promise<void> => {
+    const res = await fetch(`${BACKEND_URL}/projects/${projectId}/members/${targetUserId}`, {
+      method: 'DELETE',
+      headers: getHeaders(),
+    });
+    if (!res.ok) {
+      throw new Error((await res.text()) || 'Impossible de retirer le membre du projet.');
+    }
+  };
+
+  const getProjectAuditLogs = async (projectId: string, limit = 50): Promise<ProjectAuditLog[]> => {
+    const res = await fetch(`${BACKEND_URL}/projects/${projectId}/audit/logs?limit=${limit}`, {
+      headers: getHeaders(),
+    });
+    if (!res.ok) {
+      throw new Error((await res.text()) || "Impossible de charger le journal d'audit du projet.");
+    }
+    return res.json();
+  };
+
   const revokeInvitation = async (invitationId: string) => {
     const res = await fetch(`${BACKEND_URL}/projects/invitations/${invitationId}`, {
       method: 'DELETE',
@@ -1948,6 +2022,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         // Permissions
         currentUserRole,
         isReadOnly,
+        // Permissions et Audit Projet
+        getProjectMembers,
+        assignProjectRole,
+        removeProjectRole,
+        getProjectAuditLogs,
       }}
     >
       {children}

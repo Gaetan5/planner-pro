@@ -10,10 +10,14 @@ import {
   FileText,
   Truck,
   Link,
+  Users,
+  History,
 } from 'lucide-react';
 import { RadialProgressRing } from './RadialProgressRing';
 import { NumberTicker } from './NumberTicker';
 import { IntegrationsPanel } from './IntegrationsPanel';
+import { ProjectMembersPanel } from './ProjectMembersPanel';
+import { ProjectAuditLogPanel } from './ProjectAuditLogPanel';
 import './GovernanceView.css';
 
 export const GovernanceView: React.FC = () => {
@@ -35,7 +39,9 @@ export const GovernanceView: React.FC = () => {
   const [selectedProjId, setSelectedProjId] = useState<string>(projects[0]?.id || '');
   const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMember[]>([]);
   const [membersError, setMembersError] = useState<string | null>(null);
-  const [activeSubTab, setActiveSubTab] = useState<'project' | 'integrations'>('project');
+  const [activeSubTab, setActiveSubTab] = useState<
+    'project' | 'members' | 'audit' | 'integrations'
+  >('project');
 
   // Modals / forms states
   const [showMilestoneForm, setShowMilestoneForm] = useState(false);
@@ -276,6 +282,58 @@ export const GovernanceView: React.FC = () => {
                 }}
               >
                 <FileText size={16} /> Gouvernance Projet
+              </button>
+              <button
+                onClick={() => setActiveSubTab('members')}
+                className={`gov-tab-btn ${activeSubTab === 'members' ? 'active' : ''}`}
+                style={{
+                  background:
+                    activeSubTab === 'members'
+                      ? 'linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(236, 72, 153, 0.15))'
+                      : 'transparent',
+                  border:
+                    activeSubTab === 'members'
+                      ? '1px solid rgba(139, 92, 246, 0.3)'
+                      : '1px solid transparent',
+                  color: activeSubTab === 'members' ? '#f3f4f6' : '#9ca3af',
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  fontWeight: 600,
+                  fontSize: '0.9rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  transition: 'all 0.2s',
+                }}
+              >
+                <Users size={16} /> Membres & Rôles
+              </button>
+              <button
+                onClick={() => setActiveSubTab('audit')}
+                className={`gov-tab-btn ${activeSubTab === 'audit' ? 'active' : ''}`}
+                style={{
+                  background:
+                    activeSubTab === 'audit'
+                      ? 'linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(236, 72, 153, 0.15))'
+                      : 'transparent',
+                  border:
+                    activeSubTab === 'audit'
+                      ? '1px solid rgba(139, 92, 246, 0.3)'
+                      : '1px solid transparent',
+                  color: activeSubTab === 'audit' ? '#f3f4f6' : '#9ca3af',
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  fontWeight: 600,
+                  fontSize: '0.9rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  transition: 'all 0.2s',
+                }}
+              >
+                <History size={16} /> Journal d'Audit
               </button>
               <button
                 onClick={() => setActiveSubTab('integrations')}
@@ -557,7 +615,12 @@ export const GovernanceView: React.FC = () => {
                             <label className="form-label">Statut Initial</label>
                             <select
                               value={delStatus}
-                              onChange={(e) => setDelStatus(e.target.value as any)}
+                              onChange={(e) =>
+                                setDelStatus(
+                                  e.target.value as
+                                    'DRAFT' | 'READY_FOR_REVIEW' | 'ACCEPTED' | 'DELIVERED',
+                                )
+                              }
                               className="gov-select"
                             >
                               <option value="DRAFT">Brouillon</option>
@@ -805,6 +868,18 @@ export const GovernanceView: React.FC = () => {
                   </div>
                 </section>
               </>
+            )}
+
+            {activeSubTab === 'members' && activeProject && (
+              <ProjectMembersPanel
+                projectId={activeProject.id}
+                projectName={activeProject.name}
+                workspaceMembers={workspaceMembers}
+              />
+            )}
+
+            {activeSubTab === 'audit' && activeProject && (
+              <ProjectAuditLogPanel projectId={activeProject.id} projectName={activeProject.name} />
             )}
 
             {activeSubTab === 'integrations' && activeWorkspace && (
