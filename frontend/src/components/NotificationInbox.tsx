@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Bell, AtSign, UserPlus, Info, BellOff } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import './NotificationInbox.css';
@@ -23,6 +24,10 @@ export function NotificationInbox() {
   const { user, socket } = useApp();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isOpen, setIsOpen] = useState(false);
+  const [dropdownPos, setDropdownPos] = useState<{ top: number; right: number }>({
+    top: 64,
+    right: 16,
+  });
   const containerRef = useRef<HTMLDivElement>(null);
 
   const getHeaders = useCallback(
@@ -32,6 +37,37 @@ export function NotificationInbox() {
     }),
     [user?.token],
   );
+
+  // Positionner le popover sous le bouton
+  const updatePosition = useCallback(() => {
+    if (containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      const rightSpace = Math.max(16, window.innerWidth - rect.right);
+      setDropdownPos({
+        top: Math.round(rect.bottom + 8),
+        right: Math.round(rightSpace),
+      });
+    }
+  }, []);
+
+  const handleToggle = () => {
+    if (!isOpen) {
+      updatePosition();
+    }
+    setIsOpen((prev) => !prev);
+  };
+
+  // Recalculer sur resize et scroll
+  useEffect(() => {
+    if (!isOpen) return;
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [isOpen, updatePosition]);
 
   // Charger les notifications depuis le backend
   const fetchNotifications = useCallback(async () => {
@@ -101,7 +137,10 @@ export function NotificationInbox() {
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setIsOpen(false);
+        const target = e.target as HTMLElement;
+        if (!target.closest('.notification-inbox')) {
+          setIsOpen(false);
+        }
       }
     };
     if (isOpen) {
@@ -156,9 +195,10 @@ export function NotificationInbox() {
     >
       <button
         className="notification-bell"
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={handleToggle}
         title="Notifications"
         id="notification-bell"
+        type="button"
       >
         <Bell size={16} />
         {unreadCount > 0 && (
@@ -166,57 +206,68 @@ export function NotificationInbox() {
         )}
       </button>
 
-      {isOpen && (
-        <>
-          <div className="notification-inbox-overlay" onClick={() => setIsOpen(false)} />
-          <div className="notification-inbox">
-            <div className="notification-inbox__header">
-              <span className="notification-inbox__title">Notifications</span>
-              <div className="notification-inbox__actions">
-                {unreadCount > 0 && (
-                  <button className="notification-inbox__mark-all-btn" onClick={markAllAsRead}>
-                    Tout marquer comme lu
-                  </button>
+      {isOpen &&
+        createPortal(
+          <>
+            <div className="notification-inbox-overlay" onClick={() => setIsOpen(false)} />
+            <div
+              className="notification-inbox"
+              style={{
+                top: `${dropdownPos.top}px`,
+                right: `${dropdownPos.right}px`,
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="notification-inbox__header">
+                <span className="notification-inbox__title">Notifications</span>
+                <div className="notification-inbox__actions">
+                  {unreadCount > 0 && (
+                    <button className="notification-inbox__mark-all-btn" onClick={markAllAsRead}>
+                      Tout marquer comme lu
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="notification-inbox__list">
+                {notifications.length === 0 ? (
+                  <div className="notification-inbox__empty">
+                    <BellOff size={32} className="notification-inbox__empty-icon" />
+                    <span className="notification-inbox__empty-text">Aucune notification</span>
+                  </div>
+                ) : (
+                  notifications.map((notif) => (
+                    <div
+                      key={notif.id}
+                      className={`notification-item ${!notif.read ? 'notification-item--unread' : ''}`}
+                      onClick={() => {
+                        if (!notif.read) markAsRead(notif.id);
+                      }}
+                    >
+                      {getIcon(notif.type)}
+                      <div className="notification-item__body">
+                        <div className="notification-item__title-row">
+                          <span className="notification-item__title">{notif.title}</span>
+                          <span className="notification-item__time">
+                            {timeAgo(notif.createdAt)}
+                          </span>
+                        </div>
+                        <div className="notification-item__content">{notif.content}</div>
+                        {notif.sender && (
+                          <div className="notification-item__sender">
+                            par {notif.sender.name || notif.sender.email}
+                          </div>
+                        )}
+                      </div>
+                      {!notif.read && <div className="notification-item__dot" />}
+                    </div>
+                  ))
                 )}
               </div>
             </div>
-
-            <div className="notification-inbox__list">
-              {notifications.length === 0 ? (
-                <div className="notification-inbox__empty">
-                  <BellOff size={32} className="notification-inbox__empty-icon" />
-                  <span className="notification-inbox__empty-text">Aucune notification</span>
-                </div>
-              ) : (
-                notifications.map((notif) => (
-                  <div
-                    key={notif.id}
-                    className={`notification-item ${!notif.read ? 'notification-item--unread' : ''}`}
-                    onClick={() => {
-                      if (!notif.read) markAsRead(notif.id);
-                    }}
-                  >
-                    {getIcon(notif.type)}
-                    <div className="notification-item__body">
-                      <div className="notification-item__title-row">
-                        <span className="notification-item__title">{notif.title}</span>
-                        <span className="notification-item__time">{timeAgo(notif.createdAt)}</span>
-                      </div>
-                      <div className="notification-item__content">{notif.content}</div>
-                      {notif.sender && (
-                        <div className="notification-item__sender">
-                          par {notif.sender.name || notif.sender.email}
-                        </div>
-                      )}
-                    </div>
-                    {!notif.read && <div className="notification-item__dot" />}
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </>
-      )}
+          </>,
+          document.body,
+        )}
     </div>
   );
 }

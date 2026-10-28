@@ -12,10 +12,13 @@
 
 /* Header */
 .app-header {
+  position: relative;
+  z-index: 1000;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: var(--space-lg) var(--space-2xl);
+  padding: var(--space-md) var(--space-xl);
+  gap: var(--space-md);
 }
 
 .app-brand {
@@ -55,19 +58,32 @@
 /* Navigation Tabs */
 .app-nav {
   display: flex;
-  gap: var(--space-sm);
+  gap: 4px;
+  align-items: center;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  flex: 1;
+  min-width: 0;
+  padding: 2px 4px;
+}
+
+.app-nav::-webkit-scrollbar {
+  display: none;
 }
 
 .nav-tab {
-  padding: var(--space-sm) var(--space-lg);
+  padding: 6px 14px;
   border: none;
   cursor: pointer;
-  font-size: var(--font-md);
+  font-size: var(--font-sm);
   font-weight: 600;
   font-family: var(--font-primary);
   color: var(--text-secondary);
   background: none;
   border-radius: var(--radius-sm);
+  white-space: nowrap;
+  flex-shrink: 0;
   transition:
     color var(--transition-fast),
     background var(--transition-fast);
@@ -144,6 +160,8 @@
 
 /* Main Content Area */
 .app-main {
+  position: relative;
+  z-index: 1;
   flex: 1;
   min-height: 0;
   display: flex;
@@ -199,9 +217,25 @@
    RESPONSIVE
    ======================================== */
 
+@media (max-width: 1200px) {
+  .app-header {
+    padding: var(--space-sm) var(--space-lg);
+    gap: var(--space-sm);
+  }
+
+  .nav-tab {
+    padding: 6px 10px;
+    font-size: 13px;
+  }
+
+  .connection-badge {
+    display: none;
+  }
+}
+
 @media (max-width: 1024px) {
   .app-header {
-    padding: var(--space-md) var(--space-lg);
+    padding: var(--space-sm) var(--space-md);
   }
 
   .app-brand__subtitle,
@@ -212,13 +246,17 @@
 
 @media (max-width: 768px) {
   .app-layout {
-    padding: var(--space-md);
-    padding-bottom: 72px; /* space for bottom nav */
-    gap: var(--space-md);
+    padding: var(--space-sm);
+    padding-bottom: 76px; /* space for bottom nav */
+    gap: var(--space-sm);
   }
 
   .app-header {
-    padding: var(--space-md);
+    padding: 8px 12px;
+  }
+
+  .app-header-right {
+    gap: 6px;
   }
 
   .app-nav.desktop-only {
@@ -234,6 +272,11 @@
   }
 
   .app-brand__title {
-    font-size: var(--font-lg);
+    font-size: var(--font-md);
+  }
+
+  .app-brand__logo {
+    width: 32px;
+    height: 32px;
   }
 }
