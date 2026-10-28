@@ -1,6 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp, Task, TimeBlock } from '../context/AppContext';
-import { Calendar as CalendarIcon, Clock, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
+import {
+  Calendar as CalendarIcon,
+  Clock,
+  Trash2,
+  ChevronLeft,
+  ChevronRight,
+  CalendarRange,
+} from 'lucide-react';
 import {
   DndContext,
   DragOverlay,
@@ -53,6 +60,16 @@ function DraggableTaskCard({
     >
       <h5>{task.title}</h5>
       <span>Priorité : {task.priority}</span>
+      {task.startDate && task.dueDate ? (
+        <span className="calendar-card-gantt-badge">
+          📅 Gantt : {format(new Date(task.startDate), 'dd/MM')} →{' '}
+          {format(new Date(task.dueDate), 'dd/MM')}
+        </span>
+      ) : task.dueDate ? (
+        <span className="calendar-card-gantt-badge">
+          Échéance : {format(new Date(task.dueDate), 'dd/MM')}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -146,9 +163,14 @@ function DroppableSlot({
 
 /* ======== Main Component ======== */
 export const CalendarView: React.FC = () => {
-  const { projects, timeBlocks, createTimeBlock, deleteTimeBlock, scheduleReminder } = useApp();
+  const { projects, timeBlocks, createTimeBlock, deleteTimeBlock, scheduleReminder, refreshData } =
+    useApp();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [activeDragTaskId, setActiveDragTaskId] = useState<string | null>(null);
+
+  useEffect(() => {
+    refreshData();
+  }, [refreshData]);
 
   // Date et mode de vue
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
@@ -234,6 +256,30 @@ export const CalendarView: React.FC = () => {
     end: endOfWeek(currentDate, { weekStartsOn: 1 }),
   });
 
+  // Récupérer les tâches planifiées via Gantt ou avec échéance pour une date donnée
+  const getTasksForDate = (date: Date) => {
+    const targetMidnight = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+    return allTasks.filter((task) => {
+      if (!task.startDate && !task.dueDate) return false;
+      const start = task.startDate
+        ? new Date(task.startDate)
+        : task.dueDate
+          ? new Date(task.dueDate)
+          : null;
+      const due = task.dueDate ? new Date(task.dueDate) : start;
+      if (!start || !due) return false;
+
+      const startMidnight = new Date(
+        start.getFullYear(),
+        start.getMonth(),
+        start.getDate(),
+      ).getTime();
+      const dueMidnight = new Date(due.getFullYear(), due.getMonth(), due.getDate()).getTime();
+
+      return targetMidnight >= startMidnight && targetMidnight <= dueMidnight;
+    });
+  };
+
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <div className="calendar-layout">
@@ -310,31 +356,64 @@ export const CalendarView: React.FC = () => {
 
           {/* Grille d'emploi du temps */}
           {viewMode === 'day' ? (
-            <div className="calendar-grid">
-              {hours.map((hour) => {
-                const slotId = `slot-${format(currentDate, 'yyyy-MM-dd')}-${hour}`;
-                const block = timeBlocks.find((tb) => {
-                  const tbDate = new Date(tb.startTime);
-                  return isSameDay(tbDate, currentDate) && tbDate.getHours() === hour;
-                });
-
+            <>
+              {/* Tâches planifiées dans le Gantt pour le jour sélectionné */}
+              {(() => {
+                const dayGanttTasks = getTasksForDate(currentDate);
+                if (dayGanttTasks.length === 0) return null;
                 return (
-                  <div key={hour} className="calendar-time-row">
-                    <span className="calendar-time-label">{formatHour(hour)}</span>
-                    <DroppableSlot
-                      slotId={slotId}
-                      block={block}
-                      hour={hour}
-                      date={currentDate}
-                      isWeekView={false}
-                      selectedTaskId={selectedTaskId}
-                      onSchedule={handleScheduleTask}
-                      onDeleteBlock={deleteTimeBlock}
-                    />
+                  <div className="calendar-gantt-banner">
+                    <div className="calendar-gantt-banner-title">
+                      <CalendarRange size={15} color="var(--accent-primary)" />
+                      <span>Tâches planifiées dans le Gantt ({dayGanttTasks.length})</span>
+                    </div>
+                    <div className="calendar-gantt-banner-list">
+                      {dayGanttTasks.map((task) => (
+                        <div key={task.id} className="calendar-gantt-banner-item">
+                          <span className="calendar-gantt-banner-item-title">{task.title}</span>
+                          <span className="calendar-gantt-banner-item-dates">
+                            {task.startDate && task.dueDate
+                              ? `${format(new Date(task.startDate), 'dd/MM')} → ${format(new Date(task.dueDate), 'dd/MM')}`
+                              : task.dueDate
+                                ? `Échéance : ${format(new Date(task.dueDate), 'dd/MM')}`
+                                : ''}
+                          </span>
+                          <span className={`task-badge task-badge--${task.priority.toLowerCase()}`}>
+                            {task.priority}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 );
-              })}
-            </div>
+              })()}
+
+              <div className="calendar-grid">
+                {hours.map((hour) => {
+                  const slotId = `slot-${format(currentDate, 'yyyy-MM-dd')}-${hour}`;
+                  const block = timeBlocks.find((tb) => {
+                    const tbDate = new Date(tb.startTime);
+                    return isSameDay(tbDate, currentDate) && tbDate.getHours() === hour;
+                  });
+
+                  return (
+                    <div key={hour} className="calendar-time-row">
+                      <span className="calendar-time-label">{formatHour(hour)}</span>
+                      <DroppableSlot
+                        slotId={slotId}
+                        block={block}
+                        hour={hour}
+                        date={currentDate}
+                        isWeekView={false}
+                        selectedTaskId={selectedTaskId}
+                        onSchedule={handleScheduleTask}
+                        onDeleteBlock={deleteTimeBlock}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </>
           ) : (
             <div
               style={{
@@ -356,6 +435,30 @@ export const CalendarView: React.FC = () => {
                     <div style={{ fontSize: '18px', fontWeight: 700 }}>{format(day, 'd')}</div>
                   </div>
                 ))}
+              </div>
+
+              {/* Ligne Tâches Gantt pour la semaine */}
+              <div className="calendar-grid-week-gantt-row">
+                <div className="calendar-gantt-row-label">
+                  <CalendarRange size={13} />
+                  <span>Gantt</span>
+                </div>
+                {weekDays.map((day) => {
+                  const dayTasks = getTasksForDate(day);
+                  return (
+                    <div key={`gantt-col-${day.toISOString()}`} className="calendar-gantt-col">
+                      {dayTasks.map((task) => (
+                        <div
+                          key={task.id}
+                          className="calendar-gantt-week-badge"
+                          title={`${task.title} (${task.priority})`}
+                        >
+                          {task.title}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
               </div>
 
               <div className="calendar-grid-week">

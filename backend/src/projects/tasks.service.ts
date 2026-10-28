@@ -318,6 +318,22 @@ export class TasksService {
         await this.propagateScheduleUpdates(taskId, newDue, visited, tx, impactedTaskIds);
       }
 
+      const oldStart = task.startDate ? new Date(task.startDate) : null;
+      const newStartObj = data.startDate ? new Date(data.startDate) : null;
+
+      if (newStartObj && oldStart && oldStart.getTime() !== newStartObj.getTime()) {
+        const deltaMs = newStartObj.getTime() - oldStart.getTime();
+        const existingBlocks = await tx.timeBlock.findMany({ where: { taskId } });
+        for (const block of existingBlocks) {
+          const shiftedStart = new Date(new Date(block.startTime).getTime() + deltaMs);
+          const shiftedEnd = new Date(new Date(block.endTime).getTime() + deltaMs);
+          await tx.timeBlock.update({
+            where: { id: block.id },
+            data: { startTime: shiftedStart, endTime: shiftedEnd },
+          });
+        }
+      }
+
       const workspaceId = task.project.workspaceId ?? `personal-${task.project.userId}`;
       await this.firestoreSync.enqueue(tx, {
         entityType: 'task',
