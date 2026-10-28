@@ -153,6 +153,10 @@ export function AdminConsole() {
         fetch(`${API_URL}/admin/overview`, { headers: getHeaders() }),
         fetch(`${API_URL}/admin/health`, { headers: getHeaders() }),
       ]);
+      if (ovRes.status === 403 || hlRes.status === 403) {
+        setError("Votre compte n'a pas accès à l'administration de la plateforme.");
+        return;
+      }
       if (ovRes.ok && hlRes.ok) {
         setOverview(await ovRes.json());
         setHealth(await hlRes.json());

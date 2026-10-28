@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useApp } from '../context/AppContext';
 import { AdminConsole } from './AdminConsole';
@@ -66,18 +66,23 @@ describe('AdminConsole', () => {
     render(<AdminConsole />);
 
     await waitFor(() => {
-      expect(screen.getByText('platform.admin.bootstrap')).toBeInTheDocument();
+      expect(screen.getByText('8')).toBeInTheDocument();
     });
-    expect(screen.getByText('8')).toBeInTheDocument();
     expect(screen.getAllByText('Opérationnel')).toHaveLength(2);
     expect(screen.getByText('Miroir Firestore')).toBeInTheDocument();
     expect(screen.getByText('Désactivé')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Journal d'Audit/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('platform.admin.bootstrap')).toBeInTheDocument();
+    });
     expect(screen.getByText('admin@example.com')).toBeInTheDocument();
     expect(global.fetch).toHaveBeenCalledTimes(3);
     expect(global.fetch).toHaveBeenCalledWith(
       expect.stringContaining('/admin/overview'),
       expect.objectContaining({
-        headers: { Authorization: 'Bearer admin-token' },
+        headers: expect.objectContaining({ Authorization: 'Bearer admin-token' }),
       }),
     );
   });

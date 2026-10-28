@@ -8,11 +8,28 @@ export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> 
   oauthError,
   isLoadingOAuth = false,
 }) => {
-  const { mockLogin, classicLogin, classicRegister, firebaseLogin } = useApp();
+  const { mockLogin, classicLogin, classicRegister, firebaseLogin, verifyMfa, discoverSso } =
+    useApp();
   const [isRegisterMode, setIsRegisterMode] = useState(false);
+  const [isSsoMode, setIsSsoMode] = useState(false);
   const [authProvider, setAuthProvider] = useState<'firebase' | 'legacy'>(
     isFirebaseAuthConfigured ? 'firebase' : 'legacy',
   );
+
+  // MFA states
+  const [mfaStep, setMfaStep] = useState(false);
+  const [mfaTicket, setMfaTicket] = useState('');
+  const [mfaCode, setMfaCode] = useState('');
+
+  // SSO discovery states
+  const [ssoEmail, setSsoEmail] = useState('');
+  const [ssoResult, setSsoResult] = useState<{
+    ssoAvailable: boolean;
+    domain?: string;
+    workspaceName?: string;
+    provider?: string;
+    authUrl?: string;
+  } | null>(null);
 
   // Login fields
   const [loginEmail, setLoginEmail] = useState('');
@@ -43,8 +60,8 @@ export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> 
     setLoading(true);
     try {
       await mockLogin(bypassName || 'Gaëtan');
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Échec de la simulation de connexion');
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : 'Échec de la simulation de connexion');
     } finally {
       setLoading(false);
     }
@@ -59,9 +76,56 @@ export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> 
     setErrorMsg('');
     setLoading(true);
     try {
-      await classicLogin(loginEmail, loginPassword);
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Identifiants incorrects.');
+      const res = await classicLogin(loginEmail, loginPassword);
+      if (res?.mfaRequired && res.mfaTicket) {
+        setMfaTicket(res.mfaTicket);
+        setMfaStep(true);
+      }
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : 'Identifiants incorrects.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyMfa = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!mfaCode || mfaCode.length !== 6) {
+      setErrorMsg('Veuillez saisir un code TOTP à 6 chiffres.');
+      return;
+    }
+    setErrorMsg('');
+    setLoading(true);
+    try {
+      await verifyMfa(mfaTicket, mfaCode);
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : 'Code de vérification invalide.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSsoDiscovery = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ssoEmail || !ssoEmail.includes('@')) {
+      setErrorMsg('Veuillez entrer une adresse e-mail professionnelle valide.');
+      return;
+    }
+    setErrorMsg('');
+    setLoading(true);
+    try {
+      const result = await discoverSso(ssoEmail);
+      if (!result.ssoAvailable) {
+        setErrorMsg(`Aucun fournisseur SSO configuré pour ce domaine. Contactez l'administrateur.`);
+        setSsoResult(null);
+      } else {
+        setSsoResult(result);
+        if (result.authUrl) {
+          window.location.href = result.authUrl;
+        }
+      }
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : 'Erreur lors de la découverte SSO.');
     } finally {
       setLoading(false);
     }
@@ -82,8 +146,8 @@ export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> 
     try {
       await classicRegister(regEmail, regPassword, regName);
       // L'inscription déclenchera automatiquement la connexion et l'onboarding côté backend
-    } catch (err: any) {
-      setErrorMsg(err.message || "Erreur lors de l'inscription.");
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : "Erreur lors de l'inscription.");
     } finally {
       setLoading(false);
     }
@@ -191,26 +255,40 @@ export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> 
         )}
 
         {/* Navigation Tabs */}
-        <div className="auth-tabs">
-          <button
-            className={`auth-tab ${!isRegisterMode ? 'auth-tab--active' : ''}`}
-            onClick={() => {
-              setIsRegisterMode(false);
-              setErrorMsg('');
-            }}
-          >
-            Se connecter
-          </button>
-          <button
-            className={`auth-tab ${isRegisterMode ? 'auth-tab--active' : ''}`}
-            onClick={() => {
-              setIsRegisterMode(true);
-              setErrorMsg('');
-            }}
-          >
-            S'inscrire
-          </button>
-        </div>
+        {!mfaStep && (
+          <div className="auth-tabs">
+            <button
+              className={`auth-tab ${!isRegisterMode && !isSsoMode ? 'auth-tab--active' : ''}`}
+              onClick={() => {
+                setIsRegisterMode(false);
+                setIsSsoMode(false);
+                setErrorMsg('');
+              }}
+            >
+              Se connecter
+            </button>
+            <button
+              className={`auth-tab ${isRegisterMode ? 'auth-tab--active' : ''}`}
+              onClick={() => {
+                setIsRegisterMode(true);
+                setIsSsoMode(false);
+                setErrorMsg('');
+              }}
+            >
+              S'inscrire
+            </button>
+            <button
+              className={`auth-tab ${isSsoMode ? 'auth-tab--active' : ''}`}
+              onClick={() => {
+                setIsSsoMode(true);
+                setIsRegisterMode(false);
+                setErrorMsg('');
+              }}
+            >
+              SSO Entreprise
+            </button>
+          </div>
+        )}
 
         {/* Error Notification */}
         {errorMsg && (
@@ -228,7 +306,101 @@ export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> 
 
         {/* Forms Container */}
         <div className="auth-forms-wrapper">
-          {authProvider === 'firebase' ? (
+          {mfaStep ? (
+            /* Écran Challenge MFA TOTP */
+            <form onSubmit={handleVerifyMfa} className="auth-form fade-in">
+              <div style={{ textAlign: 'center', marginBottom: '1.25rem' }}>
+                <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🔐</div>
+                <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600 }}>
+                  Validation en deux étapes
+                </h3>
+                <p style={{ fontSize: '0.875rem', opacity: 0.8, marginTop: '0.35rem' }}>
+                  Entrez le code à 6 chiffres généré par votre application Authenticator.
+                </p>
+              </div>
+
+              <div className="form-group">
+                <input
+                  type="text"
+                  maxLength={6}
+                  placeholder="000000"
+                  value={mfaCode}
+                  onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, ''))}
+                  className="form-input"
+                  style={{
+                    textAlign: 'center',
+                    fontSize: '1.5rem',
+                    letterSpacing: '0.35rem',
+                    fontWeight: 'bold',
+                  }}
+                  autoFocus
+                  required
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="btn-primary auth-submit-btn"
+                disabled={loading || mfaCode.length !== 6}
+              >
+                {loading ? 'Vérification...' : 'Valider la connexion'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setMfaStep(false);
+                  setMfaTicket('');
+                  setMfaCode('');
+                }}
+                className="btn-secondary"
+                style={{ width: '100%', marginTop: '0.75rem', padding: '0.65rem' }}
+              >
+                Annuler
+              </button>
+            </form>
+          ) : isSsoMode ? (
+            /* Formulaire SSO Entreprise */
+            <form onSubmit={handleSsoDiscovery} className="auth-form fade-in">
+              <div style={{ marginBottom: '1rem' }}>
+                <p style={{ fontSize: '0.875rem', opacity: 0.85, margin: 0 }}>
+                  Accédez à votre espace avec vos identifiants d'entreprise (Microsoft Azure AD,
+                  Google Workspace ou SAML 2.0).
+                </p>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Adresse e-mail professionnelle</label>
+                <input
+                  type="email"
+                  placeholder="collaborateur@organisation.com"
+                  value={ssoEmail}
+                  onChange={(e) => setSsoEmail(e.target.value)}
+                  className="form-input"
+                  required
+                />
+              </div>
+
+              {ssoResult?.ssoAvailable && (
+                <div
+                  style={{
+                    padding: '0.75rem',
+                    borderRadius: '8px',
+                    background: 'rgba(59, 130, 246, 0.1)',
+                    border: '1px solid rgba(59, 130, 246, 0.3)',
+                    marginBottom: '1rem',
+                    fontSize: '0.85rem',
+                  }}
+                >
+                  🏢 <strong>{ssoResult.workspaceName}</strong> ({ssoResult.provider})
+                </div>
+              )}
+
+              <button type="submit" className="btn-primary auth-submit-btn" disabled={loading}>
+                {loading ? 'Détection en cours...' : 'Continuer avec le SSO Entreprise'}
+              </button>
+            </form>
+          ) : authProvider === 'firebase' ? (
             <form onSubmit={handleFirebaseAuth} className="auth-form fade-in">
               {isRegisterMode && (
                 <div className="form-group">

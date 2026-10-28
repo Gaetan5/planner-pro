@@ -202,9 +202,22 @@ interface AppContextType {
     | 'admin';
   isConnected: boolean;
   login: (code: string) => Promise<void>;
-  classicLogin: (email: string, passwordRaw: string) => Promise<void>;
+  classicLogin: (
+    email: string,
+    passwordRaw: string,
+  ) => Promise<{ mfaRequired?: boolean; mfaTicket?: string } | void>;
+  verifyMfa: (mfaTicket: string, code: string) => Promise<void>;
+  discoverSso: (email: string) => Promise<{
+    ssoAvailable: boolean;
+    domain?: string;
+    provider?: string;
+    workspaceName?: string;
+    enforceSSO?: boolean;
+    authUrl?: string;
+  }>;
   classicRegister: (email: string, passwordRaw: string, name: string) => Promise<void>;
   firebaseLogin: (idToken: string, name?: string) => Promise<void>;
+  ssoLogin: (code: string, domain: string) => Promise<void>;
   logout: () => void;
   mockLogin: (name: string) => Promise<void>;
   setActiveTab: (
@@ -811,6 +824,81 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (!res.ok) {
         const errData = await res.json();
         throw new Error(errData.message || 'Identifiants invalides');
+      }
+      const data = await res.json();
+
+      if (data.mfaRequired) {
+        return { mfaRequired: true, mfaTicket: data.mfaTicket };
+      }
+
+      const userData = {
+        id: data.user.id,
+        name: data.user.name,
+        email: data.user.email,
+        token: data.accessToken,
+        platformRole: data.user.platformRole ?? null,
+      };
+      setUser(userData);
+      localStorage.setItem('planner_user', JSON.stringify(userData));
+    } catch (e) {
+      console.error(e);
+      throw e;
+    }
+  };
+
+  const verifyMfa = async (mfaTicket: string, code: string) => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/auth/mfa/challenge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mfaTicket, code }),
+      });
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.message || 'Code d’authentification TOTP invalide');
+      }
+      const data = await res.json();
+      const userData = {
+        id: data.user.id,
+        name: data.user.name,
+        email: data.user.email,
+        token: data.accessToken,
+        platformRole: data.user.platformRole ?? null,
+      };
+      setUser(userData);
+      localStorage.setItem('planner_user', JSON.stringify(userData));
+    } catch (e) {
+      console.error(e);
+      throw e;
+    }
+  };
+
+  const discoverSso = async (email: string) => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/auth/sso/discover`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      if (!res.ok) {
+        return { ssoAvailable: false };
+      }
+      return await res.json();
+    } catch {
+      return { ssoAvailable: false };
+    }
+  };
+
+  const ssoLogin = async (code: string, domain: string) => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/auth/sso/callback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, domain }),
+      });
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.message || 'Échec de l’authentification SSO');
       }
       const data = await res.json();
       const userData = {
@@ -1766,8 +1854,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isConnected,
         login,
         classicLogin,
+        verifyMfa,
+        discoverSso,
         classicRegister,
         firebaseLogin,
+        ssoLogin,
         logout,
         mockLogin,
         setActiveTab,
