@@ -1,9 +1,7 @@
 # Dossier d'Architecture Technique & Manuel d'Ingénierie (DAT)
-
 ## Système Planner-Pro — Operating System de Productivité & Ingénierie
-
 **Statut :** Production Ready  
-**Version :** 2.0 (Spécifications Techniques Approfondies)  
+**Version :** 2.1 (Spécifications Techniques Complètes & Exhaustives)  
 **Public cible :** Architectes Logiciels, Ingénieurs Backend/Frontend, DevOps & Lead Developers  
 **Dernière révision :** Octobre 2026  
 
@@ -21,19 +19,20 @@
 8. [Bloc-notes Intelligent & Moteur Lexical (Notes-to-Tasks)](#8-bloc-notes-intelligent--moteur-lexical-notes-to-tasks)
 9. [Moteur Financier, Budgets & Burn Rate Projet](#9-moteur-financier-budgets--burn-rate-projet)
 10. [Synchronisation Hybride Asynchrone : Transactional Outbox vers Cloud Firestore](#10-synchronisation-hybride-asynchrone--transactional-outbox-vers-cloud-firestore)
-11. [Infrastructure de Production, Déploiement & Résilience](#11-infrastructure-de-production-déploiement--résilience)
+11. [Moteur d'IA & Heuristique Prédictive (Copilot & Gemini)](#11-moteur-dia--heuristique-prédictive-copilot--gemini)
+12. [Gouvernance, Traçabilité & Journal d'Audit (Audit Trail)](#12-gouvernance-traçabilité--journal-daudit-audit-trail)
+13. [Passerelle de Notifications Temps Réel & Mentions](#13-passerelle-de-notifications-temps-réel--mentions)
+14. [Infrastructure de Production, Déploiement & Résilience](#14-infrastructure-de-production-déploiement--résilience)
 
 ---
 
 ## 1. Vision Architecturale & Principes Directeurs
 
 ### 1.1 Contexte & Paradigme "Focus & Flow"
-
-Planner-Pro n'est pas une simple application de gestion de tickets de plus (CRUD). Son architecture est conçue pour éliminer la friction cognitive entre la réflexion libre (prise de notes), la formalisation de projet (Kanban, Gantt, jalons) et l'exécution minutée (chronomètre temps réel, Time-blocking, Pomodoro).
+Planner-Pro transcende le simple gestionnaire de tâches pour devenir un hub actif de productivité profonde. L'application fait converger la réflexion (bloc-notes libre), la planification (Kanban, Gantt & Sprints) et l'exécution (Time-tracking temps réel et time-blocking calendrier) sans friction cognitive.
 
 ### 1.2 Principes d'Ingénierie Logicielle
-
-* **Architecture Modulaire DDD (Domain-Driven Design)** : Découpage strict du backend NestJS en domaines d'affaires autonomes (`auth`, `projects`, `tracking`, `notes`, `notifications`, `firestore-sync`).
+* **Architecture Modulaire DDD (Domain-Driven Design)** : Découpage strict du backend NestJS en domaines d'affaires autonomes (`auth`, `projects`, `tracking`, `notes`, `notifications`, `firestore-sync`, `admin`).
 * **Zéro Dépendance Circulaire Métier & Graphe Acyclique Dirigé (DAG)** : Les dépendances de tâches sont modélisées mathématiquement comme un DAG vérifié par recherche en profondeur (DFS).
 * **Sécurité Défensive & Zéro Exposition** : Tout secret externe est chiffré symétriquement en AES-256-GCM. Aucun token brut d'invitation n'est persistant en base de données.
 * **Résilience aux Pannes Réseau (Double-Write Problem résolu)** : L'intégration avec des services externes ou Cloud distants (comme Firestore) n'utilise jamais d'appel synchrone dans la transaction métier, mais s'appuie sur le patron *Transactional Outbox*.
@@ -73,7 +72,9 @@ Le système est conteneurisé et orchestré via Docker Compose, séparant hermé
 |  Build Vite)  |       | - Projects & Tasks Module (Gantt DFS Engine)  |        |
 |               |       | - Notes Service (Regex Markdown-to-Tasks)     |        |
 | Port: 8080    |       | - Tracking Gateway (Socket.io WSS)            |        |
-+---------------+       | - Transactional Outbox Worker                 |        |
++---------------+       | - Copilot Service (Heuristics & Gemini LLM)   |        |
+                        | - Notifications Gateway (Pub/Sub Redis)       |        |
+                        | - Transactional Outbox Worker                 |        |
                         +-------+--------------------+------------------+        |
                                 |                    |                           |
                  Prisma ORM v7  |                    | Redis Client              |
@@ -89,37 +90,31 @@ Le système est conteneurisé et orchestré via Docker Compose, séparant hermé
 ### 2.1 Description Technique des Conteneurs
 
 #### Conteneur 1 : Proxy Inverse Nginx (`ekose-nginx-1` ou Nginx Hôte)
-
 * **Fonctions** : Terminaison TLS (Certificats RSA 4096 / ECDSA Let's Encrypt), négociation HTTP/2, compression Gzip/Brotli, rate-limiting (60 req/min sur endpoints sensibles), et négociation du tunnel WebSocket (`proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade"`).
 * **Réseau** : Expose le port 80 (redirection permanente HTTP 301 vers 443) et le port 443.
 
 #### Conteneur 2 : Frontend SPA (`planner-pro-production-frontend-1`)
-
 * **Framework & Build** : React 18, TypeScript, bundler Vite.
 * **Moteurs de rendu & Interaction** : `@dnd-kit/core` et `@dnd-kit/sortable` pour le glisser-déposer haute vélocité (Kanban, Calendrier, Sprints), Lucide React pour l'iconographie, Context API (`AppContext`) pour la distribution réactive de l'état global.
 * **Serveur interne** : Nginx 1.27 Alpine servant les assets statiques compilés avec politique de cache agressive (`Cache-Control: public, max-age=31536000, immutable` pour les chunks hashés et `no-cache` pour `index.html`).
 
 #### Conteneur 3 : Backend API NestJS (`planner-pro-production-backend-1`)
-
 * **Framework & Moteur** : Node.js 20 LTS, NestJS 10, architecture modulaire en injection de dépendances.
 * **Passerelle Temps Réel** : `@nestjs/websockets` avec moteur Socket.io v4. Couplé à `@socket.io/redis-adapter` pour permettre un dimensionnement horizontal multi-instances sans perte de cohésion de sessions.
 * **Couche d'Accès aux Données** : Prisma ORM v7 avec découpage multi-fichiers de schéma (`auth.prisma`, `project.prisma`, `tracking.prisma`, `notes.prisma`). Pool de connexions optimisé avec timeouts stricts.
 
 #### Conteneur 4 : Base de Données Principale (`planner-pro-production-db-1`)
-
 * **Moteur SGBDR** : MySQL 8.0 Community Edition configuré en encodage `utf8mb4_unicode_ci`.
 * **Garanties** : Moteur InnoDB, transactions au niveau d'isolation `READ COMMITTED`, clés étrangères avec cascades contrôlées, indexation B-Tree sur les identifiants de partitionnement métier (`workspaceId`, `projectId`, `userId`).
 
 #### Conteneur 5 : Cache & Pub/Sub Distribué (`planner-pro-production-cache-1`)
-
 * **Moteur** : Redis 7.0 Alpine.
-* **Utilisations** :
+* **Utilisations** : 
   1. Adaptateur Pub/Sub pour la diffusion de messages WebSocket entre workers Node.js.
   2. Cache à faible latence pour la lecture des notes (`TTL: 3600s`).
   3. Stockage volatile des états de présence et timers actifs en cours de session.
 
 #### Conteneur 6 : Cloud Firestore (Google Cloud Platform)
-
 * **Rôle** : Base de données NoSQL distribuée servant de miroir temps réel pour les applications mobiles et de secours hors-ligne (Offline-First sync). Alimenté de manière asynchrone et idempotente par le worker *Transactional Outbox* du backend.
 
 ---
@@ -155,7 +150,6 @@ Le flux d'authentification OAuth 2.0 s'exécute selon la spécification RFC 6749
 ```
 
 ### 3.2 Spécification du Chiffrement Symétrique AES-256-GCM
-
 Pour sécuriser les jetons d'accès tiers (GitHub personal tokens, jetons d'intégration Google Calendar, etc.), le service `encryption.util.ts` implémente un chiffrement symétrique authentifié **AES-256-GCM** (Galois/Counter Mode) :
 
 * **Génération de la clé** : Clé symétrique de 256 bits dérivée de la variable d'environnement `ENCRYPTION_KEY`.
@@ -234,7 +228,6 @@ Le système d'invitation garantit qu'aucun lien d'invitation ne puisse être dev
 ```
 
 ### 4.1 Détails Techniques de Sécurité
-
 1. **Entropie Cryptographique** : Le jeton brut `rawToken` est généré par `crypto.randomBytes(32).toString('hex')`, offrant un espace d'états de $2^{256}$, éliminant tout risque d'attaque par force brute ou collision.
 2. **Hachage Unidirectionnel en Base** : Seul le digest `crypto.createHash('sha256').update(rawToken).digest('hex')` est stocké en base de données. Même avec un accès administrateur direct à la table MySQL `invitations`, un attaquant ne peut pas reconstituer le lien magique à présenter à l'API.
 3. **Idempotence & Anti-Replay** : Dès qu'une invitation est consommée via l'endpoint `/projects/invitations/accept/:token`, son statut est basculé à `ACCEPTED` avec horodatage `acceptedAt = NOW()`. Toute tentative ultérieure de réutilisation est immédiatement rejetée avec une exception HTTP 400 (`Cette invitation a déjà été acceptée`).
@@ -357,7 +350,6 @@ Le suivi du temps de travail s'appuie sur une architecture hybride combinant la 
 ```
 
 ### 6.1 Protocole & Gestion des Événements Temps Réel
-
 * **Isolation des Salons (Rooms)** : À la connexion, le client rejoint automatiquement :
   1. Son salon personnel `user:${userId}` (pour synchroniser le chronomètre sur plusieurs onglets ou appareils de ce collaborateur).
   2. Les salons de ses espaces `workspace:${workspaceId}` (pour notifier les collègues en temps réel de qui travaille sur quoi).
@@ -389,7 +381,6 @@ Le module de calendrier concrétise la planification dans le temps réel en déc
 ```
 
 ### 7.1 Algorithme de Détection de Surcharge Quotidienne
-
 Lors de chaque modification de timeblock, le frontend et le backend exécutent le calcul de la somme des durées de tous les blocs d'un utilisateur sur la journée $J$ :
 
 $$\text{Charge}(J) = \sum_{i \in \text{Timeblocks}(J)} (\text{endTime}_i - \text{startTime}_i)$$
@@ -442,9 +433,7 @@ L'éditeur de notes permet une rédaction continue en Markdown. Le moteur d'anal
 ```
 
 ### 8.1 Expressions Régulières & Préservation Lexicale
-
 Le service [notes.service.ts](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/notes/notes.service.ts) utilise des patterns stricts :
-
 1. **Détection de case à cocher** : `/^(\s*-\s*\[([ xX])\])\s+(.*)$/`
 2. **Extraction du tag de projet** : `/#([a-zA-Z0-9_\-]+)/`
 3. **Extraction de la date d'échéance** : `/@(\d{4}-\d{2}-\d{2})/`
@@ -501,11 +490,9 @@ Pour chaque projet, Planner-Pro croise les heures pointées issues du module Tim
 ## 10. Synchronisation Hybride Asynchrone : Transactional Outbox vers Cloud Firestore
 
 ### 10.1 Problématique du Double-Write
-
 Lorsqu'une entité (ex. une Tâche ou une Invitation) est créée, mettre à jour MySQL et appeler simultanément l'API distante Google Firestore expose l'architecture à des incohérences majeures si l'appel réseau vers Firestore échoue ou subit un timeout après que la transaction MySQL a été validée (commit).
 
 ### 10.2 Implémentation du Transactional Outbox Pattern
-
 Pour éliminer ce problème, Planner-Pro applique le patron **Transactional Outbox** :
 
 ```
@@ -553,24 +540,159 @@ Pour éliminer ce problème, Planner-Pro applique le patron **Transactional Outb
 
 ---
 
-## 11. Infrastructure de Production, Déploiement & Résilience
+## 11. Moteur d'IA & Heuristique Prédictive (Copilot & Gemini)
 
-### 11.1 Topologie des Conteneurs Docker
+Le service [copilot.service.ts](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/projects/copilot.service.ts) combine un moteur de règles déterministes d'analyse des risques avec la puissance de synthèse d'un Grand Modèle de Langage (Google Gemini 1.5 Pro).
 
+```
+                               +-------------------------------------+
+                               |     COLLECTE DES DONNÉES PROJETS    |
+                               | (Tâches, Échéances, Dépendances DAG)|
+                               +------------------+------------------+
+                                                  |
+                                                  v
+                               +-------------------------------------+
+                               |   MOTEUR D'HEURISTIQUES DE RISQUE   |
+                               +------------------+------------------+
+                                                  |
+        +-----------------------+-----------------+-----------------------+
+        |                       |                 |                       |
+        v                       v                 v                       v
+ [Règle OVERDUE]         [Règle AT_RISK]    [Règle BOTTLENECK]      [Règle OVERLOADED]
+ Échéance < Today        Échéance <= 3j     Dépendance vers une     Charge cumulée
+ Sévérité: CRITICAL      Statut = TODO      tâche en retard         > Capacité déclarée
+                         Sévérité: HIGH     Sévérité: HIGH          Sévérité: HIGH
+        |                       |                 |                       |
+        +-----------------------+--------+--------+-----------------------+
+                                         |
+                                         v
+                         +-------------------------------+
+                         |   SYNTHÈSE LLM GEMINI 1.5     |
+                         | Briefing Matinal Personnalisé |
+                         +---------------+---------------+
+                                         |
+                        [Échec ou Quota dépassé ?]
+                                         |
+                          +--------------+--------------+
+                          | [NON]                       | [OUI]
+                          v                             v
+             [ Briefing IA Formaté ]       [ Fallback Déterministe ]
+             Priorités & Recommandations   Agrégation brute par sévérité
+```
+
+### 11.1 Algorithmes de Détection Prédictive des Risques
+1. **Règle OVERDUE** : Identifie toute tâche active dont la date limite (`dueDate`) est strictement antérieure à la date courante ($D_{\text{due}} < D_{\text{today}}$). Classée avec sévérité `CRITICAL`.
+2. **Règle AT_RISK** : Identifie les tâches dont l'échéance arrive dans un délai de 3 jours ($0 \le D_{\text{due}} - D_{\text{today}} \le 3\,\text{jours}$) alors que le statut est resté à l'état `TODO`. Classée en sévérité `HIGH`.
+3. **Règle BOTTLENECK (Goulot d'Étranglement)** : Parcourt le graphe des dépendances de chaque tâche. Si une tâche dépend d'une tâche identifiée comme `OVERDUE` ou `AT_RISK`, elle hérite d'une alerte de blocage immédiate.
+4. **Règle OVERLOADED** : Croise les assignations de tâches actives avec les profils de capacité `ResourceProfile` (ex: 35h/semaine). Si le cumul des temps estimés dépasse le seuil de tolérance de 110%, le collaborateur est marqué en surcharge.
+
+### 11.2 Résilience & Fallback Déterministe
+Si l'appel à l'API Gemini échoue (coupure réseau, quota API atteint ou timeout de 8 secondes), le système bascule automatiquement et de manière transparente sur une synthèse algorithmique déterministe, garantissant que l'utilisateur reçoit toujours son briefing quotidien sans interruption de service.
+
+---
+
+## 12. Gouvernance, Traçabilité & Journal d'Audit (Audit Trail)
+
+La conformité réglementaire (RGPD, SOC2) et la sécurité opérationnelle imposent une non-répudiation totale des actions d'administration et de gestion des droits. Planner-Pro implémente un double niveau d'audit persistant et immuable.
+
+```
++-----------------------------------------------------------------------------------------------+
+|                                      ARCHITECTURE D'AUDIT                                     |
+|                                                                                               |
+|    1. NIVEAU APPLICATION / PROJET                              2. NIVEAU PLATEFORME / GLOBAL  |
+|       (Table : AuditLog)                                          (Table : PlatformAuditLog)  |
+|                                                                                               |
+|    - Assigner / Révoquer un rôle projet                        - Connexion Super Admin        |
+|    - Inviter / Supprimer un membre workspace                  - Révocation forcée de session |
+|    - Clôturer / Archiver un projet                             - Impersonation d'utilisateur  |
+|    - Supprimer une tâche ou note critique                      - Modification rôle plateforme |
+|                                                                                               |
+|                   |                                                           |               |
+|                   v                                                           v               |
+|    +-----------------------------+                             +-----------------------------+|
+|    |      Structure SQL :        |                             |      Structure SQL :        ||
+|    | - id : UUID                 |                             | - id : UUID                 ||
+|    | - userId : FK User          |                             | - actorId : FK Admin        ||
+|    | - action : String Enum      |                             | - targetUserId : FK User    ||
+|    | - entityType : 'project'    |                             | - action : PlatformAction   ||
+|    | - entityId : String         |                             | - ipAddress : String (IPv6) ||
+|    | - changes : JSON (Delta)    |                             | - userAgent : String        ||
+|    | - ipAddress : String        |                             | - metadata : JSON           ||
+|    | - createdAt : NOW()         |                             | - createdAt : NOW()         ||
+|    +-----------------------------+                             +-----------------------------+|
++-----------------------------------------------------------------------------------------------+
+```
+
+### 12.1 Format des Deltas de Données (JSON Diffing)
+Chaque entrée d'audit conserve l'état avant et après modification dans le champ `changes` sous forme de JSON strict :
+
+```json
+{
+  "entity": "ProjectMembership",
+  "operation": "ROLE_UPDATE",
+  "previous": { "role": "CONTRIBUTOR" },
+  "current": { "role": "MANAGER" },
+  "grantedBy": "user-uuid-sarah-connor",
+  "timestamp": "2026-10-29T21:05:00.000Z"
+}
+```
+
+* **Immutabilité** : Aucun endpoint d'API n'autorise de `DELETE` ou de `UPDATE` sur les tables `AuditLog` et `PlatformAuditLog`. Les enregistrements sont en écriture seule (*Append-Only*).
+
+---
+
+## 13. Passerelle de Notifications Temps Réel & Mentions
+
+La passerelle [notifications.gateway.ts](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/notifications/notifications.gateway.ts) distribue les événements d'équipe en temps réel sur les postes des collaborateurs via WebSockets et WebSocket Pub/Sub Redis.
+
+```
+[ Événement Métier ] (Ex: Assignation de tâche, Commentaire avec @mention, Jalon atteint)
+         |
+         v
++---------------------------------------------------------------------------------------+
+|                       SERVICE DE NOTIFICATIONS (NestJS)                               |
+|                                                                                       |
+|  1. Persistance en base de données :                                                  |
+|     INSERT INTO Notification (userId, title, message, type, read=false)               |
+|                                                                                       |
+|  2. Routage vers la passerelle WebSocket :                                            |
+|     notificationsGateway.server.to(`user:${targetUserId}`).emit('notification', {     |
+|       id, type, title, message, createdAt                                             |
+|     });                                                                               |
+|                                                                                       |
+|  3. Si le collaborateur n'a pas de socket active :                                    |
+|     Envoi asynchrone d'un email de notification (MailService / SMTP ou webhook n8n)   |
++---------------------------------------------------------------------------------------+
+         |
+         +----------------------------------+
+         |                                  |
+         v                                  v
+[ Collaborateur Connecté ]        [ Collaborateur Hors-Ligne ]
+Toast In-App instantané           Notification Email différée
+Badge de cloche incrémenté        avec lien direct vers la tâche
+```
+
+### 13.1 Parsing des Mentions & Événements Pris en Charge
+* **Mentions dans les commentaires** : Analyse de pattern `@([a-zA-Z0-9._-]+)` lors de l'ajout d'un commentaire sur une tâche (`addComment`). Les utilisateurs mentionnés sont automatiquement extraits, validés quant à leur appartenance au projet, et notifiés.
+* **Alertes de Dépendance Résolue** : Lorsqu'une tâche bloquante $T_1$ passe au statut `DONE`, le système identifie toutes les tâches $T_2$ dépendantes et notifie leurs responsables : *"La tâche bloquante $T_1$ a été complétée, vous pouvez démarrer $T_2$"*.
+
+---
+
+## 14. Infrastructure de Production, Déploiement & Résilience
+
+### 14.1 Topologie des Conteneurs Docker
 La stack est déployée sur une instance Cloud (Oracle Linux ARM64 / Ubuntu 24.04 LTS) selon la configuration définie dans [docker-compose.prod.yml](file:///home/gaetan/Documents/GitHub/planner-pro/docker-compose.prod.yml) :
 
-1. `planner-pro-production-backend` : Image Node.js 20 Alpine exécutant le binaire NestJS compilé.
-2. `planner-pro-production-frontend` : Image Nginx Alpine servant l'application SPA React 18.
+1. `planner-pro-production-backend` : Image Node.js 20 Alpine exécutant le binaire NestJS compilé (`127.0.0.1:3003 -> 3001`).
+2. `planner-pro-production-frontend` : Image Nginx Alpine servant l'application SPA React 18 (`127.0.0.1:8080 -> 80`).
 3. `planner-pro-production-db` : Serveur MySQL 8.0 avec volumes montés sur stockage persistant hôte (`/var/lib/mysql`).
 4. `planner-pro-production-cache` : Serveur Redis 7.0 avec politique d'éviction mémoire `allkeys-lru`.
 
-### 11.2 Stratégie de Sauvegarde & PRA (Plan de Reprise d'Activité)
-
+### 14.2 Stratégie de Sauvegarde & PRA (Plan de Reprise d'Activité)
 * **Sauvegarde automatique** : Le script [scripts/backup-production.sh](file:///home/gaetan/Documents/GitHub/planner-pro/scripts/backup-production.sh) effectue un dump cohérent de la base MySQL (`mysqldump --single-transaction --quick`), compresse l'archive avec `gzip` et chiffre le fichier résultant avec OpenSSL avant synchronisation distante.
 * **Healthcheck & Auto-Healing** : Tous les conteneurs sont configurés avec `restart: unless-stopped` et des sondes de vitalité (`HEALTHCHECK`) testant les endpoints `/admin/health` toutes les 30 secondes.
 
 ---
 
 ### Résumé de Conformité pour les Équipes d'Ingénierie
-
-Ce document constitue la **spécification technique de référence (v2.0)** de Planner-Pro. Tout développement futur, ajout d'API ou refactorisation doit impérativement respecter les règles de non-régression, les patterns d'idempotence et les matrices d'habilitation détaillés dans ce dossier.
+Ce document constitue la **spécification technique de référence (v2.1)** de Planner-Pro. Tout développement futur, ajout d'API ou refactorisation doit impérativement respecter les règles de non-régression, les patterns d'idempotence et les matrices d'habilitation détaillés dans ce dossier.
