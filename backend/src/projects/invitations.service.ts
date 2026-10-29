@@ -174,6 +174,33 @@ export class InvitationsService {
     });
   }
 
+  async checkInvitation(rawToken: string) {
+    const tokenHash = this.hashToken(rawToken);
+
+    const invitation = await this.prisma.invitation.findUnique({
+      where: { tokenHash },
+      include: {
+        workspace: { select: { name: true } },
+        invitedBy: { select: { name: true, email: true } },
+        project: { select: { id: true, name: true } },
+      },
+    });
+
+    if (!invitation || invitation.status !== 'PENDING' || new Date() > invitation.expiresAt) {
+      throw new NotFoundException("Lien d'invitation invalide, expiré ou révoqué.");
+    }
+
+    return {
+      workspaceName: invitation.workspace.name,
+      invitedByName:
+        invitation.invitedBy?.name || invitation.invitedBy?.email || 'Un collaborateur',
+      role: invitation.role,
+      projectName: invitation.project?.name || null,
+      projectId: invitation.projectId || null,
+      email: invitation.email || null,
+    };
+  }
+
   async validateAndAcceptInvitation(rawToken: string, loggedUser: { id: string; email: string }) {
     const tokenHash = this.hashToken(rawToken);
 

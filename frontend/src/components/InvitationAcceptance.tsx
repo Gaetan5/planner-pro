@@ -10,7 +10,7 @@ interface InvitationAcceptanceProps {
 }
 
 export const InvitationAcceptance: React.FC<InvitationAcceptanceProps> = ({ token, onClose }) => {
-  const { user, mockLogin, checkInvitation, acceptInvitation } = useApp();
+  const { user, logout, mockLogin, checkInvitation, acceptInvitation } = useApp();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -18,6 +18,9 @@ export const InvitationAcceptance: React.FC<InvitationAcceptanceProps> = ({ toke
     workspaceName: string;
     invitedByName: string;
     role: string;
+    projectName?: string | null;
+    projectId?: string | null;
+    email?: string | null;
   } | null>(null);
   const [accepting, setAccepting] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -33,9 +36,11 @@ export const InvitationAcceptance: React.FC<InvitationAcceptanceProps> = ({ toke
       try {
         const info = await checkInvitation(token);
         setInviteInfo(info);
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error(err);
-        setError(err.message || "Lien d'invitation invalide, expiré ou révoqué.");
+        const message =
+          err instanceof Error ? err.message : "Lien d'invitation invalide, expiré ou révoqué.";
+        setError(message);
       } finally {
         setLoading(false);
       }
@@ -68,19 +73,21 @@ export const InvitationAcceptance: React.FC<InvitationAcceptanceProps> = ({ toke
     try {
       await acceptInvitation(token);
       setSuccess(true);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      setError(err.message || "Impossible d'accepter l'invitation.");
+      const message = err instanceof Error ? err.message : "Impossible d'accepter l'invitation.";
+      setError(message);
     } finally {
       setAccepting(false);
     }
   };
 
   const handleGoToApp = () => {
-    // Nettoyer le paramètre token de l'URL
+    // Nettoyer les paramètres token et invite de l'URL
     const url = new URL(window.location.href);
     url.searchParams.delete('token');
-    window.history.replaceState({}, document.title, url.pathname + url.search);
+    url.searchParams.delete('invite');
+    window.history.replaceState({}, document.title, url.pathname + (url.search ? url.search : ''));
     onClose();
   };
 
@@ -161,8 +168,17 @@ export const InvitationAcceptance: React.FC<InvitationAcceptanceProps> = ({ toke
               Bienvenue à bord !
             </h3>
             <p className="login-subtitle" style={{ marginTop: '10px' }}>
-              Vous avez rejoint avec succès l'espace de travail{' '}
-              <strong>{inviteInfo?.workspaceName}</strong>.
+              {inviteInfo?.projectName ? (
+                <>
+                  Vous avez rejoint avec succès le projet <strong>{inviteInfo.projectName}</strong>{' '}
+                  de l'espace <strong>{inviteInfo.workspaceName}</strong>.
+                </>
+              ) : (
+                <>
+                  Vous avez rejoint avec succès l'espace de travail{' '}
+                  <strong>{inviteInfo?.workspaceName}</strong>.
+                </>
+              )}
             </p>
           </div>
           <button
@@ -177,6 +193,13 @@ export const InvitationAcceptance: React.FC<InvitationAcceptanceProps> = ({ toke
     );
   }
 
+  const roleLabel =
+    inviteInfo?.role === 'VIEWER'
+      ? 'Client (Consultation)'
+      : inviteInfo?.role === 'ADMIN'
+        ? 'Administrateur'
+        : 'Contributeur';
+
   return (
     <div className="login-page">
       <div className="glass-panel login-card">
@@ -188,9 +211,20 @@ export const InvitationAcceptance: React.FC<InvitationAcceptanceProps> = ({ toke
         <div>
           <h2 className="login-title">Planner-Pro</h2>
           <p className="login-subtitle" style={{ fontSize: 'var(--font-sm)', opacity: 0.9 }}>
-            Vous êtes invité(e) par <strong>{inviteInfo?.invitedByName}</strong> à rejoindre
-            l'espace de travail <strong>{inviteInfo?.workspaceName}</strong> avec le rôle de{' '}
-            <strong>{inviteInfo?.role}</strong>.
+            {inviteInfo?.projectName ? (
+              <>
+                Vous êtes invité(e) par <strong>{inviteInfo?.invitedByName}</strong> à collaborer
+                sur le projet <strong>{inviteInfo.projectName}</strong> (Espace{' '}
+                <strong>{inviteInfo.workspaceName}</strong>) avec le rôle de{' '}
+                <strong>{roleLabel}</strong>.
+              </>
+            ) : (
+              <>
+                Vous êtes invité(e) par <strong>{inviteInfo?.invitedByName}</strong> à rejoindre
+                l'espace de travail <strong>{inviteInfo?.workspaceName}</strong> avec le rôle de{' '}
+                <strong>{roleLabel}</strong>.
+              </>
+            )}
           </p>
         </div>
 
@@ -254,11 +288,29 @@ export const InvitationAcceptance: React.FC<InvitationAcceptanceProps> = ({ toke
                 color: 'var(--text-secondary)',
               }}
             >
-              Vous êtes actuellement connecté(e) en tant que{' '}
-              <strong>
-                {user.name} ({user.email})
-              </strong>
-              .
+              <div>
+                Vous êtes actuellement connecté(e) en tant que{' '}
+                <strong>
+                  {user.name} ({user.email})
+                </strong>
+                .
+              </div>
+              <div style={{ marginTop: '8px' }}>
+                <button
+                  type="button"
+                  onClick={logout}
+                  className="btn-text"
+                  style={{
+                    color: 'var(--accent-primary)',
+                    fontSize: 'var(--font-xs)',
+                    textDecoration: 'underline',
+                    padding: 0,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Ce n'est pas vous ? Se déconnecter pour changer de compte
+                </button>
+              </div>
             </div>
 
             <button

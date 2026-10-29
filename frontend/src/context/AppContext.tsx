@@ -354,10 +354,17 @@ interface AppContextType {
   ) => Promise<{ invitation: unknown; rawToken: string }>;
   listInvitations: (workspaceId: string) => Promise<unknown[]>;
   revokeInvitation: (invitationId: string) => Promise<void>;
-  checkInvitation: (
+  checkInvitation: (token: string) => Promise<{
+    workspaceName: string;
+    invitedByName: string;
+    role: string;
+    projectName?: string | null;
+    projectId?: string | null;
+    email?: string | null;
+  }>;
+  acceptInvitation: (
     token: string,
-  ) => Promise<{ workspaceName: string; invitedByName: string; role: string }>;
-  acceptInvitation: (token: string) => Promise<{ workspaceId: string; message: string }>;
+  ) => Promise<{ workspaceId: string; projectId?: string; message: string }>;
   // Commentaires & Communication
   socket: Socket | null;
   addComment: (
