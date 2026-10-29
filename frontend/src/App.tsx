@@ -53,8 +53,20 @@ function AppWithSession() {
   } = useApp();
   const [inviteToken, setInviteToken] = useState<string | null>(() => {
     const params = new URLSearchParams(window.location.search);
-    return params.get('token');
+    return params.get('token') || params.get('invite');
   });
+
+  useEffect(() => {
+    const checkInviteParam = () => {
+      const params = new URLSearchParams(window.location.search);
+      const token = params.get('token') || params.get('invite');
+      if (token && token !== inviteToken) {
+        setInviteToken(token);
+      }
+    };
+    window.addEventListener('popstate', checkInviteParam);
+    return () => window.removeEventListener('popstate', checkInviteParam);
+  }, [inviteToken]);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [oauthError, setOauthError] = useState<string | null>(null);
   const [handlingOAuth, setHandlingOAuth] = useState(false);

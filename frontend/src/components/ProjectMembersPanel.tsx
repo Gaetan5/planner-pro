@@ -18,6 +18,18 @@ import {
 } from 'lucide-react';
 import './ProjectMembersPanel.css';
 
+interface ProjectInvitation {
+  id: string;
+  email: string | null;
+  role: string;
+  projectId?: string | null;
+  expiresAt: string;
+  invitedBy?: {
+    name?: string | null;
+    email?: string | null;
+  };
+}
+
 interface ProjectMembersPanelProps {
   projectId: string;
   projectName: string;
@@ -40,7 +52,7 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
   } = useApp();
 
   const [members, setMembers] = useState<ProjectMember[]>([]);
-  const [projectInvitations, setProjectInvitations] = useState<any[]>([]);
+  const [projectInvitations, setProjectInvitations] = useState<ProjectInvitation[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -70,9 +82,9 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
       setMembers(data);
 
       if (activeWorkspaceId) {
-        const invs = await listInvitations(activeWorkspaceId);
+        const invs = (await listInvitations(activeWorkspaceId)) as ProjectInvitation[];
         // Filtrer les invitations spécifiques à ce projet
-        const filtered = (invs || []).filter((inv: any) => inv.projectId === projectId);
+        const filtered = (invs || []).filter((inv) => inv.projectId === projectId);
         setProjectInvitations(filtered);
       }
     } catch (err: unknown) {
@@ -127,7 +139,7 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
       );
 
       if (res && res.rawToken) {
-        const link = `${window.location.origin}/?invite=${res.rawToken}`;
+        const link = `${window.location.origin}/?token=${res.rawToken}`;
         setGeneratedInviteLink(link);
         setSuccess(
           externalEmail
