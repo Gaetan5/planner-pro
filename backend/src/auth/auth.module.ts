@@ -11,10 +11,14 @@ import { SsoController } from './sso/sso.controller';
 import { ScimService } from './scim/scim.service';
 import { ScimController } from './scim/scim.controller';
 import { ScimAuthGuard } from './scim/scim.guard';
+import { TokenModule } from './token.module';
+import { RedisModule } from '../redis/redis.module';
 
 @Module({
   imports: [
     PrismaModule,
+    RedisModule,
+    TokenModule,
     ConfigModule.forRoot(),
     JwtModule.register({
       global: true,

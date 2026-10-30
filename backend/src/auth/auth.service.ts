@@ -4,14 +4,21 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 import { encrypt, decrypt, hashPassword, verifyPassword } from './encryption.util';
 import { FirebaseIdentityService } from './firebase-identity.service';
 import { generateTotpSecret, verifyTotpCode, getTotpAuthUri } from './totp.util';
+import { TokenService, MFA_TICKET_TTL_SECONDS } from './token.service';
+import { RedisService } from '../redis/redis.service';
+
+/** Nombre maximal d'essais de code par ticket MFA (S3). */
+const MFA_TICKET_MAX_ATTEMPTS = 5;
+/** Délai maximal d'un appel Redis du parcours MFA : au-delà, 503 plutôt qu'une requête bloquée. */
+const MFA_REDIS_TIMEOUT_MS = 2000;
 
 interface GitHubTokenResponse {
   access_token?: string;
@@ -47,8 +54,9 @@ interface GitHubRepoResponse {
 export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly jwtService: JwtService,
+    private readonly tokenService: TokenService,
     private readonly firebaseIdentity: FirebaseIdentityService,
+    private readonly redis: RedisService,
   ) {}
 
   async loginWithFirebase(idToken: string, suppliedName?: string) {
@@ -90,7 +98,7 @@ export class AuthService {
       }
     }
 
-    const accessToken = this.jwtService.sign({
+    const accessToken = this.tokenService.signAccessToken({
       sub: user.id,
       email: user.email,
       name: user.name,
@@ -229,7 +237,7 @@ export class AuthService {
 
     // 5. Générer le JWT d'accès
     const payload = { sub: user.id, email: user.email, name: user.name };
-    const jwt = this.jwtService.sign(payload);
+    const jwt = this.tokenService.signAccessToken(payload);
 
     return {
       user: {
@@ -261,7 +269,7 @@ export class AuthService {
     });
 
     const payload = { sub: user.id, email: user.email, name: user.name };
-    const jwt = this.jwtService.sign(payload);
+    const jwt = this.tokenService.signAccessToken(payload);
 
     return {
       user: {
@@ -372,7 +380,7 @@ export class AuthService {
     });
 
     const payload = { sub: user.id, email: user.email, name: user.name };
-    const jwt = this.jwtService.sign(payload);
+    const jwt = this.tokenService.signAccessToken(payload);
 
     return {
       user: {
@@ -423,9 +431,10 @@ export class AuthService {
 
     // Si le MFA TOTP est activé, émettre un ticket temporaire au lieu du token final
     if (user.mfaEnabled) {
-      const mfaTicket = this.jwtService.sign(
-        { sub: user.id, mfaPending: true },
-        { expiresIn: '5m' },
+      // Ticket dédié (typ 'mfa_ticket', clé distincte), enregistré pour un usage unique (S3)
+      const { ticket: mfaTicket, jti } = this.tokenService.signMfaTicket(user.id);
+      await this.withRedisTimeout(() =>
+        this.redis.set(this.mfaTicketKey(jti), user.id, MFA_TICKET_TTL_SECONDS),
       );
       return {
         mfaRequired: true,
@@ -438,7 +447,7 @@ export class AuthService {
     }
 
     const payload = { sub: user.id, email: user.email, name: user.name };
-    const jwt = this.jwtService.sign(payload);
+    const jwt = this.tokenService.signAccessToken(payload);
 
     return {
       user: {
@@ -518,6 +527,31 @@ export class AuthService {
   }
 
   /**
+   * Exécute un appel Redis du parcours MFA avec un délai maximal (S3). Le client ioredis met les
+   * commandes en file sans limite pendant une reconnexion : sans ce délai, la requête resterait
+   * bloquée. En cas d'erreur ou de dépassement, 503 et aucun jeton ni ticket n'est émis.
+   */
+  private async withRedisTimeout<T>(operation: () => Promise<T>): Promise<T> {
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('Délai Redis dépassé')), MFA_REDIS_TIMEOUT_MS);
+    });
+    try {
+      return await Promise.race([operation(), timeout]);
+    } catch {
+      throw new ServiceUnavailableException(
+        'Validation MFA momentanément indisponible, réessayez.',
+      );
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private mfaTicketKey(jti: string): string {
+    return `mfa_ticket:${jti}`;
+  }
+
+  /**
    * Valide le challenge MFA lors de la connexion pour émettre le jeton final
    */
   async verifyMfaChallenge(mfaTicket: string, code: string) {
@@ -525,19 +559,26 @@ export class AuthService {
       throw new BadRequestException('Le ticket MFA et le code à 6 chiffres sont requis.');
     }
 
-    let payload: { sub: string; mfaPending: boolean };
-    try {
-      payload = await this.jwtService.verifyAsync(mfaTicket, {
-        secret: process.env.JWT_SECRET,
-      });
-    } catch {
+    const payload = await this.tokenService.verifyMfaTicket(mfaTicket);
+
+    // Ticket à usage unique : absent de Redis s'il a déjà servi ou a été invalidé
+    const ticketKey = this.mfaTicketKey(payload.jti);
+    const ticketOwner = await this.withRedisTimeout(() => this.redis.get(ticketKey));
+    if (ticketOwner !== payload.sub) {
       throw new UnauthorizedException(
         'Session de validation MFA expirée. Veuillez vous reconnecter.',
       );
     }
 
-    if (!payload.mfaPending || !payload.sub) {
-      throw new UnauthorizedException('Jeton de challenge MFA invalide.');
+    // Limite d'essais par ticket : au-delà, le ticket est invalidé
+    const attempts = await this.withRedisTimeout(() =>
+      this.redis.incrementWithTtl(`${ticketKey}:attempts`, MFA_TICKET_TTL_SECONDS),
+    );
+    if (attempts > MFA_TICKET_MAX_ATTEMPTS) {
+      await this.withRedisTimeout(() => this.redis.del(ticketKey));
+      throw new UnauthorizedException(
+        'Trop de tentatives de validation MFA. Veuillez vous reconnecter.',
+      );
     }
 
     const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
@@ -551,10 +592,20 @@ export class AuthService {
 
     const isValid = verifyTotpCode(user.mfaSecret, code);
     if (!isValid) {
+      if (attempts >= MFA_TICKET_MAX_ATTEMPTS) {
+        await this.withRedisTimeout(() => this.redis.del(ticketKey));
+      }
       throw new UnauthorizedException('Code de vérification TOTP incorrect.');
     }
 
-    const accessToken = this.jwtService.sign({
+    // Consommation atomique : une seule requête concurrente peut utiliser le ticket
+    if ((await this.withRedisTimeout(() => this.redis.del(ticketKey))) !== 1) {
+      throw new UnauthorizedException(
+        'Session de validation MFA expirée. Veuillez vous reconnecter.',
+      );
+    }
+
+    const accessToken = this.tokenService.signAccessToken({
       sub: user.id,
       email: user.email,
       name: user.name,

@@ -4,11 +4,29 @@ import {
   BadRequestException,
   UnauthorizedException,
   ForbiddenException,
+  NotImplementedException,
 } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../../prisma/prisma.service';
+import { TokenService } from '../token.service';
 import { ConfigureSsoDto } from './sso.dto';
 import { SSOProvider, WorkspaceRole } from '@prisma/client';
+
+/**
+ * Fournisseurs dont l'échange de code est réellement implémenté (S2).
+ * SAML2 et OIDC_GENERIC ne le sont pas : aucune assertion ni aucun jeton n'est vérifié pour eux.
+ */
+export const IMPLEMENTED_SSO_PROVIDERS: SSOProvider[] = [
+  SSOProvider.OIDC_AZURE_AD,
+  SSOProvider.OIDC_GOOGLE,
+];
+
+function assertProviderImplemented(provider: SSOProvider): void {
+  if (!IMPLEMENTED_SSO_PROVIDERS.includes(provider)) {
+    throw new NotImplementedException(
+      `Le fournisseur SSO ${provider} n'est pas encore pris en charge.`,
+    );
+  }
+}
 
 export interface SsoDiscoveryResult {
   ssoAvailable: boolean;
@@ -23,7 +41,7 @@ export interface SsoDiscoveryResult {
 export class SsoService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly jwtService: JwtService,
+    private readonly tokenService: TokenService,
   ) {}
 
   /**
@@ -77,6 +95,7 @@ export class SsoService {
     if (!ssoConfig || !ssoConfig.enabled) {
       throw new NotFoundException(`Aucune configuration SSO active pour le domaine ${domain}.`);
     }
+    assertProviderImplemented(ssoConfig.provider);
 
     const redirect =
       callbackUrl ||
@@ -104,10 +123,6 @@ export class SsoService {
       return { url };
     }
 
-    if (ssoConfig.entryPoint) {
-      return { url: `${ssoConfig.entryPoint}?RelayState=${state}` };
-    }
-
     throw new BadRequestException(
       'Le fournisseur SSO configuré ne supporte pas la redirection automatique.',
     );
@@ -125,6 +140,8 @@ export class SsoService {
     if (!ssoConfig || !ssoConfig.enabled) {
       throw new UnauthorizedException('Configuration SSO invalide ou désactivée.');
     }
+    // Avant tout appel réseau, toute recherche ou création d'utilisateur
+    assertProviderImplemented(ssoConfig.provider);
 
     const redirect =
       redirectUri ||
@@ -199,10 +216,8 @@ export class SsoService {
       name = claims.name || email.split('@')[0];
       ssoUid = `google:${claims.sub}`;
     } else {
-      // Cas générique simulé ou SAML fallback
-      email = `user@${domain}`;
-      name = `Collaborateur ${domain}`;
-      ssoUid = `generic:${domain}:${code}`;
+      // Jamais atteint (assertProviderImplemented) : refus explicite par sécurité
+      throw new NotImplementedException('Fournisseur SSO non pris en charge.');
     }
 
     if (!email) {
@@ -264,7 +279,7 @@ export class SsoService {
     }
 
     // Génération du JWT de session
-    const accessToken = this.jwtService.sign({
+    const accessToken = this.tokenService.signAccessToken({
       sub: user.id,
       email: user.email,
       name: user.name,

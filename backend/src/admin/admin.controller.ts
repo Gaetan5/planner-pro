@@ -15,9 +15,11 @@ import { User, AuthenticatedUser } from '../auth/user.decorator';
 import { AdminService } from './admin.service';
 import { PlatformAdminGuard } from './platform-admin.guard';
 import { AdminPaginationQueryDto, UpdateUserRoleDto } from './dto/admin.dto';
+import { FeatureFlagGuard, RequireFeature } from '../config/feature-flag.guard';
 
 @Controller('admin')
-@UseGuards(JwtAuthGuard, PlatformAdminGuard)
+// FeatureFlagGuard en premier : une route désactivée répond 404 avant toute authentification
+@UseGuards(FeatureFlagGuard, JwtAuthGuard, PlatformAdminGuard)
 @UsePipes(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true }))
 export class AdminController {
   constructor(private readonly adminService: AdminService) {}
@@ -57,6 +59,7 @@ export class AdminController {
   }
 
   @Post('users/:id/impersonate')
+  @RequireFeature('IMPERSONATION')
   impersonateUser(@User() actor: AuthenticatedUser, @Param('id') targetUserId: string) {
     return this.adminService.impersonateUser(actor.id, targetUserId);
   }

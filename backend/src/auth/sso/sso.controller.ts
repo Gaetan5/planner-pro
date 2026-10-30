@@ -16,6 +16,7 @@ import { SsoService } from './sso.service';
 import { DiscoverSsoDto, SsoCallbackDto, ConfigureSsoDto } from './sso.dto';
 import { JwtAuthGuard } from '../jwt.guard';
 import { Public } from '../public.decorator';
+import { FeatureFlagGuard, RequireFeature } from '../../config/feature-flag.guard';
 
 interface AuthenticatedUserRequest {
   user: {
@@ -26,6 +27,8 @@ interface AuthenticatedUserRequest {
 }
 
 @Controller()
+@RequireFeature('SSO')
+@UseGuards(FeatureFlagGuard)
 export class SsoController {
   constructor(private readonly ssoService: SsoService) {}
 

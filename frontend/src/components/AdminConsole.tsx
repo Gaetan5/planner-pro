@@ -134,6 +134,8 @@ export function AdminConsole() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
+  // Impersonation masquée tant que le serveur ne l'a pas activée (S18, étape 0)
+  const [impersonationEnabled, setImpersonationEnabled] = useState<boolean | null>(null);
 
   // Check if we are currently impersonating someone
   const backupSession = sessionStorage.getItem('planner_admin_original_session');
@@ -240,6 +242,17 @@ export function AdminConsole() {
       setIsLoading(false);
     }
   }, [user?.token, activityPage, activitySearch, getHeaders]);
+
+  // Drapeau d'impersonation, chargé à la première ouverture de l'onglet Utilisateurs
+  useEffect(() => {
+    if (activeTab !== 'users' || impersonationEnabled !== null) return;
+    fetch(`${API_URL}/features`)
+      .then((res) => (res.ok ? res.json() : { impersonation: false }))
+      .then((flags: { impersonation?: boolean }) =>
+        setImpersonationEnabled(flags.impersonation === true),
+      )
+      .catch(() => setImpersonationEnabled(false));
+  }, [activeTab, impersonationEnabled]);
 
   // Handle Tab Change
   useEffect(() => {
@@ -660,16 +673,18 @@ export function AdminConsole() {
                             <ShieldAlert size={14} />
                             Déconnecter
                           </button>
-                          <button
-                            className="admin-btn"
-                            type="button"
-                            title="Se connecter sous l'identité de cet utilisateur pour diagnostiquer un incident"
-                            disabled={isBusy || item.id === user?.id}
-                            onClick={() => void handleImpersonate(item.id, item.email)}
-                          >
-                            <LogIn size={14} />
-                            Impersonate
-                          </button>
+                          {impersonationEnabled && (
+                            <button
+                              className="admin-btn"
+                              type="button"
+                              title="Se connecter sous l'identité de cet utilisateur pour diagnostiquer un incident"
+                              disabled={isBusy || item.id === user?.id}
+                              onClick={() => void handleImpersonate(item.id, item.email)}
+                            >
+                              <LogIn size={14} />
+                              Impersonate
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

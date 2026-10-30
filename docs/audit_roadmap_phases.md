@@ -54,7 +54,7 @@
 |   4   | Capture Vocale               | ✅ 80%  |  ✅ 70%  | **75%**  | Fonctionnel avec Gemini                                          |
 |   5   | OCR & Whiteboard Import      | ✅ 80%  |  ✅ 70%  | **75%**  | Vision API câblée                                                |
 |   6   | Copilote Proactif            | ✅ 85%  |  ✅ 75%  | **80%**  | Alertes + Briefing IA                                            |
-|   7   | Synchronisation Réelle       | ✅ 80%  |  ✅ 70%  | **75%**  | Intégration iCal/ICS & JSON réelle avec simulateur dynamique     |
+|   7   | Synchronisation Réelle       | ⚠️ à réévaluer | ⚠️ à réévaluer | **à réévaluer** | Flux iCal/ICS & JSON réels ; simulateur supprimé (audit S5/P1) |
 |   8   | Auto Scheduling Intelligent  | ✅ 60%  |  ⚠️ 20%  | **40%**  | Effet domino backend OK                                          |
 |   9   | Agile Professionnel          | ✅ 80%  |  ✅ 75%  | **78%**  | Sprints, Burndown, Velocity                                      |
 |  10   | Gantt Nouvelle Génération    | ✅ 85%  |  ✅ 85%  | **85%**  | Drag & drop, zoom, liens interactifs et conflits opérationnels   |
@@ -149,7 +149,9 @@
 
 - Modèle [Integration](file:///home/gaetan/Documents/GitHub/planner-pro/backend/prisma/schema.prisma#L425-L438) — supporte `SLACK`, `TEAMS`, `GOOGLE_CALENDAR`, `OUTLOOK`.
 - [IntegrationService](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/projects/integration.service.ts) — CRUD intégrations + webhook Slack/Teams.
-- **CalendarSyncService** : Réécriture robuste avec import et parsing réel de flux de calendriers externes via URL (formats iCal/ICS et JSON), avec parser ICS custom. Propose également un simulateur dynamique en temps réel pour l'UI.
+- **CalendarSyncService** : import et parsing de flux de calendriers externes via URL (formats iCal/ICS et JSON), avec parser ICS custom, et appels OAuth Google/Outlook lorsque les identifiants serveur sont configurés.
+
+> **Correction (audit de sécurité du 2026-10-29, constats S5 et P1, voir `docs/security/rapport-audit.md`)** : la maturité annoncée ci-dessous était surestimée. Une partie des données affichées provenait d'un **simulateur** : faux rendez-vous (« Rendez-vous dentiste ») importés en base comme créneaux, faux jetons OAuth `mock-*` persistés, statuts `CONNECTED`/`DEMO` affichés sans source réelle, et route publique `GET /projects/mock-calendar`. Le simulateur a été supprimé. Une intégration sans source réelle est désormais affichée « Non configuré » et ignorée par la synchronisation, et les données simulées déjà en base se nettoient avec `backend/scripts/cleanup-simulated-calendar.ts`. La maturité de cette phase est à réévaluer.
 
 ### ✅ Ce qui est fait (Frontend) — Synchro
 
@@ -157,9 +159,10 @@
 
 ### ⚠️ Ce qui manque — Synchro
 
-- **Pas d'OAuth2 natif Google/Outlook** — la synchronisation s'effectue via des liens de partage d'agendas publics (URLs iCal/ICS) plutôt que via authentification OAuth directe.
+- **OAuth2 Google/Outlook partiel** : le flux OAuth existe côté serveur mais n'est opérationnel que si `GOOGLE_CLIENT_ID/SECRET` ou `MICROSOFT_CLIENT_ID/SECRET` sont configurés ; sans eux, la connexion est refusée (plus de jetons factices).
+- Restent à traiter (audit) : SSRF sur les URL de flux (S19), isolation des intégrations par workspace (S14).
 
-### 📊 Maturité : **75%** — Le service est maintenant opérationnel avec parsing d'agendas réels et détection dynamique de conflits
+### 📊 Maturité : **à réévaluer** (75 % annoncés auparavant, surestimés : voir la correction ci-dessus)
 
 ---
 

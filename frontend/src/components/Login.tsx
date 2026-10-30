@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { isFirebaseAuthConfigured } from '../firebase-config';
 import logo from '../logo.png';
 import './Login.css';
+
+const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> = ({
   oauthError,
@@ -12,6 +14,8 @@ export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> 
     useApp();
   const [isRegisterMode, setIsRegisterMode] = useState(false);
   const [isSsoMode, setIsSsoMode] = useState(false);
+  // Onglet SSO masqué tant que le serveur n'a pas confirmé que la fonctionnalité est active (P3)
+  const [ssoFeatureEnabled, setSsoFeatureEnabled] = useState(false);
   const [authProvider, setAuthProvider] = useState<'firebase' | 'legacy'>(
     isFirebaseAuthConfigured ? 'firebase' : 'legacy',
   );
@@ -47,6 +51,21 @@ export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> 
   const [errorMsg, setErrorMsg] = useState(oauthError ?? '');
   const [infoMsg, setInfoMsg] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${BACKEND_URL}/features`)
+      .then((res) => (res.ok ? res.json() : { sso: false }))
+      .then((flags: { sso?: boolean }) => {
+        if (!cancelled) setSsoFeatureEnabled(flags.sso === true);
+      })
+      .catch(() => {
+        if (!cancelled) setSsoFeatureEnabled(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleGitHubLogin = () => {
     const clientId = import.meta.env.VITE_GITHUB_CLIENT_ID || 'votre_client_id_github';
@@ -277,16 +296,18 @@ export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> 
             >
               S'inscrire
             </button>
-            <button
-              className={`auth-tab ${isSsoMode ? 'auth-tab--active' : ''}`}
-              onClick={() => {
-                setIsSsoMode(true);
-                setIsRegisterMode(false);
-                setErrorMsg('');
-              }}
-            >
-              SSO Entreprise
-            </button>
+            {ssoFeatureEnabled && (
+              <button
+                className={`auth-tab ${isSsoMode ? 'auth-tab--active' : ''}`}
+                onClick={() => {
+                  setIsSsoMode(true);
+                  setIsRegisterMode(false);
+                  setErrorMsg('');
+                }}
+              >
+                SSO Entreprise
+              </button>
+            )}
           </div>
         )}
 
@@ -359,7 +380,7 @@ export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> 
                 Annuler
               </button>
             </form>
-          ) : isSsoMode ? (
+          ) : isSsoMode && ssoFeatureEnabled ? (
             /* Formulaire SSO Entreprise */
             <form onSubmit={handleSsoDiscovery} className="auth-form fade-in">
               <div style={{ marginBottom: '1rem' }}>

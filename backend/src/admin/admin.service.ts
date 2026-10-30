@@ -1,8 +1,8 @@
 import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
 import { PlatformRole, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
+import { TokenService } from '../auth/token.service';
 import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
 
 @Injectable()
@@ -13,7 +13,7 @@ export class AdminService {
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly firestoreSync: FirestoreSyncService,
-    private readonly jwtService: JwtService,
+    private readonly tokenService: TokenService,
   ) {}
 
   async getOverview() {
@@ -241,7 +241,7 @@ export class AdminService {
       name: targetUser.name,
       impersonatedBy: actorId,
     };
-    const accessToken = this.jwtService.sign(payload);
+    const accessToken = this.tokenService.signAccessToken(payload);
 
     await this.prisma.platformAuditLog.create({
       data: {

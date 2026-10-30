@@ -11,6 +11,9 @@ model User {
   mfaSecret         String?
   mfaEnabled        Boolean        @default(false)
   isSuspended       Boolean        @default(false)
+  // Workspace dont la clé SCIM a créé ce compte (S1) : seul lui peut en modifier le nom
+  provisionedByWorkspaceId String?
+  provisionedByWorkspace   Workspace?    @relation("ScimProvisionedUsers", fields: [provisionedByWorkspaceId], references: [id], onDelete: SetNull)
   platformRole       PlatformRole?
   ownedWorkspaces   Workspace[]    @relation("WorkspaceOwner")
   memberships       Membership[]
@@ -33,6 +36,8 @@ model User {
   aiCommandHistories AiCommandHistory[]
   aiBriefing         AiBriefing?
   createdAt          DateTime            @default(now())
+
+  @@index([provisionedByWorkspaceId])
 }
 
 enum PlatformRole {
