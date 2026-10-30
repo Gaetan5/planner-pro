@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
 import { AdminService } from './admin.service';
+import { TokenService } from '../auth/token.service';
 
 describe('AdminService', () => {
   const prisma = {
@@ -27,7 +28,7 @@ describe('AdminService', () => {
       prisma as unknown as PrismaService,
       redis as unknown as RedisService,
       firestoreSync as unknown as FirestoreSyncService,
-      jwtService as unknown as JwtService,
+      new TokenService(jwtService as unknown as JwtService),
     );
     firestoreSync.getStatus.mockResolvedValue({
       state: 'disabled',

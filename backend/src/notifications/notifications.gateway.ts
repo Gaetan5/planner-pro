@@ -7,11 +7,11 @@ import {
   OnGatewayInit,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { JwtService } from '@nestjs/jwt';
 import { SkipThrottle } from '@nestjs/throttler';
 import { createAdapter } from '@socket.io/redis-adapter';
 import { createClient } from 'redis';
 import { PrismaService } from '../prisma/prisma.service';
+import { TokenService } from '../auth/token.service';
 
 @SkipThrottle()
 @WebSocketGateway({
@@ -29,7 +29,7 @@ export class NotificationsGateway
   server!: Server;
 
   constructor(
-    private readonly jwtService: JwtService,
+    private readonly tokenService: TokenService,
     private readonly prisma: PrismaService,
   ) {}
 
@@ -63,7 +63,8 @@ export class NotificationsGateway
     }
 
     try {
-      const payload = await this.jwtService.verifyAsync(token);
+      // Même vérification que le guard HTTP : ticket MFA et jetons sans typ rejetés (S3)
+      const payload = await this.tokenService.verifyAccessToken(token);
       client.data.userId = payload.sub;
       client.join(`user:${client.data.userId}`);
       console.log(

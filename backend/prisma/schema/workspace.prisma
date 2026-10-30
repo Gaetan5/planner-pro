@@ -12,6 +12,7 @@ model Workspace {
   sprints       Sprint[]
   ssoConfiguration SSOConfiguration?
   scimApiKeys   SCIMApiKey[]
+  scimProvisionedUsers User[] @relation("ScimProvisionedUsers")
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
   deletedAt   DateTime?

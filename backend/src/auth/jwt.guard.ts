@@ -1,13 +1,13 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { JwtService } from '@nestjs/jwt';
 import { Request } from 'express';
 import { IS_PUBLIC_KEY } from './public.decorator';
+import { TokenService } from './token.service';
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
   constructor(
-    private jwtService: JwtService,
+    private tokenService: TokenService,
     private reflector: Reflector,
   ) {}
 
@@ -27,18 +27,10 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException("Token d'authentification manquant.");
     }
 
-    try {
-      if (!process.env.JWT_SECRET) {
-        throw new Error("JWT_SECRET n'est pas défini.");
-      }
-      const payload = await this.jwtService.verifyAsync(token, {
-        secret: process.env.JWT_SECRET,
-      });
-      // Assigner l'utilisateur décodé à la requête
-      request['user'] = { id: payload.sub, email: payload.email, name: payload.name };
-    } catch {
-      throw new UnauthorizedException("Token d'authentification invalide ou expiré.");
-    }
+    // Seuls les jetons d'accès (typ 'access') sont acceptés : un ticket MFA est rejeté (S3)
+    const payload = await this.tokenService.verifyAccessToken(token);
+    // Assigner l'utilisateur décodé à la requête
+    request['user'] = { id: payload.sub, email: payload.email, name: payload.name };
 
     return true;
   }

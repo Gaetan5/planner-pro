@@ -11,13 +11,13 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { TrackingService } from './tracking.service';
-import { JwtService } from '@nestjs/jwt';
 import { SkipThrottle } from '@nestjs/throttler';
 import { createAdapter } from '@socket.io/redis-adapter';
 import { createClient } from 'redis';
 import { AiService } from '../projects/ai.service';
 import { ProjectPermissionsService } from '../projects/project-permissions.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { TokenService } from '../auth/token.service';
 
 @SkipThrottle()
 @WebSocketGateway({
@@ -34,7 +34,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   constructor(
     private readonly trackingService: TrackingService,
-    private readonly jwtService: JwtService,
+    private readonly tokenService: TokenService,
     private readonly aiService: AiService,
     private readonly projectPermissionsService: ProjectPermissionsService,
     private readonly prisma: PrismaService,
@@ -69,7 +69,8 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
     }
 
     try {
-      const payload = await this.jwtService.verifyAsync(token);
+      // Même vérification que le guard HTTP : ticket MFA et jetons sans typ rejetés (S3)
+      const payload = await this.tokenService.verifyAccessToken(token);
       client.data.userId = payload.sub;
       client.join(`user:${client.data.userId}`);
       console.log(`Client authentifié : ${client.data.userId} (Socket: ${client.id})`);

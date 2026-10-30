@@ -53,8 +53,16 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   /**
    * Supprime une clé du cache.
    */
-  async del(key: string): Promise<void> {
-    await this.redisClient.del(key);
+  async del(key: string): Promise<number> {
+    return this.redisClient.del(key);
+  }
+
+  /**
+   * Incrémente atomiquement un compteur et fixe son TTL (en secondes) à la création.
+   */
+  async incrementWithTtl(key: string, ttlSeconds: number): Promise<number> {
+    const results = await this.redisClient.multi().incr(key).expire(key, ttlSeconds, 'NX').exec();
+    return Number(results?.[0]?.[1] ?? 0);
   }
 
   async ping(): Promise<string> {

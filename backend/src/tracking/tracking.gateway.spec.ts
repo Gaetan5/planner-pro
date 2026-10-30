@@ -7,6 +7,7 @@ import { JwtService } from '@nestjs/jwt';
 import { AiService } from '../projects/ai.service';
 import { ProjectPermissionsService } from '../projects/project-permissions.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { TokenService } from '../auth/token.service';
 import { Socket } from 'socket.io';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 
@@ -20,9 +21,9 @@ describe('TrackingGateway', () => {
     stopActiveTracking: jest.fn(),
   };
 
-  const mockJwtService = {
-    verifyAsync: jest.fn(),
-  };
+  const JWT_SECRET = 'test-secret-tracking-gateway-0123456789';
+  const realJwtService = new JwtService({ secret: JWT_SECRET });
+  let tokenService: TokenService;
 
   const mockAiService = {
     transcribeAndAnalyzeVoice: jest.fn(),
@@ -39,11 +40,13 @@ describe('TrackingGateway', () => {
   };
 
   beforeEach(async () => {
+    process.env.JWT_SECRET = JWT_SECRET;
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TrackingGateway,
         { provide: TrackingService, useValue: mockTrackingService },
-        { provide: JwtService, useValue: mockJwtService },
+        { provide: JwtService, useValue: realJwtService },
+        TokenService,
         { provide: AiService, useValue: mockAiService },
         { provide: ProjectPermissionsService, useValue: mockProjectPermissionsService },
         { provide: PrismaService, useValue: mockPrismaService },
@@ -52,6 +55,7 @@ describe('TrackingGateway', () => {
 
     gateway = module.get<TrackingGateway>(TrackingGateway);
     aiService = module.get<AiService>(AiService);
+    tokenService = module.get<TokenService>(TokenService);
   });
 
   describe('Voice Streaming WebSockets', () => {
@@ -180,6 +184,29 @@ describe('TrackingGateway', () => {
           message: "Impossible de vérifier l'accès à cette tâche. Réessayez ultérieurement.",
         });
       });
+    });
+  });
+
+  // S3 : la gateway de tracking applique la même vérification que le guard HTTP
+  describe('authentification du handshake', () => {
+    it.each([
+      ['ticket MFA', () => tokenService.signMfaTicket('user-1').ticket],
+      ['jeton sans typ', () => realJwtService.sign({ sub: 'user-1' })],
+    ])('déconnecte un handshake présentant un %s', async (_label, makeToken) => {
+      const client = {
+        id: 'socket-s3',
+        handshake: { auth: { token: makeToken() }, headers: {} },
+        data: {} as Record<string, unknown>,
+        join: jest.fn(),
+        emit: jest.fn(),
+        disconnect: jest.fn(),
+      };
+
+      await gateway.handleConnection(client as unknown as Socket);
+
+      expect(client.disconnect).toHaveBeenCalledWith(true);
+      expect(client.join).not.toHaveBeenCalled();
+      expect(mockTrackingService.getActiveTracking).not.toHaveBeenCalled();
     });
   });
 });

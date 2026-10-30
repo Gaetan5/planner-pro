@@ -11,3 +11,9 @@ dev.db-journal
 package-lock.json
 vite.config.ts.timestamp-*
 test_cli_*.js
+
+# Certificats et clés TLS MySQL générés par ops/mysql-tls/generate-certs.sh (audit S4)
+secrets/
+
+# Rapports CSV des scripts de reprise S28 (contiennent des adresses e-mail)
+reprise-phase0/
