@@ -17,7 +17,6 @@ import './CapacityView.css';
 
 export const CapacityView: React.FC = () => {
   const {
-    user,
     projects,
     workspaces,
     activeWorkspaceId,
@@ -99,14 +98,12 @@ export const CapacityView: React.FC = () => {
 
     setIsOptimizing(true);
     try {
-      const token = localStorage.getItem('token') || user?.token;
       const res = await fetch(
         `${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/projects/workspaces/${activeWorkspaceId}/resources/optimize`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
           },
         },
       );

@@ -2,7 +2,11 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { PrismaMariaDb } from '@prisma/adapter-mariadb';
 import { readFileSync } from 'fs';
-import { isLocalEnvironment as isLocal, LOCAL_DEFAULT_DATABASE_URL } from './database-url';
+import {
+  allowsLocalDsnFallback,
+  isLocalEnvironment as isLocal,
+  LOCAL_DEFAULT_DATABASE_URL,
+} from './database-url';
 
 export interface MariaDbConnectionOptions {
   host: string;
@@ -17,7 +21,7 @@ export interface MariaDbConnectionOptions {
 
 /**
  * Construit les options de connexion MariaDB/MySQL à partir de l'environnement (S4) :
- * - aucun repli vers le DSN root local hors `development`/`test` ;
+ * - aucun repli vers le DSN root local hors `development` (A7 : pas non plus en `test`) ;
  * - TLS vérifié si `DATABASE_SSL=true` (autorité facultative `DATABASE_SSL_CA`, chemin de fichier) ;
  * - TLS obligatoire en production ;
  * - clé publique RSA du serveur épinglée si `DATABASE_RSA_PUBLIC_KEY` (chemin de fichier),
@@ -30,9 +34,9 @@ export function buildMariaDbOptions(
 ): MariaDbConnectionOptions {
   const isLocalEnvironment = isLocal(env);
 
-  if (!env.DATABASE_URL && !isLocalEnvironment) {
+  if (!env.DATABASE_URL && !allowsLocalDsnFallback(env)) {
     throw new Error(
-      "La variable d'environnement DATABASE_URL est obligatoire hors développement et test (Fail-Fast).",
+      "La variable d'environnement DATABASE_URL est obligatoire hors développement (Fail-Fast ; les tests la fixent via tests/support/jest-env.ts).",
     );
   }
 

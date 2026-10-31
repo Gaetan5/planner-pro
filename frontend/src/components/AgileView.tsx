@@ -17,7 +17,6 @@ import './AgileView.css';
 
 export const AgileView: React.FC = () => {
   const {
-    user,
     workspaces,
     projects,
     updateTask,
@@ -47,8 +46,6 @@ export const AgileView: React.FC = () => {
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editingPoints, setEditingPoints] = useState<string>('');
 
-  const token = user?.token;
-
   // Définir le workspace actif initial
   useEffect(() => {
     if (workspaces.length > 0 && !activeWorkspaceId) {
@@ -69,11 +66,7 @@ export const AgileView: React.FC = () => {
       // Charger les sprints
       const res = await fetch(
         `${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/projects/workspaces/${activeWorkspaceId}/sprints`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        },
+        {},
       );
       if (!res.ok) {
         throw new Error(

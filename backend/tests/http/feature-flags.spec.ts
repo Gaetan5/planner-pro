@@ -10,6 +10,8 @@ import { PrismaService } from '../../src/prisma/prisma.service';
 import { AppController } from '../../src/app.controller';
 import { AppService } from '../../src/app.service';
 import { TokenService } from '../../src/auth/token.service';
+import { SessionService } from '../../src/auth/session.service';
+import { sessionServiceStub } from '../support/session.test-support';
 import { startHttpTestApp } from './http-test-app';
 
 /**
@@ -47,6 +49,11 @@ describe('P3 : drapeaux de fonctionnalités SSO / SCIM (HTTP)', () => {
         ScimAuthGuard,
         JwtAuthGuard,
         TokenService,
+        {
+          provide: SessionService,
+          useFactory: (tokens: TokenService) => sessionServiceStub(tokens),
+          inject: [TokenService],
+        },
       ],
     }));
   });

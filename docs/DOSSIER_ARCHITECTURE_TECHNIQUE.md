@@ -770,15 +770,15 @@ Un audit d'architecture et de sécurité complet a été conduit en octobre 2026
 
 ### 15.1 Phases du Programme
 
-| Phase | Périmètre | État |
-|---|---|---|
-| 0 | Urgences : SCIM, repli SSO, ticket MFA, connecteur base de données, calendrier simulé, reprise des données (S28) | **Validée côté code** — reste à appliquer en exploitation (migrations, certificats TLS, scripts de reprise) |
-| 1 | MFA, sessions révocables, contrôles uniformes à la connexion, OAuth GitHub | Prochaine phase |
-| 2 | SSO OIDC complet (validation de l'`id_token`) et SCIM | À venir |
-| 3 | Autorisation centralisée, IDOR, temps réel | À venir |
-| 4 | Invitations, console d'administration | À venir |
-| 5 | SSRF, XSS, en-têtes, DTO, limitation de débit, webhooks, dépendances, code mort | À venir |
-| 6 | Journal d'audit, tests e2e, intégration continue | À venir |
+| Phase | Périmètre | Constats | État |
+|---|---|---|---|
+| 0 | Urgences : SCIM, repli SSO, ticket MFA, connecteur MariaDB, calendrier simulé, reprise des données | S1, S2, S3, S4, S5, S28, P1, P3, S14 (étape 1), S18 (étape 0) | **Validée côté code** — reste à appliquer en exploitation (migrations, certificats TLS, scripts de reprise) |
+| 1 | Authentification et sessions : MFA, sessions révocables, contrôles uniformes à la connexion, OAuth GitHub | A3, S7, S8, S6, S9, P6, S27 | En cours |
+| 2 | SSO et SCIM complets : validation OIDC, vérification DNS des domaines, durcissement SCIM | S10, S11 | À venir — SSO et SCIM restent désactivés jusqu'à la fin de cette phase |
+| 3 | Autorisation centralisée, IDOR, temps réel (Socket.IO) | A1, A2, A4, S12, S13, S14 (suite), S15, S16 | À venir |
+| 4 | Invitations, console d'administration | P4, S17, S18 (suite) | À venir |
+| 5 | Durcissement : SSRF, XSS, en-têtes, DTO, limitation de débit, webhooks, dépendances, code mort | S19 à S26, A5, A6, A7, P5, P8 | À venir |
+| 6 | Journal d'audit, tests e2e, intégration continue, montée vers pnpm 10 | A8, A9, P2, P7 | À venir |
 
 ### 15.2 Règles de Développement Issues du Programme
 

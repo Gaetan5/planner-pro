@@ -33,9 +33,8 @@ export function NotificationInbox() {
   const getHeaders = useCallback(
     () => ({
       'Content-Type': 'application/json',
-      Authorization: user?.token ? `Bearer ${user.token}` : '',
     }),
-    [user?.token],
+    [],
   );
 
   // Positionner le popover sous le bouton

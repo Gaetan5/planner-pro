@@ -1,8 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { SsoService } from './sso.service';
-import { TokenService } from '../token.service';
+import { AuthService } from '../auth.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { JwtService } from '@nestjs/jwt';
 import { SSOProvider, WorkspaceRole } from '@prisma/client';
 import { NotImplementedException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
@@ -30,8 +29,12 @@ describe('SsoService', () => {
     },
   };
 
+  // Point d'entrée unique des sessions (A3) : aucune session ne doit être émise pour un refus
   const jwtService = {
     sign: jest.fn().mockReturnValue('jwt-sso-token'),
+  };
+  const authService = {
+    completeLogin: jest.fn().mockResolvedValue({ user: {}, session: {} }),
   };
 
   beforeEach(async () => {
@@ -39,8 +42,7 @@ describe('SsoService', () => {
       providers: [
         SsoService,
         { provide: PrismaService, useValue: prisma },
-        { provide: JwtService, useValue: jwtService },
-        TokenService,
+        { provide: AuthService, useValue: authService },
       ],
     }).compile();
 
@@ -79,7 +81,9 @@ describe('SsoService', () => {
       expect(res.domain).toBe('totalenergies.com');
       expect(res.provider).toBe(SSOProvider.OIDC_AZURE_AD);
       expect(res.enforceSSO).toBe(true);
-      expect(res.workspaceName).toBe('TotalEnergies Exploration');
+      // S27 : le nom du workspace n'est pas révélé à un appelant anonyme
+      expect(JSON.stringify(res)).not.toContain('TotalEnergies Exploration');
+      expect(res).not.toHaveProperty('workspaceName');
     });
   });
 
@@ -123,7 +127,7 @@ describe('SsoService', () => {
         expect(prisma.user.create).not.toHaveBeenCalled();
         expect(prisma.user.update).not.toHaveBeenCalled();
         expect(prisma.membership.create).not.toHaveBeenCalled();
-        expect(jwtService.sign).not.toHaveBeenCalled();
+        expect(authService.completeLogin).not.toHaveBeenCalled();
         expect(fetchSpy).not.toHaveBeenCalled();
         fetchSpy.mockRestore();
       },

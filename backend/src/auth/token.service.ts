@@ -7,11 +7,15 @@ export const ACCESS_TOKEN_TYPE = 'access';
 export const MFA_TICKET_TYPE = 'mfa_ticket';
 export const MFA_TICKET_AUDIENCE = 'mfa-challenge';
 export const MFA_TICKET_TTL_SECONDS = 300;
+/** Durée de vie du jeton d'accès (S7) : court, la session se prolonge par rotation du refresh. */
+export const ACCESS_TOKEN_TTL_SECONDS = 900;
 
 export interface AccessTokenClaims {
   sub: string;
   email?: string;
   name?: string | null;
+  /** Identifiant de session (famille de jetons de rafraîchissement) : obligatoire (S7). */
+  sid: string;
   impersonatedBy?: string;
 }
 
@@ -51,8 +55,15 @@ export class TokenService {
     );
   }
 
+  /**
+   * Émission bas niveau du jeton d'accès. Seul `SessionService` l'appelle (A3) : toute session
+   * passe par `AuthService.completeLogin`.
+   */
   signAccessToken(claims: AccessTokenClaims): string {
-    return this.jwtService.sign({ ...claims, typ: ACCESS_TOKEN_TYPE });
+    return this.jwtService.sign(
+      { ...claims, typ: ACCESS_TOKEN_TYPE },
+      { expiresIn: ACCESS_TOKEN_TTL_SECONDS, jwtid: randomUUID() },
+    );
   }
 
   /**
@@ -74,7 +85,9 @@ export class TokenService {
       payload.typ !== ACCESS_TOKEN_TYPE ||
       'mfaPending' in payload ||
       typeof payload.sub !== 'string' ||
-      !payload.sub
+      !payload.sub ||
+      typeof payload.sid !== 'string' ||
+      !payload.sid
     ) {
       throw new UnauthorizedException("Token d'authentification invalide ou expiré.");
     }

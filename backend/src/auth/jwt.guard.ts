@@ -1,13 +1,21 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  CanActivate,
+  ExecutionContext,
+  ForbiddenException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Request } from 'express';
+import { IS_FORBIDDEN_IN_IMPERSONATION } from './forbidden-in-impersonation.decorator';
 import { IS_PUBLIC_KEY } from './public.decorator';
-import { TokenService } from './token.service';
+import { SessionService } from './session.service';
+import { readAccessCookie } from './session-cookies';
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
   constructor(
-    private tokenService: TokenService,
+    private sessionService: SessionService,
     private reflector: Reflector,
   ) {}
 
@@ -27,16 +35,31 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException("Token d'authentification manquant.");
     }
 
-    // Seuls les jetons d'accès (typ 'access') sont acceptés : un ticket MFA est rejeté (S3)
-    const payload = await this.tokenService.verifyAccessToken(token);
+    // Jeton d'accès (typ 'access', S3) ET session active, compte non suspendu (S7)
+    const payload = await this.sessionService.verifyAccess(token);
+    if (payload.impersonatedBy) {
+      const forbidden = this.reflector.getAllAndOverride<boolean>(IS_FORBIDDEN_IN_IMPERSONATION, [
+        context.getHandler(),
+        context.getClass(),
+      ]);
+      if (forbidden) {
+        throw new ForbiddenException('Action interdite pendant une session d’impersonation.');
+      }
+    }
     // Assigner l'utilisateur décodé à la requête
-    request['user'] = { id: payload.sub, email: payload.email, name: payload.name };
+    request['user'] = {
+      id: payload.sub,
+      email: payload.email,
+      name: payload.name,
+      sid: payload.sid,
+      impersonatedBy: payload.impersonatedBy,
+    };
 
     return true;
   }
 
   private extractToken(request: Request): string | undefined {
-    const cookieToken = request.cookies?.accessToken;
+    const cookieToken = readAccessCookie(request);
     if (cookieToken) return cookieToken;
 
     const authorization = request.headers.authorization;

@@ -68,9 +68,8 @@ export const FinancesView: React.FC = () => {
   const getHeaders = useCallback(
     () => ({
       'Content-Type': 'application/json',
-      Authorization: user?.token ? `Bearer ${user.token}` : '',
     }),
-    [user?.token],
+    [],
   );
 
   const loadFinances = useCallback(

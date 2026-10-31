@@ -5,6 +5,8 @@ import { AdminService } from '../../src/admin/admin.service';
 import { PlatformAdminGuard } from '../../src/admin/platform-admin.guard';
 import { JwtAuthGuard } from '../../src/auth/jwt.guard';
 import { TokenService } from '../../src/auth/token.service';
+import { SessionService } from '../../src/auth/session.service';
+import { STUB_SID, sessionServiceStub } from '../support/session.test-support';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { AppController } from '../../src/app.controller';
 import { AppService } from '../../src/app.service';
@@ -21,7 +23,10 @@ describe('S18 étape 0 : drapeau FEATURE_IMPERSONATION_ENABLED (HTTP)', () => {
   const savedEnv = { ...process.env };
 
   const adminService = {
-    impersonateUser: jest.fn().mockResolvedValue({ accessToken: 'jeton', user: { id: 'u-2' } }),
+    impersonateUser: jest.fn().mockResolvedValue({
+      session: { accessToken: 'jeton', accessMaxAgeSeconds: 900, sid: 'imp-sid' },
+      user: { id: 'u-2' },
+    }),
     getOverview: jest.fn().mockResolvedValue({ totals: {} }),
   };
   const prisma = {
@@ -39,11 +44,16 @@ describe('S18 étape 0 : drapeau FEATURE_IMPERSONATION_ENABLED (HTTP)', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: JwtService, useValue: jwtService },
         TokenService,
+        {
+          provide: SessionService,
+          useFactory: (tokens: TokenService) => sessionServiceStub(tokens),
+          inject: [TokenService],
+        },
         JwtAuthGuard,
         PlatformAdminGuard,
       ],
     }));
-    adminToken = new TokenService(jwtService).signAccessToken({ sub: 'admin-1' });
+    adminToken = new TokenService(jwtService).signAccessToken({ sub: 'admin-1', sid: STUB_SID });
   });
 
   afterAll(async () => {

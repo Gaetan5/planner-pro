@@ -11,6 +11,8 @@ import { PrismaService } from '../../src/prisma/prisma.service';
 import { ProactiveSchedulerService } from '../../src/projects/proactive-scheduler.service';
 import { JwtAuthGuard } from '../../src/auth/jwt.guard';
 import { TokenService } from '../../src/auth/token.service';
+import { SessionService } from '../../src/auth/session.service';
+import { STUB_SID, sessionServiceStub } from '../support/session.test-support';
 import { startHttpTestApp } from './http-test-app';
 
 /**
@@ -54,10 +56,19 @@ describe('S5 : routes calendrier (HTTP)', () => {
         { provide: JwtService, useValue: jwtService },
         ProjectPermissionsService,
         TokenService,
+        {
+          provide: SessionService,
+          useFactory: (tokens: TokenService) => sessionServiceStub(tokens),
+          inject: [TokenService],
+        },
         JwtAuthGuard,
       ],
     }));
-    token = new TokenService(jwtService).signAccessToken({ sub: 'user-1', email: 'u@x.com' });
+    token = new TokenService(jwtService).signAccessToken({
+      sub: 'user-1',
+      email: 'u@x.com',
+      sid: STUB_SID,
+    });
   });
 
   afterAll(async () => {

@@ -625,3 +625,594 @@ Ordre : **A9** (CI sur toutes les branches, audit, e2e), **P7** (suite e2e de s�
   - A1 à A9 ;
   - P2 et P4 à P8.
 
+
+---
+
+## Revue de la Phase 1 (A3 → S9) (r4, 2026-10-30)
+
+Revue des entrées A3, S7, S8, S6 et S9 du journal (statut `CORRIGÉ – À REVOIR`), faite sur le code réel de la branche `security/phase-0` (modifications non commitées). Le fixeur travaillait en parallèle sur P6 et S27 : les chiffres ci-dessous incluent donc son travail P6 en cours. P6 et S27 ne sont pas revus ici.
+
+### Vérifications refaites par l'architecte
+
+| Vérification | Résultat |
+| --- | --- |
+| `cd backend && npx jest` (avec `DATABASE_URL` pointant vers `127.0.0.1:1`, injoignable, pour ne jamais toucher la MySQL de dev) | 45/45 suites, 416/416 tests. Un premier passage, lancé pendant que le fixeur ajoutait `MailService` (P6), avait 4 suites en échec (`Nest can't resolve … MailService`). C'était transitoire : vert au second passage. |
+| `cd frontend && npx vitest run` | 13/13 fichiers, 43/43 tests |
+| `env -u DATABASE_URL npx nest build` (backend) | OK |
+| `npx vite build` (frontend) | OK |
+| ESLint sur `backend/src/auth`, `src/admin`, les gateways, `tests/unit/auth`, `tests/http/session-lifecycle.spec.ts`, `tests/http/http-test-app.ts`, `scripts/encrypt-mfa-secrets.ts` | **1 erreur** : `auth.service.ts:782` `no-useless-assignment` (`let valid = false` dans `verifyCurrentFactor`, code S6). Le journal annonçait 0 erreur. |
+| ESLint frontend (`api-session.ts`, `github-oauth.ts`, `AppContext.tsx`, `AdminConsole.tsx`, `Login.tsx`, `App.tsx`, `main.tsx`) | 0 erreur |
+| `grep -rn "jwtService.sign\|signAccessToken" backend/src` hors specs | `jwtService.sign` seulement dans `token.service.ts` (accès et ticket MFA) ; `signAccessToken` appelé seulement par `session.service.ts:115,209` |
+| `grep -rn "res.cookie\|maxAge" backend/src` hors specs | cookies de session définis seulement dans `session-cookies.ts` ; seule autre occurrence : le cookie `github_oauth_state` |
+| `grep -rn "user.token\|Authorization\|accessToken" frontend/src` hors specs | aucun jeton lu ni stocké par le JavaScript ; `planner_user` ne contient plus qu'un profil, et l'ancien `token` est purgé au démarrage (`AppContext.tsx:519-523`) |
+
+### A3 : un seul point d'émission de session : **VALIDÉ**
+
+- `SessionService` est le seul appelant de `TokenService.signAccessToken`. `AuthService.completeLogin` est le seul point d'entrée : mot de passe, MFA, GitHub, Firebase, mock, SSO (`sso.service.ts`) et impersonation (`admin.service.ts`) y passent. Les cookies n'ont qu'une définition (`session-cookies.ts`).
+- **Écart sur le critère du grep : accepté.** Les deux couches sont bien séparées : la signature bas niveau (`TokenService`, déjà validée avec S3) et la politique de session (`SessionService`). Nouveau critère, qui remplace celui de la section 4 : « `jwtService.sign` n'apparaît que dans `token.service.ts` ; `signAccessToken` n'est appelé que par `session.service.ts` ». Il est vérifié.
+- Actions non bloquantes :
+  1. `src/auth/session.test-support.ts` utilise `jest.fn()` et se retrouve compilé dans `dist/` (il n'y a pas de `tsconfig.build.json`). Le déplacer sous `backend/tests/support/`. **Critère** : `ls backend/dist/**/session.test-support*` ne renvoie rien après `nest build`.
+  2. Migration `20261109000000` : la table `RefreshToken` devrait être vide, mais rien ne le garantit. Un `ALTER … ADD familyId NOT NULL` sur des lignes existantes leur donne `familyId = ''`. Ajouter `DELETE FROM RefreshToken;` avant l'`ALTER` (aucune de ces lignes n'est utilisable).
+
+### S7 : sessions révocables, cookies httpOnly, déconnexion serveur : **À REPRENDRE** (deux points ciblés, le socle est solide)
+
+Constaté dans le code :
+
+- jeton d'accès de 15 min avec `sid` et `jti` ; un jeton sans `sid` est rejeté ;
+- refresh opaque de 256 bits, haché en SHA-256, consommé de façon atomique (`updateMany` sur `revokedAt: null`), révocation de la famille sur réutilisation ;
+- cache Redis de 60 s invalidé à la révocation, repli sur la base en 500 ms ;
+- `POST /auth/logout` idempotent ; `revokeUserSessions` révoque réellement ;
+- `DELETE /auth/sessions/:sid` borné au propriétaire ;
+- WebSocket authentifié par cookie ;
+- frontend sans jeton lisible.
+
+Les tests HTTP (`session-lifecycle.spec.ts`) couvrent les quatre scénarios demandés : logout, suspension, révocation admin et rejeu du refresh.
+
+**Réponses aux écarts et questions du fixeur :**
+
+1. **`Path=/auth` pour le refresh : accepté.** Le logout avec un jeton d'accès expiré a besoin du cookie de refresh. L'exposition supplémentaire se limite aux routes `/auth/*` du même backend. Remédiation S7.3 mise à jour : `Path=/auth`.
+2. **Surveillance de la session, et non du jeton, toutes les 60 s sur les sockets : accepté sur le principe.** Couper une socket à chaque expiration du jeton de 15 min n'apporterait rien, puisque la révocation reste détectée. **Mais le délai n'est pas tenu dans un cas** : `ws-auth.ts:40-48` appelle `isSessionActive`, qui lit d'abord le cache Redis (`session.service.ts:268-271`). Prenons une suspension posée en base, sans passer par `revoke`. Si le cache a été rempli juste avant par une requête HTTP, la socket peut survivre jusqu'à environ 120 s (cache de 60 s, plus un intervalle de 60 s). Le critère est « moins de 60 s ». → **Action S7-a.**
+3. **CSRF par `SameSite=Strict` et CORS : accepté pour les attaques inter-sites, insuffisant pour les sites voisins.** `SameSite` protège contre les autres *sites*, pas contre les autres *sous-domaines* du même site. Or `*.boukarou-os.com` est un site partagé (charte « Boukarou OS », plusieurs applications possibles). Deux voies restent ouvertes depuis un sous-domaine voisin compromis ou hostile :
+   - un formulaire `application/x-www-form-urlencoded`, que Nest analyse par défaut, part avec les cookies ;
+   - un handshake Socket.IO par cookie (*Cross-Site WebSocket Hijacking*), puisque l'option `cors` de Socket.IO ne s'applique pas au transport WebSocket.
+
+   Le passage du WebSocket au cookie, introduit par S7, crée ce second vecteur : avant, `auth.token` était explicite, donc immunisé. → **Nouveau constat S29, action S7-b.**
+4. **7 jours glissants et plafond de 30 jours : accepté comme décision produit par défaut.** C'est cohérent avec les usages SaaS B2B, et l'inactivité de 7 jours joue le rôle de délai d'inactivité. Deux réserves, à traiter plus tard (pas dans cette phase) :
+   - comptes `platformRole` : plafond de 12 h (Phase 4, avec S18.3) ;
+   - durée configurable par workspace : backlog produit.
+5. **Retrait du `Bearer` : à faire, mais pas maintenant.** Le Bearer ne crée pas de risque nouveau : aucun jeton n'est plus lisible par le JavaScript, et le cookie reste prioritaire (`jwt.guard.ts:46-53`). Il est même immunisé contre le CSRF. Décision :
+   - garder le Bearer jusqu'à la Phase 5 ;
+   - à ce moment-là, le retirer du guard HTTP et du handshake WS, sauf si un consommateur documenté existe. Dans ce cas, le remplacer par des jetons d'API personnels à portée limitée (backlog), jamais par le jeton de session.
+6. **Garde-fou `DATABASE_URL` en `NODE_ENV=test` : accepté et rendu obligatoire.** Le garde-fou de `http-test-app.ts` est bon, mais il ne couvre que les tests HTTP. → **Mise à jour d'A7** (voir plus bas), à faire dès le complément de Phase 1 parce que le risque porte sur la base de dev réelle.
+
+**Actions S7 :**
+
+- **S7-a** : la revalidation périodique des sockets doit interroger la base **sans** passer par le cache. Par exemple `isSessionActive(sid, userId, { bypassCache: true })` dans `ws-auth.ts`, et la valeur lue rafraîchit le cache. Le coût est d'une requête indexée par socket et par minute, acceptable.
+  - **Test** (`notifications.gateway.spec.ts`, timers factices) : cache Redis pré-rempli « actif », puis `isSuspended = true` en base sans `revoke`. La socket est déconnectée au premier tick (60 s au plus).
+- **S7-b** : voir S29 (contrôle de l'`Origin` sur le handshake WS authentifié par cookie). S7 est clos quand S29 est validé.
+- **S7-c** : écrire `docs/security/runbook-phase1.md`. Il est cité par la migration `20261109000100` (en-tête SQL) mais **n'existe pas**. Contenu attendu :
+  - ordre de déploiement (migrations A3/S7, S6, P6) ;
+  - annonce de la déconnexion générale (jetons sans `sid`) ;
+  - exécution de `scripts/encrypt-mfa-secrets.ts` : rapport, revue, `--apply`, sauvegarde préalable, CSV conservé ;
+  - révocation côté GitHub des anciens jetons à portée `repo` ;
+  - contrat des cookies pour les éventuels scripts ;
+  - retour arrière.
+
+  **Critère** : le fichier existe et chaque migration de la Phase 1 y est citée.
+
+### S8 : contrôles uniformes à la connexion : **VALIDÉ**
+
+- `completeLogin` applique, pour toutes les méthodes : suspension (403), puis `enforceSSO`, puis MFA (ticket), puis émission. Le ticket conserve la méthode d'origine **côté serveur** (`<userId>|<méthode>` dans Redis), ce qui l'empêche d'être falsifié. Au challenge, la suspension et `enforceSSO` sont réévalués.
+- Plus aucune liaison automatique : Firebase et GitHub sur un compte existant donnent 409 sans `update` ; un compte provisionné par SCIM n'est jamais réclamé. La matrice de `login-policy.spec.ts` (24 tests) correspond au critère d'acceptation.
+
+**Réponses aux écarts :**
+
+1. **Ordre suspension → `enforceSSO` → MFA : accepté.** Inutile de consommer un ticket et une saisie TOTP pour une méthode qui sera refusée de toute façon. Comme `enforceSSO` est réévalué au challenge (`primaryMethod`), un `enforceSSO` posé entre le ticket et le code est bien appliqué. Remédiation S8.1 mise à jour dans ce sens.
+2. **`enforceSSO` conditionné à `FEATURE_SSO_ENABLED` : accepté, et c'est la bonne lecture du risque.** Tant que S10 n'a pas prouvé la propriété du domaine, `enforceSSO` est un vecteur de déni de service contre une organisation tierce. → **Mise à jour de S10** (voir plus bas).
+3. et 4. **Accepté.** La liaison GitHub passe par `/auth/github/link` (voir S9 et P9) ; la liaison SSO relève de la Phase 2. Pour la pré-occupation SCIM, la règle générale du 409 et le premier rattachement par réinitialisation de mot de passe (P6) satisfont S8.4.
+
+### S6 : cycle de vie du MFA : **À REPRENDRE** (trois actions courtes)
+
+Constaté :
+
+- `setupMfa` refuse avec 409 si le MFA est actif, et le secret en attente est chiffré ;
+- `confirmMfa` promeut le secret, consomme le pas de temps et livre 10 codes Argon2id ;
+- `disableMfa` et la régénération exigent le facteur actuel **et** le mot de passe (ou une connexion de moins de 5 min) ;
+- anti-rejeu par `mfaLastUsedStep`, avec une mise à jour conditionnelle `lt` (sûre en concurrence) ;
+- code de secours à usage unique (`updateMany` sur `usedAt: null`) ;
+- DTO en place ;
+- lecture tolérante des secrets encore en clair ;
+- script de chiffrement idempotent, non exécuté.
+
+Les tests attendus par le rapport sont tous présents dans `mfa-lifecycle.spec.ts`.
+
+**Réponses aux questions :**
+
+- **Code de secours accepté pour désactiver le MFA (avec le mot de passe) : accepté.** Un code de secours permet déjà de se connecter. L'accepter pour la désactivation n'ajoute aucune capacité à un attaquant, et c'est le parcours normal en cas de perte de l'appareil. Le refuser pour la régénération est cohérent. Recommandation non bloquante : envoyer un e-mail de notification à la désactivation du MFA et à la régénération des codes, puisque `MailService` est maintenant disponible (P6).
+- **Absence d'écran d'activation du MFA : pris acte.** Le backend ne peut pas être reproché au fixeur sur ce point, mais sans écran le MFA reste inaccessible aux utilisateurs. → **Nouveau constat produit P9.**
+
+**Actions S6 :**
+
+- **S6-a** : corriger l'erreur ESLint `auth.service.ts:782` (`no-useless-assignment`). **Critère** : `npx eslint src/auth` donne 0 erreur.
+- **S6-b** : `setupMfa` et `confirmMfa` n'exigent aucune réauthentification. Une session volée sur un compte **sans** MFA permet donc d'enrôler le facteur de l'attaquant. Le titulaire est alors verrouillé hors de son compte et l'attaquant détient les codes de secours. C'est l'impact décrit dans S6 (« une session volée suffit à remplacer le facteur »), dans sa variante « premier facteur ». Correctif : appeler `assertReauthenticated(user, dto.password, sid)` dans `setupMfa`, ce qui suppose d'ajouter un DTO `SetupMfaDto { password?: string }`.
+  - **Tests** : `setupMfa` sans mot de passe, sur un compte qui en a un, est refusé sans écriture de `mfaPendingSecret` ; compte sans mot de passe avec une connexion de plus de 5 min : refusé.
+- **S6-c** : couvert par S7-c. Les étapes de `encrypt-mfa-secrets.ts` doivent figurer dans `runbook-phase1.md`.
+
+### S9 : OAuth GitHub : **À REPRENDRE** (une régression fonctionnelle, un durcissement)
+
+Constaté :
+
+- `state` de 32 octets, cookie signé par HMAC (clé HKDF dédiée), vérifié en temps constant **avant** tout appel à GitHub, puis effacé ;
+- identité par `githubId` ; seuls les e-mails `verified === true` sont retenus ; 409 sans `update` sur un e-mail connu ; plus d'e-mail fabriqué ;
+- `res.ok` contrôlé sur les trois appels ;
+- portée `read:user user:email` ; DTO en place.
+
+Le critère d'acceptation de sécurité est atteint (`github-oauth.spec.ts`, 19 tests).
+
+**Réponse à l'écart :** `authorize` renvoie un JSON `{ url }` au lieu d'une redirection 302 : **accepté**. L'appel `fetch` avec `credentials: 'include'` vers l'API du même site pose bien le cookie, et la navigation suit vers GitHub. La sécurité est équivalente (le `state` reste lié au cookie de ce navigateur) et l'erreur reste affichable dans l'application.
+
+**Actions S9 :**
+
+- **S9-a (régression)** : `loginWithGitHub` (`auth.service.ts:361-366`) **écrase `githubAccessToken`** avec le jeton de connexion, à portée `read:user user:email`. Un utilisateur dont le jeton actuel porte `repo` le perd à sa prochaine connexion GitHub, et `getGitHubRepositories` cesse de voir ses dépôts privés. L'écriture a en outre lieu **avant** les contrôles de `completeLogin` (suspension, `enforceSSO`, MFA). Correctif :
+  - à la connexion, ne jamais persister le jeton GitHub. Mettre à jour `githubUsername` seulement, et seulement après le succès de `completeLogin` ;
+  - le jeton n'est stocké que par `/auth/github/link` avec la finalité `repos`, et seulement si le champ `scope` de la réponse de GitHub contient `repo`.
+
+  **Tests** : connexion d'un compte lié dont le jeton stocké est `X` : `githubAccessToken` reste `X` ; compte suspendu : aucune écriture.
+- **S9-b (durcissement)** : la finalité (`login`, `link`, `repos`) n'est liée ni au `state` ni au cookie. Le frontend ne peut donc pas savoir, au retour de GitHub, quelle route appeler : `App.tsx:115-117` appelle toujours `login`. Correctif :
+  - inclure la finalité dans la valeur signée (`<state>.<purpose>.<hmac>`) ;
+  - faire vérifier par `/auth/github/login` que la finalité vaut `login`, et par `/auth/github/link` qu'elle vaut `link` ou `repos` ;
+  - exposer la finalité au frontend : soit dans l'URL de retour (`redirect_uri` avec `?gh=link`), soit par un `GET /auth/github/pending` qui renvoie la finalité du cookie.
+
+  **Tests** : un `state` émis pour `login` présenté à `/link` donne 401, et inversement.
+- L'écran de liaison GitHub et de connexion d'un dépôt relève de P9.
+
+### Nouveaux constats
+
+#### S29 : CSRF et détournement de WebSocket depuis un sous-domaine du même site ; cookies sans préfixe `__Host-`
+
+- **Phase** : 1 (complément, lié à la clôture de S7). **Sévérité** : Mineur. **CVSS 4.2** `AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:L/A:N`.
+- **Localisation** :
+  - `backend/src/auth/ws-auth.ts:15-21` : WebSocket authentifié par le cookie `accessToken`, sans contrôle d'`Origin` ;
+  - `backend/src/tracking/tracking.gateway.ts:24-29` et `backend/src/notifications/notifications.gateway.ts:20-25` : l'option `cors` de Socket.IO ne s'applique pas au transport WebSocket ;
+  - `backend/src/main.ts` : analyseur `urlencoded` actif par défaut, aucun contrôle d'`Origin` ni de `Sec-Fetch-Site` sur les méthodes à effet ;
+  - `backend/src/auth/session-cookies.ts:27-38` : cookies sans préfixe.
+- **Cause** : `SameSite=Strict` protège contre les autres **sites**. Or tous les sous-domaines de `boukarou-os.com` forment un seul site. Une page hostile ou victime d'une XSS sur un sous-domaine voisin peut donc :
+  - ouvrir une socket authentifiée par le cookie de la victime, lire ses notifications et ses événements de suivi, et en émettre ;
+  - envoyer des formulaires `POST` avec les cookies ;
+  - déposer un cookie `accessToken` sur `Domain=.boukarou-os.com` (*cookie tossing*), ce qui revient à connecter la victime au compte de l'attaquant.
+- **Remédiation attendue** :
+  1. Handshake Socket.IO : `allowRequest` (ou un middleware `server.use`) qui refuse le handshake quand le jeton vient du **cookie** et que l'en-tête `Origin` est absent ou hors de `CORS_ORIGINS`. Le `Bearer` explicite reste accepté sans `Origin` jusqu'à son retrait (Phase 5).
+  2. HTTP : middleware global sur `POST`, `PUT`, `PATCH` et `DELETE`. Si la requête porte le cookie `accessToken` ou `refreshToken`, exiger un `Origin` (à défaut, un `Referer`) présent dans `CORS_ORIGINS`, sinon 403. Exemptions explicites et listées : webhook GitHub, SCIM (authentifié par clé, sans cookie).
+  3. En production, nommer le cookie d'accès `__Host-accessToken` (`Secure`, `Path=/`, sans `Domain`). Le cookie de rafraîchissement ne peut pas porter `__Host-` à cause de `Path=/auth` : le préfixer `__Secure-` et le traiter comme non fiable s'il apparaît en double (refus si deux valeurs sont reçues).
+- **Critère d'acceptation** : aucune requête à effet ni aucun handshake WS authentifié par cookie n'aboutit depuis une origine absente de `CORS_ORIGINS`.
+- **Tests attendus** :
+  - `session-lifecycle.spec.ts` : `POST /auth/logout`, ou une route protégée en `POST`, avec cookie et `Origin: https://evil.boukarou-os.com` donne 403 ; avec `Origin` autorisé, 2xx ;
+  - test de gateway : handshake avec cookie et `Origin` étranger refusé ; avec `Authorization: Bearer` et sans `Origin`, accepté.
+
+#### P9 : écrans de sécurité du compte absents (MFA, codes de secours, liaison GitHub et Firebase, sessions actives)
+
+- **Phase** : 1 (complément). **Sévérité** : Majeur (produit).
+- **Observation** :
+  - les routes `/auth/mfa/setup|confirm|disable|recovery-codes`, `/auth/github/link` (finalités `link` et `repos`) et `/auth/sessions` existent, mais aucun écran ne les appelle (aucun appel à `startGitHubAuthorization('link'|'repos')`) ;
+  - les messages 409 renvoient l'utilisateur vers « liez … depuis votre profil », un écran qui n'existe pas pour GitHub ;
+  - depuis S9, plus aucun parcours n'obtient la portée `repo` : l'intégration de dépôts GitHub est inutilisable pour les nouveaux comptes.
+- **Risque** : MFA inaccessible aux utilisateurs, ce qui annule en pratique S6 ; comptes bloqués en 409 sans issue, donc des tickets de support ; régression de l'intégration GitHub.
+- **Suggestion** : un écran « Sécurité du compte » qui regroupe :
+  - activation du MFA (QR code depuis `authUri`, confirmation, affichage unique des 10 codes avec téléchargement) ;
+  - désactivation et régénération (code, ou code de secours, plus mot de passe) ;
+  - liaison GitHub et Firebase ;
+  - liste et révocation des sessions ;
+  - bouton « Connecter un dépôt » (finalité `repos`) dans les intégrations.
+
+  Cet écran s'appuie sur S9-b pour router le retour de GitHub.
+- **Critère** : tests vitest. Le parcours d'activation affiche les codes une seule fois. Le retour GitHub avec la finalité `link` appelle `/auth/github/link`. La page des sessions appelle `DELETE /auth/sessions/:sid`.
+
+### Mises à jour de remédiations existantes (décisions de cette revue)
+
+- **A3**, critère : remplacé par « `jwtService.sign` seulement dans `token.service.ts`, `signAccessToken` appelé seulement par `session.service.ts` ».
+- **S7.3** : `Path=/auth` pour le cookie de rafraîchissement (au lieu de `/auth/refresh`). Durées retenues : 7 jours glissants, plafond de 30 jours.
+- **S8.1** : ordre retenu : suspension, puis `enforceSSO`, puis MFA. `enforceSSO` est réévalué au challenge selon la méthode d'origine du ticket.
+- **S10**, ajout d'un point : `enforceSSO` n'est appliqué que si `FEATURE_SSO_ENABLED=true` **et** si le domaine de la configuration est prouvé (`domainVerifiedAt` non nul, une fois S10 livré).
+  - **Test** : `enforceSSO=true` sur un domaine non vérifié : les connexions par mot de passe restent autorisées.
+- **S18.2**, complément : liste des routes **interdites en session d'impersonation** (403 si `req.user.impersonatedBy` est présent), à couvrir par un test paramétré :
+  - `/auth/mfa/*` ;
+  - `/auth/github/link` et `/auth/firebase/link` ;
+  - `DELETE /auth/sessions/:sid` ;
+  - `/auth/password/*` ;
+  - `/admin/*`.
+
+  Sans cela, une impersonation de 15 min pourrait lier le GitHub ou le Firebase de l'administrateur au compte cible, et devenir un accès **persistant**. Le drapeau `FEATURE_IMPERSONATION_ENABLED` doit rester désactivé tant que ce point n'est pas fait. Autre ajout : à l'impersonation, révoquer la session de l'administrateur (`actor.sid`). Son cookie de rafraîchissement est effacé (`session-cookies.ts:40-41`), mais sa famille reste active 7 jours sans pouvoir être utilisée.
+- **A7**, ajout d'un point, **à avancer au complément de Phase 1** : en `NODE_ENV=test`, aucun repli de DSN. `buildMariaDbOptions` lève une erreur sans `DATABASE_URL` ; la configuration Jest (`setupFiles`) fixe `DATABASE_URL` sur une adresse injoignable (`127.0.0.1:1`) sauf pour la suite e2e explicite, qui exige sa propre URL. **Test** : `prisma.service.spec.ts`, cas `NODE_ENV=test` sans `DATABASE_URL` : erreur (le cas « repli local autorisé » est retiré pour `test`).
+
+### Synthèse de la revue r4
+
+| ID | Verdict r4 |
+| --- | --- |
+| A3 | VALIDÉ (2 actions non bloquantes) |
+| S7 | À REPRENDRE (S7-a, S7-b par S29, S7-c) |
+| S8 | VALIDÉ |
+| S6 | À REPRENDRE (S6-a, S6-b, S6-c par S7-c) |
+| S9 | À REPRENDRE (S9-a, S9-b) |
+| S29 | Nouveau, ouvert |
+| P9 | Nouveau, ouvert |
+
+Aucune nouvelle faille critique. La seule régression est fonctionnelle (S9-a) ; le seul affaiblissement introduit est le WebSocket par cookie sans contrôle d'`Origin` (S29).
+
+**Actions pour fixeur, dans l'ordre :**
+
+1. S6-a : erreur ESLint `auth.service.ts:782`.
+2. S7-a : revalidation WS sans le cache, et son test.
+3. S29 : contrôle de l'`Origin` (WS, puis HTTP) ; préfixes de cookies en production.
+4. S6-b : réauthentification pour `setupMfa`.
+5. S9-a : ne plus écraser `githubAccessToken` à la connexion.
+6. S9-b : finalité liée au `state`.
+7. S7-c : `docs/security/runbook-phase1.md`.
+8. A7 (avancé) : pas de repli de DSN en `NODE_ENV=test`.
+9. Non bloquants A3 : déplacer `session.test-support.ts`, `DELETE FROM RefreshToken` dans la migration.
+10. Puis P6 et S27 (en cours), puis P9.
+
+**Constats ouverts à la fin de r4** :
+
+- Phase 1 : S6, S7, S9, P6, S27, S29, P9.
+- Phases 2 à 6 : S10 à S26 sauf S14 étape 1 et S18 étape 0 ; A1, A2, A4 à A9 ; P2, P4, P5, P7, P8.
+- Clos : S1, S2, S3, S4, S5, S8, S28, A3, P1, P3.
+
+---
+
+## Revue P6 et S27 (r5, 2026-10-30)
+
+Revue des entrées P6 et S27 du journal (statut `CORRIGÉ – À REVOIR`), faite sur le code réel. Le fixeur appliquait en parallèle les actions de la r4 (S7-a, S29, S6-b, S9-a/b, runbook, A7, S18.2) : ces actions ne sont **pas** revues ici.
+
+### Vérifications refaites par l'architecte
+
+| Vérification | Résultat |
+| --- | --- |
+| `cd backend && npx jest` (`DATABASE_URL` sur `127.0.0.1:1`, injoignable) | 48/48 suites, 430/430 tests. Le journal annonce 47 et 428 : l'écart vient du travail r4 en cours. |
+| `cd frontend && npx vitest run` | 14/14 fichiers, 53/53 tests |
+| ESLint sur les fichiers P6/S27 (`auth.service.ts`, `encryption.util.ts`, `mail.service.ts`, `invitations.service.ts`, `mask-email.ts`, `sso.service.ts`, `dto/`, `tests/unit/auth`, `account-routes.spec.ts`, `account-api.ts`, `AccountLinkPage.tsx`, `Login.tsx`, `App.tsx`) | 0 erreur. L'erreur S6-a de la r4 (`auth.service.ts:782`) est corrigée. |
+
+### P6 : vérification d'e-mail et réinitialisation de mot de passe : **À REPRENDRE** (une faille introduite, un oracle temporel)
+
+Constaté, et conforme :
+
+- jetons de 256 bits, stockés en SHA-256 ;
+- typés : la confusion entre vérification et réinitialisation est testée ;
+- usage unique atomique (`updateMany` sur `usedAt: null`) ;
+- un nouveau jeton invalide le précédent ;
+- durées de 24 h (vérification) et 30 min (réinitialisation) ;
+- `register` en 202 sans session ;
+- `login` répond 403 pour un compte non vérifié, **après** le contrôle du mot de passe ;
+- `resetPassword` révoque toutes les sessions et conserve le MFA ;
+- liens consommés par un **clic**, pas à l'ouverture (protection contre les scanners de liens) ;
+- jeton retiré de l'URL côté frontend ;
+- reprise `emailVerifiedAt = createdAt` dans la migration.
+
+**Actions P6 :**
+
+- **P6-a (Majeur, faille introduite) : des liens secrets sont écrits dans les journaux.** `MailService.sendMail` (`backend/src/mail/mail.service.ts:378-397`) passe en mode simulé dans deux cas :
+  - SMTP absent ;
+  - **tout échec d'envoi**, même avec un vrai SMTP configuré.
+
+  Dans les deux cas, il journalise le texte complet du message. Ce texte contient désormais les liens de réinitialisation et de vérification, c'est-à-dire des jetons secrets. En production, quiconque lit les journaux (exploitation, agrégateur, prestataire) peut réinitialiser le mot de passe de n'importe quel compte qui a fait une demande dans les 30 dernières minutes. C'est CWE-532, qui mène à une prise de contrôle de compte. Correctif :
+  1. hors `NODE_ENV ∈ {development, test}`, ne jamais journaliser le corps d'un message : seulement le destinataire masqué (`maskEmail`), le sujet et l'erreur ;
+  2. en production, refuser le démarrage si les variables `SMTP_*` sont absentes (même logique fail-closed qu'A7), ou désactiver explicitement les routes `register`, `forgot` et `resend` (503) ;
+  3. le repli « simulé » après un échec d'envoi n'est autorisé qu'en développement.
+
+  **Tests** (`mail.service.spec.ts`) : en `NODE_ENV=production` avec un transporteur qui échoue, aucune trace du jeton dans les appels au `Logger` (espion sur `log`, `warn`, `error`, `debug`) ; démarrage en production sans SMTP : erreur explicite (ou 503 sur `/auth/password/forgot`).
+- **P6-b (Mineur, oracle temporel ; lié à S27)** : `requestPasswordReset`, `resendVerification` et `register` **attendent** l'envoi de l'e-mail (`await this.safeMail(...)`). Ce n'est le cas que si le compte existe (pour `forgot` et `resend`), ou avec un coût différent (pour `register` : transaction et onboarding d'un côté, simple notification de l'autre). Un aller-retour SMTP coûte de 100 ms à plusieurs secondes, ce qui fait de la durée de réponse un oracle d'existence du compte, beaucoup plus net que celui que S27 vient de fermer sur `login`. Correctif : l'envoi est **détaché de la réponse** (envoi non attendu avec capture d'erreur, ou file d'envoi). Les écritures en base restent dans la requête.
+  - **Test** : avec un `MailService` dont la promesse ne se résout jamais, `requestPasswordReset`, `resendVerification` et `register` (adresse existante comme nouvelle) se résolvent tous, et renvoient le même message.
+- **P6-c (non bloquant)** : une inscription jamais vérifiée bloque l'adresse sans limite de durée. Un tiers qui inscrit `victime@x.com` empêche ensuite la victime de créer son compte par Firebase ou GitHub (409), tant qu'elle ne passe pas par « Mot de passe oublié ». Deux correctifs :
+  - purger les comptes jamais vérifiés de plus de 7 jours (tâche planifiée, avec leurs données d'onboarding) ;
+  - dans les messages 409 de Firebase et GitHub, mentionner « Mot de passe oublié ».
+- **P6-d (non bloquant)** : `sendEmailVerificationEmail` insère le **nom saisi** par le demandeur dans un e-mail légitime envoyé à une adresse qui n'est pas forcément la sienne (texte libre, possibilité d'hameçonnage). L'HTML est échappé, mais pas le contenu. Solution : retirer le nom de cet e-mail (« Bonjour, »), ou le borner (`@MaxLength(80)`, sans `://`).
+- Résultat de `resetPassword` : la mise à jour du mot de passe et le marquage « vérifié » sont deux écritures hors transaction. À regrouper (non bloquant).
+
+**Réponses aux questions :**
+
+1. **Reporter l'écran « Sessions actives » et l'écran MFA : accepté**, ils sortent de P6. Ils sont déjà portés par **P9** (écran « Sécurité du compte », tâche produit). Réserve : P9 doit être livré **avant l'ouverture de la Phase 1 aux utilisateurs**. Sans lui, le MFA n'est pas activable et S6 reste théorique. P6 est clos sans ces écrans.
+2. **Réinitialisation qui marque le compte vérifié, y compris pour un compte SCIM : accepté.** Le lien prouve le contrôle de la boîte aux lettres, ce qui est une preuve **plus forte** que l'adresse affirmée par l'IdP d'un workspace dont le domaine n'est pas encore prouvé (S10). Deux garde-fous existent déjà et suffisent :
+   - le MFA est conservé ;
+   - un `enforceSSO` sur un domaine prouvé continuera de refuser la connexion par mot de passe (S8 et mise à jour S10).
+
+   À ajouter avec A8 : un événement d'audit « premier accès d'un compte provisionné par SCIM ».
+3. **`sendAccountExistsEmail` : à garder.** C'est le pendant indispensable d'une réponse générique : sans lui, le vrai titulaire qui a oublié son compte n'a aucun retour. OWASP recommande ce schéma. Le risque de courriel non sollicité n'est pas plus grand que celui de « Mot de passe oublié », qui existe déjà. Conditions :
+   - le message ne contient aucune donnée saisie par le demandeur (c'est le cas) ;
+   - l'envoi suit P6-b (détaché) ;
+   - limitation **par adresse destinataire** (au plus 1 notification par heure et par adresse) : elle relève de **S24** (limitation de débit avec Redis), et non d'A7 comme l'écrit le journal.
+4. **Pré-remplir l'e-mail d'invitation : ne jamais renvoyer l'adresse en clair.** On n'a pas besoin de la pré-remplir, il suffit de ne pas la demander :
+   - le parcours « Créer un compte » depuis une invitation envoie `POST /auth/register { invitationToken, name, password }`, **sans e-mail** ;
+   - le serveur prend l'adresse de l'invitation ;
+   - le compte est créé **vérifié**, puisque le jeton a été envoyé à cette adresse : c'est une preuve équivalente au lien de vérification ;
+   - l'interface n'affiche que l'adresse masquée (« Vous rejoindrez en tant que j***@e***.com »).
+
+   Conditions, rattachées à **S17** :
+   - jeton d'invitation à usage unique et à durée bornée ;
+   - acceptation de l'invitation toujours explicite ;
+   - si un compte existe déjà pour cette adresse : même réponse générique, notification, puis connexion.
+
+   **Tests** : `register` avec `invitationToken` valide crée le compte avec l'adresse de l'invitation et `emailVerifiedAt` renseigné ; un corps contenant un `email` différent est ignoré ou refusé (400) ; un jeton expiré ou consommé donne 400.
+
+### S27 : énumération des comptes et comparaisons non constantes : **VALIDÉ** pour son périmètre
+
+Constaté :
+
+- `login` vérifie un hachage Argon2id factice (mêmes paramètres, calculé une fois) quand le compte est absent **ou sans mot de passe** ; le message 401 est identique ;
+- `register` hache dans les deux branches ;
+- PBKDF2 legacy comparé par `timingSafeEqual`, avec un contrôle de longueur sans exception ;
+- `checkInvitation` masque l'adresse et ne renvoie plus l'e-mail de l'invitant ;
+- `discover` ne renvoie plus `workspaceName`.
+
+Les tests de `enumeration-timing.spec.ts` couvrent le critère.
+
+- **Écart sur le critère : accepté.** On vérifie que `argon2.verify` est appelé, au lieu de mesurer une durée instable en CI. C'est ce que le rapport proposait.
+- **Écart sur `workspaceName` dans `checkInvitation` : accepté.** Il faut posséder un jeton de 256 bits.
+- Résidu connu, non bloquant : un compte encore en PBKDF2 legacy (1 000 itérations) répond plus vite qu'un compte Argon2. Il reste donc détectable, mais seulement par qui connaît l'adresse, et la migration différée l'efface à la première connexion.
+- L'oracle temporel des nouvelles routes P6 est traité sous **P6-b**. S27 ne repasse pas à « À REPRENDRE » pour autant : le défaut vient de P6.
+
+### Synthèse de la revue r5
+
+| ID | Verdict r5 |
+| --- | --- |
+| P6 | À REPRENDRE (P6-a bloquant, P6-b ; P6-c et P6-d non bloquants) |
+| S27 | VALIDÉ |
+
+**Actions pour fixeur (P6/S27), dans l'ordre :**
+
+1. P6-a : ne plus journaliser le corps des e-mails hors développement ; fail-closed sans SMTP en production.
+2. P6-b : envoi d'e-mail détaché de la réponse (`register`, `forgot`, `resend`), avec un test de promesse jamais résolue.
+3. Formulaire d'inscription par invitation sans e-mail (question 4). À planifier avec S17 ; pas un prérequis à la clôture de P6.
+4. Non bloquants : P6-c (purge des comptes non vérifiés, message 409), P6-d (nom retiré de l'e-mail de vérification), transaction dans `resetPassword`.
+
+Toujours dues au titre de la r4, en cours chez le fixeur et non revues ici : S7-a, S29, S6-b, S9-a, S9-b, S7-c (`runbook-phase1.md`), A7 (DSN en test), S18.2.
+
+**Constats ouverts à la fin de r5** :
+
+- Phase 1 : S6, S7, S9 (actions r4), P6 (P6-a, P6-b), S29, P9.
+- Phases 2 à 6 : S10 à S26 sauf S14 étape 1 et S18 étape 0 ; A1, A2, A4 à A9 ; P2, P4, P5, P7, P8.
+- Clos : S1, S2, S3, S4, S5, S8, S27, S28, A3, P1, P3.
+
+---
+
+## Revue r6 (2026-10-31) : actions r4 et r5, clôture de la Phase 1
+
+Revue des entrées de la section « Actions de la revue r4 (Phase 1) et de la revue r5 (P6) » du journal, faite sur le code réel. Le fixeur ne travaillait pas pendant cette revue.
+
+### Vérifications refaites par l'architecte
+
+| Vérification | Résultat |
+| --- | --- |
+| `cd backend && npx jest` (`DATABASE_URL` sur `127.0.0.1:1` ; `tests/support/jest-env.ts` la force de toute façon) | 53/53 suites, 497/497 tests (conforme au journal) |
+| `cd frontend && npx vitest run` | 14/14 fichiers, 56/56 tests (conforme) |
+| `env -u DATABASE_URL npx nest build` | OK ; `find dist -name "*.spec.js" -o -name "*test-support*"` vide |
+| `npx vite build` | OK |
+| ESLint frontend `src` | 0 erreur |
+| ESLint backend `src tests` | **7 erreurs**, toutes dans `backend/tests/support/session.test-support.js`. Ce fichier est un artefact compilé non suivi par git, avec `.d.ts` et `.js.map` (voir A3-c). 0 erreur sur les fichiers source. |
+| Contournement de S18.2 par la casse | **Confirmé** sur l'Express 4.22.1 du projet : `POST /Auth/GitHub/Link` atteint le gestionnaire de `/auth/github/link` (`req.path = /Auth/GitHub/Link`), alors que l'expression de blocage ne correspond pas. Script de preuve dans le bac à sable de session, rien dans le dépôt. |
+
+### Verdicts par constat
+
+**S6 (S6-a, S6-b) : VALIDÉ.**
+- L'erreur ESLint de `verifyCurrentFactor` est corrigée.
+- `setupMfa(userId, dto, sid)` appelle `assertReauthenticated` avant toute écriture. La réauthentification passe avant le contrôle `mfaEnabled`, donc l'existence du MFA n'est pas révélée sans mot de passe.
+- `POST /auth/mfa/setup` est limité à 5/min.
+- Les tests de refus sans écriture sont présents. **S6 est clos.**
+
+**S7 (S7-a, S7-c) : VALIDÉ.**
+- `isSessionActive(…, { bypassCache: true })` lit la base, rafraîchit le cache si la session est active et le supprime sinon. Le tick WS l'utilise.
+- Le test `ws-revalidation.spec.ts` reproduit le scénario de 120 s de la r4 et coupe la socket au premier tick.
+- `runbook-phase1.md` couvre :
+  - ordre de déploiement et variables ;
+  - déconnexion générale ;
+  - les trois migrations, reprise P6 comprise ;
+  - le script MFA en quatre temps ;
+  - les jetons GitHub ;
+  - le contrat des cookies ;
+  - les vérifications, le retour arrière et la purge.
+- S7-b est soldé par S29. **S7 est clos.**
+
+**S9 (S9-a, S9-b, `GET /auth/github/pending`) : VALIDÉ.**
+- `loginWithGitHub` ne persiste plus aucun jeton. `githubUsername` n'est mis à jour qu'après `completeLogin`.
+- `linkGitHubAccount` ne stocke le jeton (chiffré) que si la finalité est `repos` **et** que la liste des portées, découpée, contient exactement `repo`. `public_repo` ne passe donc pas.
+- La finalité est signée dans le cookie (`<state>.<finalité>.<HMAC>`) et chaque route n'accepte que les siennes.
+- `/pending` ne révèle que la finalité d'un cookie valablement signé, propre à ce navigateur, et répond 401 sinon. Il ne sert pas d'oracle.
+- Le frontend aiguille vers `login` ou `link` (`App.tsx:119-121`).
+- Remarque non bloquante : un nouveau compte GitHub est créé **avant** `completeLogin`. Sur un domaine `enforceSSO`, il est donc créé puis refusé (403). C'est sans gravité (adresse vérifiée par GitHub, aucune session), mais la création pourrait être conditionnée au même contrôle `enforceSSO`. À traiter avec S10. **S9 est clos.**
+
+**S29 : VALIDÉ.**
+- `originCheckMiddleware`, placé après `cookieParser`, refuse avec 403 les requêtes `POST`, `PUT`, `PATCH` et `DELETE` portant un cookie de session, quel que soit le préfixe, sauf avec une `Origin` autorisée (ou, à défaut, un `Referer` autorisé). `Origin: null` est refusé. Si `Origin` est présent et refusé, le `Referer` n'est pas consulté.
+- Les exemptions (webhook GitHub, SCIM) sont ancrées. Le routage Express ne tient pas compte de la casse : une variante comme `/SCIM/v2` n'est donc pas exemptée et reste contrôlée, ce qui va dans le sens sûr.
+- Handshake WS : `Origin` exigée quand le jeton vient du cookie.
+- En production, les cookies s'appellent `__Host-accessToken` et `__Secure-refreshToken`. Une valeur en double est refusée et le nom sans préfixe est ignoré.
+- Les 10 tests HTTP et 8 tests unitaires couvrent le critère d'acceptation. **S29 est clos.**
+
+**A7, point avancé (pas de repli de DSN en test) : VALIDÉ.**
+- `allowsLocalDsnFallback` n'est vrai qu'en `development`.
+- `jest-env.ts`, via `setupFiles`, écrase `DATABASE_URL`, même si elle est exportée dans le shell. Seule `E2E_DATABASE_URL` la remplace, et le garde-fou de `http-test-app.ts` est conservé.
+- Le reste d'A7 (configuration validée, `NODE_ENV` obligatoire, `ENABLE_DEV_AUTH`) reste ouvert en Phase 5.
+
+**A3, actions non bloquantes : VALIDÉ, avec un ménage à faire avant commit (A3-c).**
+- Le support de test est déplacé ; `tsconfig.build.json` exclut les specs et `tests/` (vérifié : `dist/` est propre) ; la migration commence par `DELETE FROM RefreshToken;`.
+- **A3-c** : `backend/tests/support/` contient `session.test-support.js`, `.d.ts` et `.js.map`, compilés à côté de la source (probablement un `tsc` lancé hors configuration). Deux conséquences :
+  - les 7 erreurs ESLint ;
+  - un **piège** : la configuration Jest déclare `moduleFileExtensions: ["js", "json", "ts"]`, donc les imports `../support/session.test-support` chargent le **`.js` compilé** et non le `.ts`. Le contenu est identique aujourd'hui, mais toute modification future du `.ts` serait ignorée par les tests.
+
+  Actions :
+  1. supprimer les trois fichiers ;
+  2. ajouter `backend/tests/**/*.js`, `*.d.ts` et `*.js.map` au `.gitignore` ;
+  3. placer `"ts"` avant `"js"` dans `moduleFileExtensions`.
+
+  **Critère** : `find backend/src backend/tests -name "*.js" -o -name "*.d.ts"` vide ; ESLint `src tests` à 0 erreur.
+
+**S18.2 (403 en impersonation) : À REPRENDRE.**
+- La liste des routes est la bonne, mais le blocage compare `request.path` à des expressions **sensibles à la casse**, alors que le routage Express ne l'est pas. Démonstration : `POST /Auth/GitHub/Link` (ou `/AUTH/MFA/disable`, `/Admin/users/…`) atteint le gestionnaire sans être bloqué. Une session d'impersonation peut donc encore lier le GitHub de l'administrateur au compte cible.
+- L'impact reste nul tant que `FEATURE_IMPERSONATION_ENABLED` est désactivé, ce qui est le cas par défaut. Ce point relève de S18 (Phase 4) et **ne bloque pas** la clôture de la Phase 1.
+- Remédiation : ne plus raisonner sur le chemin. Poser un décorateur `@ForbiddenInImpersonation()`, lu par `JwtAuthGuard` via `Reflector`, sur les **gestionnaires** concernés et sur la **classe** `AdminController`. À défaut, comparer en minuscules avec une expression marquée `i`, mais le décorateur est préférable : il suit les routes même si leur chemin change.
+- **Tests** : ajouter à `impersonation-routes.spec.ts` des cas en casse mixte (`/Auth/GitHub/Link`, `/AUTH/MFA/setup`, `/Admin/overview`), qui doivent renvoyer 403 en impersonation ; et un test méta qui vérifie que chaque gestionnaire de `/auth/mfa/*`, `*/link` et `/admin/*` porte le décorateur.
+
+**P6 (P6-a, P6-b, P6-c, P6-d, transaction) : VALIDÉ.**
+- **P6-a** :
+  - production sans `SMTP_HOST` et `SMTP_PORT`, ou sans transporteur créable : refus de démarrer ;
+  - hors `development` et `test`, aucun corps journalisé, destinataire masqué, seulement le message d'erreur ;
+  - repli simulé réservé au développement ;
+  - staging sans SMTP : rien n'est envoyé et rien n'est journalisé ;
+  - le même mécanisme couvre les liens d'invitation ;
+  - les 7 tests espionnent toutes les méthodes du Logger.
+- **P6-b** : `sendDetached` (envoi non attendu, erreur capturée) sur les six branches de `register`, `forgot` et `resend`, testées avec une promesse qui ne se résout jamais.
+- **P6-c** : la purge est sélective (aucune autre identité, compte non partagé), transactionnelle et tolérante aux erreurs. Les 409 mentionnent « Mot de passe oublié ».
+- **P6-d** : le nom ne figure plus dans l'e-mail de vérification.
+- `resetPassword` est transactionnel.
+- Remarques non bloquantes sur la purge :
+  1. `take: 200` sans tri ni curseur : si au moins 200 candidats sont conservés (comptes partagés), la purge revoit chaque nuit les mêmes et n'avance plus. Ajouter `orderBy: { createdAt: 'asc' }` et un curseur.
+  2. En multi-instance, la tâche tourne sur chaque réplique. C'est sans danger (transaction, puis `P2025` journalisé), mais un verrou Redis éviterait les avertissements.
+  3. La cascade n'a pas été éprouvée sur une vraie base : la surveiller à la première exécution, comme le prévoit le runbook (§ 9).
+
+  **P6 est clos.**
+
+### Réponses aux questions du fixeur
+
+1. **`Referer` accepté à défaut d'`Origin` : confirmé.**
+   - La règle reste fermée par défaut : sans `Origin` ni `Referer`, la requête est refusée (403). C'est le cas d'une page qui pose `Referrer-Policy: no-referrer`.
+   - Un `Referer` émis depuis un sous-domaine voisin porte l'origine de ce voisin, donc refusée.
+   - Le `Referer` ne sert que pour les rares requêtes où le navigateur omet `Origin`.
+   - Si `Origin` est présent, il prévaut : c'est déjà le cas.
+2. **Échec SMTP en production, demande perdue derrière la réponse générique : acceptable à ce stade.**
+   - L'utilisateur peut relancer : « Renvoyer l'e-mail », nouvelle demande de réinitialisation.
+   - L'échec est journalisé, sans secret.
+   - Condition d'exploitation, à ajouter au runbook (§ 7) : une **alerte** sur le motif `Échec de l'envoi de l'email` (plus de N par heure).
+   - File d'envoi avec reprise (BullMQ sur le Redis existant, idempotence par identifiant de jeton) : backlog, à traiter avec S24 et la question 4.
+3. **Révocation de la session administrateur à l'impersonation reportée à S18.3 (Phase 4) : accepté.**
+   - La famille orpheline n'est pas exploitable : son cookie de rafraîchissement est effacé du navigateur et son secret n'existe qu'en haché. Elle expire en 7 jours.
+   - Condition ferme : `FEATURE_IMPERSONATION_ENABLED` reste désactivé jusqu'à la clôture de S18, ce point et la correction de S18.2 compris.
+4. **Résidu temporel de `register` (quelques dizaines de millisecondes en faveur d'une adresse existante) : acceptable.**
+   - Cette différence est du même ordre que la gigue réseau. Elle est bornée par la limitation à 5/min/IP.
+   - Elle n'apprend rien que `forgot` et `resend`, désormais à durée constante, ne permettraient déjà pas d'obtenir.
+   - La suppression complète passerait par une inscription mise en file. Elle est rattachée au même chantier que la question 2 (S24).
+   - Pas d'action en Phase 1.
+
+### Phase 1 : statut
+
+**La Phase 1 est close côté code, hors P9.**
+
+| Constat | Statut |
+| --- | --- |
+| A3, S6, S7, S8, S9, S27, S29, P6 | VALIDÉ |
+| P9 (écran « Sécurité du compte ») | ouvert, tâche produit. Doit être livré **avant l'ouverture aux utilisateurs** des fonctions MFA et liaison GitHub. |
+
+Conditions de clôture restantes, qui ne sont pas du code de sécurité :
+
+- **A3-c** : supprimer les artefacts compilés de `backend/tests/support/` (et corriger `moduleFileExtensions`) **avant le commit**. Sans cela, la branche embarque 7 erreurs ESLint et des tests qui chargent du JS périmé.
+- Exploitation (décision de l'utilisateur) : exécuter `docs/security/runbook-phase1.md` au déploiement (migrations, chiffrement des secrets MFA, SMTP, `CORS_ORIGINS`, révocation des anciens jetons GitHub `repo`), après le runbook de la Phase 0.
+
+**Actions pour fixeur :**
+
+1. A3-c : ménage des artefacts compilés et ordre `moduleFileExtensions`. À faire avant commit.
+2. S18.2 : décorateur `@ForbiddenInImpersonation()` à la place des expressions sur le chemin, et tests en casse mixte. Peut attendre la Phase 4, drapeau désactivé.
+3. Non bloquants :
+   - curseur et tri dans la purge ;
+   - alerte sur les échecs SMTP (runbook § 7) ;
+   - création GitHub conditionnée à `enforceSSO` (avec S10).
+
+**Constats ouverts à la fin de r6 :**
+
+- Phase 1 : P9 (produit) seulement.
+- Phases 2 à 6 : S10 à S26 sauf S14 étape 1 et S18 étape 0 (S18.2 est en cours, avec la reprise de casse) ; A1, A2, A4 à A9 (A7 partiellement avancé) ; P2, P4, P5, P7, P8.
+- Clos : S1, S2, S3, S4, S5, S6, S7, S8, S9, S27, S28, S29, A3, P1, P3, P6.
+
+---
+
+## Revue r7 (2026-10-31) : actions r6, clôture de la Phase 1
+
+Revue de la section « Actions de la revue r6 » du journal, faite sur le code réel pendant que personne d'autre ne modifiait le code.
+
+### Vérifications refaites par l'architecte
+
+| Vérification | Résultat |
+| --- | --- |
+| `cd backend && npx jest` (`DATABASE_URL` injoignable) | 54/54 suites, 518/518 tests (conforme au journal) |
+| `cd frontend && npx vitest run` | 14/14 fichiers, 56/56 tests |
+| `env -u DATABASE_URL npx nest build` | OK ; aucun `*.spec.js` ni `*test-support*` dans `dist/` |
+| `npx eslint src tests` (backend) | **0 erreur**, 17 avertissements antérieurs |
+| `find backend/src backend/tests -name "*.js" -o -name "*.d.ts" -o -name "*.js.map"` | vide |
+
+### Verdicts
+
+**A3-c : VALIDÉ.**
+- Les artefacts compilés sont supprimés.
+- `.gitignore` couvre `backend/tests/**/*.js`, `*.d.ts` et `*.js.map`.
+- `moduleFileExtensions` vaut `["ts", "js", "json"]` : Jest charge désormais la source TypeScript en priorité.
+- **A3 est entièrement clos.**
+
+**S18.2 (routes interdites en impersonation) : VALIDÉ.** S18 reste ouvert pour S18.1, S18.2-bis (ci-dessous), S18.3 et la révocation de la session administrateur.
+- `@ForbiddenInImpersonation()` est une métadonnée lue par `JwtAuthGuard` via `Reflector`, sur le gestionnaire puis sur la classe. Le blocage ne dépend plus du chemin, donc plus de la casse. Il est posé sur :
+  - `github/link`, `firebase/link` ;
+  - `DELETE sessions/:sid` ;
+  - `mfa/setup`, `mfa/confirm`, `mfa/disable`, `mfa/recovery-codes` ;
+  - la classe `AdminController`, où `JwtAuthGuard` précède `PlatformAdminGuard`.
+- `tests/http/impersonation-case.spec.ts` passe par le vrai routage Express (`startHttpTestApp`) :
+  - en impersonation, `/Auth/GitHub/Link`, `/AUTH/MFA/setup`, `/auth/MFA/disable`, `DELETE /Auth/Sessions/abc` et `/AUTH/FIREBASE/LINK` renvoient 403 ;
+  - hors impersonation, la même route franchit le garde (400 sur le DTO), ce qui prouve que le 403 vient bien du décorateur.
+- Le test méta de `impersonation-routes.spec.ts` balaie les contrôleurs et vérifie qu'il trouve les 8 routes attendues : il ne passe pas trivialement.
+- **Écart sur `/auth/password/*` et `/auth/mfa/challenge`, laissés hors décorateur : accepté, vérifié dans le code.** Aucune de ces routes ne lit la session ni `req.user` : leur effet ne dépend que d'un secret présenté dans le corps.
+
+  | Route | Ce qu'elle exige | Ce que peut faire une session d'impersonation |
+  | --- | --- | --- |
+  | `password/forgot` | une adresse | seulement provoquer l'envoi du lien **dans la boîte de la cible** |
+  | `password/reset` | le jeton reçu par e-mail | rien sans ce jeton |
+  | `mfa/challenge` | un ticket MFA, émis seulement après le mot de passe ou l'IdP de la cible | rien sans ce ticket |
+  | `email/verify`, `email/resend` | idem | même raisonnement |
+
+  Une session d'impersonation ne peut donc changer ni le mot de passe ni les facteurs de la cible par ces routes. **Règle à respecter** pour que ce raisonnement tienne : toute future route qui modifie un identifiant **à partir de la session** (changer le mot de passe connecté, changer l'adresse e-mail) doit porter le décorateur. Le test méta doit être étendu à ces chemins dès leur création.
+
+**P6-c, complément (purge par curseur) : VALIDÉ.**
+- Tri stable `[createdAt, id]`, curseur par clé (robuste à la suppression de la dernière ligne d'un lot), lots de 200, au plus 50 lots par exécution.
+- Le test couvre un lot plein suivi d'un second lot avec le bon curseur.
+
+**Runbook Phase 1, § 7.7 (alerte sur les échecs SMTP) : VALIDÉ.**
+- Motifs de journal exacts, niveaux, loggers concernés et seuils proposés. L'alerte est exigée avant l'ouverture aux utilisateurs.
+- Vérifié : ces lignes ne contiennent ni lien ni adresse en clair. `sendMail` capture lui-même les erreurs de transport et masque le destinataire.
+
+**Mention S10 (création GitHub sur un domaine `enforceSSO`) : prise en compte**, reportée à S10 comme convenu en r6.
+
+### Nouveau point pour S18 (Phase 4) : S18.2-bis
+
+La revue des routes hors `/auth` montre d'autres voies par lesquelles une impersonation de 15 minutes deviendrait un **accès persistant** aux données de la cible. Il ne s'agit plus de ses identifiants, mais de ses espaces de travail :
+
+- `POST /workspaces/:workspaceId/invitations` (inviter l'adresse de l'administrateur comme OWNER, puis accepter avec son propre compte) ;
+- `POST /projects/:id/members` ;
+- `POST /workspaces/:workspaceId/scim/keys` (clé d'API durable) ;
+- `POST|DELETE /workspaces/:workspaceId/sso` ;
+- `POST /workspaces/:workspaceId/integrations` (webhook ou flux sortant vers une URL choisie).
+
+**Remédiation (Phase 4, avec S18.1 et S18.3)** :
+- poser `@ForbiddenInImpersonation()` sur ces gestionnaires, ainsi que sur la suppression de workspace et les changements de rôle ;
+- étendre le test méta à ces chemins.
+
+**Condition inchangée** : `FEATURE_IMPERSONATION_ENABLED` reste désactivé jusqu'à la clôture de S18. Aucun impact tant que le drapeau est éteint, donc aucun blocage pour la Phase 1.
+
+### Verdict de la Phase 1
+
+**Phase 1 close côté code, hors P9 et S18.3 : OUI.**
+
+| Constat | Statut |
+| --- | --- |
+| A3, S6, S7, S8, S9, S27, S29, P6 | VALIDÉ |
+| S18.2 (blocage par décorateur) | VALIDÉ |
+| P9 (écran « Sécurité du compte », produit) | ouvert |
+| S18.3 et la révocation de la session administrateur | ouverts (Phase 4) |
+| S18.2-bis | ouvert (Phase 4) |
+
+Aucune régression ni nouvelle faille introduite par les correctifs de la r6.
+
+Dernières actions, qui ne bloquent pas la clôture :
+
+1. **Commit** de la Phase 1 sur `security/phase-0` (ou sur une branche `security/phase-1`), à la demande de l'utilisateur. `.claude/` reste hors git. Vérifier `git status` : aucun artefact compilé.
+2. **Exploitation** (décision de l'utilisateur) : runbook de la Phase 0 puis `docs/security/runbook-phase1.md` ; alerte SMTP configurée avant l'ouverture aux utilisateurs.
+3. **Produit** : P9 avant d'exposer le MFA et la liaison GitHub aux utilisateurs.
+4. **Phase 4** : S18.1, S18.2-bis, S18.3 et la révocation de la session administrateur à l'impersonation. Le drapeau d'impersonation reste désactivé d'ici là.
+
+**Constats ouverts à la fin de r7 :**
+
+- Phase 1 : P9 (produit).
+- Phases 2 à 6 : S10 à S26 sauf S14 étape 1 et S18 étapes 0 et 2 (S18 reste ouvert pour 1, 2-bis et 3) ; A1, A2, A4 à A9 (A7 partiellement avancé) ; P2, P4, P5, P7, P8.
+- Clos : S1, S2, S3, S4, S5, S6, S7, S8, S9, S27, S28, S29, A3, P1, P3, P6.
+- Prochaine étape pour fixeur : **Phase 2** (S10, puis S11).

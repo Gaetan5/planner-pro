@@ -7,15 +7,15 @@ import { resolveCliDatasourceUrl } from './database-url';
 describe('resolveCliDatasourceUrl (prisma.config.ts, S4)', () => {
   const DSN = 'mysql://planner:pw@db:3306/planner_pro';
 
-  it.each(['production', 'staging', undefined])(
+  it.each(['production', 'staging', 'test', undefined])(
     'NODE_ENV=%s sans DATABASE_URL : URL indéfinie (aucun repli root, generate reste possible)',
     (nodeEnv) => {
       expect(resolveCliDatasourceUrl({ NODE_ENV: nodeEnv })).toBeUndefined();
     },
   );
 
-  it.each(['development', 'test'])('NODE_ENV=%s sans DATABASE_URL : repli local', (nodeEnv) => {
-    expect(resolveCliDatasourceUrl({ NODE_ENV: nodeEnv })).toContain('@localhost:3306');
+  it('NODE_ENV=development sans DATABASE_URL : repli local', () => {
+    expect(resolveCliDatasourceUrl({ NODE_ENV: 'development' })).toContain('@localhost:3306');
   });
 
   it('DATABASE_URL sans TLS : renvoyée telle quelle', () => {

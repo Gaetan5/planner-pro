@@ -39,12 +39,10 @@ export const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({ workspaceI
     deleteIntegration,
     exportToCalendar,
     getCalendarConflicts,
-    user,
   } = useApp();
 
   const getHeaders = () => ({
     'Content-Type': 'application/json',
-    Authorization: user?.token ? `Bearer ${user.token}` : '',
   });
 
   const [integrations, setIntegrations] = useState<Integration[]>([]);

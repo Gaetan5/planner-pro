@@ -17,3 +17,8 @@ secrets/
 
 # Rapports CSV des scripts de reprise S28 (contiennent des adresses e-mail)
 reprise-phase0/
+
+# Artefacts compilés à côté des sources de test (A3-c) : jamais suivis
+backend/tests/**/*.js
+backend/tests/**/*.d.ts
+backend/tests/**/*.js.map

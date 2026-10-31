@@ -17,7 +17,8 @@ import { createClient } from 'redis';
 import { AiService } from '../projects/ai.service';
 import { ProjectPermissionsService } from '../projects/project-permissions.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { TokenService } from '../auth/token.service';
+import { SessionService } from '../auth/session.service';
+import { authenticateSocket, stopSessionWatch } from '../auth/ws-auth';
 
 @SkipThrottle()
 @WebSocketGateway({
@@ -34,7 +35,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   constructor(
     private readonly trackingService: TrackingService,
-    private readonly tokenService: TokenService,
+    private readonly sessionService: SessionService,
     private readonly aiService: AiService,
     private readonly projectPermissionsService: ProjectPermissionsService,
     private readonly prisma: PrismaService,
@@ -57,21 +58,9 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
   async handleConnection(client: Socket) {
     console.log(`Client connecté : ${client.id}`);
 
-    let token = client.handshake.auth?.token || client.handshake.headers?.authorization;
-    if (token && token.startsWith('Bearer ')) {
-      token = token.slice(7);
-    }
-
-    if (!token) {
-      console.log('Accès WebSocket refusé : Identifiant non fourni.');
-      client.disconnect(true);
-      return;
-    }
-
     try {
-      // Même vérification que le guard HTTP : ticket MFA et jetons sans typ rejetés (S3)
-      const payload = await this.tokenService.verifyAccessToken(token);
-      client.data.userId = payload.sub;
+      // Même vérification que le guard HTTP : jeton d'accès (S3), session active (S7)
+      await authenticateSocket(client, this.sessionService);
       client.join(`user:${client.data.userId}`);
       console.log(`Client authentifié : ${client.data.userId} (Socket: ${client.id})`);
 
@@ -97,6 +86,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
   }
 
   handleDisconnect(client: Socket) {
+    stopSessionWatch(client);
     console.log(`Client déconnecté : ${client.id}`);
   }
 

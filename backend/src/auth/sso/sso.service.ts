@@ -7,7 +7,7 @@ import {
   NotImplementedException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { TokenService } from '../token.service';
+import { AuthService } from '../auth.service';
 import { ConfigureSsoDto } from './sso.dto';
 import { SSOProvider, WorkspaceRole } from '@prisma/client';
 
@@ -32,7 +32,6 @@ export interface SsoDiscoveryResult {
   ssoAvailable: boolean;
   domain?: string;
   provider?: SSOProvider;
-  workspaceName?: string;
   enforceSSO?: boolean;
   authUrl?: string;
 }
@@ -41,7 +40,7 @@ export interface SsoDiscoveryResult {
 export class SsoService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly tokenService: TokenService,
+    private readonly authService: AuthService,
   ) {}
 
   /**
@@ -63,11 +62,6 @@ export class SsoService {
 
     const ssoConfig = await this.prisma.sSOConfiguration.findUnique({
       where: { domain },
-      include: {
-        workspace: {
-          select: { name: true },
-        },
-      },
     });
 
     if (!ssoConfig || !ssoConfig.enabled) {
@@ -78,7 +72,6 @@ export class SsoService {
       ssoAvailable: true,
       domain: ssoConfig.domain,
       provider: ssoConfig.provider,
-      workspaceName: ssoConfig.workspace.name,
       enforceSSO: ssoConfig.enforceSSO,
       authUrl: `/api/auth/sso/authorize?domain=${encodeURIComponent(domain)}`,
     };
@@ -131,7 +124,7 @@ export class SsoService {
   /**
    * Callback SSO : validation du code d'authentification et Just-In-Time Provisioning
    */
-  async handleCallback(code: string, domain: string, redirectUri?: string) {
+  async handleCallback(code: string, domain: string, redirectUri?: string, userAgent?: string) {
     const ssoConfig = await this.prisma.sSOConfiguration.findUnique({
       where: { domain },
       include: { workspace: true },
@@ -278,23 +271,10 @@ export class SsoService {
       });
     }
 
-    // Génération du JWT de session
-    const accessToken = this.tokenService.signAccessToken({
-      sub: user.id,
-      email: user.email,
-      name: user.name,
-    });
+    // Session émise par le point d'entrée unique (A3)
+    const login = await this.authService.completeLogin(user, { method: 'sso', userAgent });
 
-    return {
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        platformRole: user.platformRole,
-      },
-      accessToken,
-      workspaceId: ssoConfig.workspaceId,
-    };
+    return { ...login, workspaceId: ssoConfig.workspaceId };
   }
 
   /**
