@@ -1,5 +1,32 @@
 const net = require('net');
+const fs = require('fs');
 const mariadb = require('mariadb');
+
+// Mêmes règles que PrismaService (audit S4) : TLS obligatoire en production, clé publique
+// épinglée si DATABASE_RSA_PUBLIC_KEY, récupération de clé seulement en développement/test sans TLS.
+const isLocalEnvironment = ['development', 'test'].includes(process.env.NODE_ENV || '');
+const sslEnabled = process.env.DATABASE_SSL === 'true';
+if (process.env.NODE_ENV === 'production' && !sslEnabled) {
+  console.error('DATABASE_SSL=true est obligatoire en production (audit S4).');
+  process.exit(1);
+}
+const pinnedPublicKey = process.env.DATABASE_RSA_PUBLIC_KEY
+  ? fs.readFileSync(process.env.DATABASE_RSA_PUBLIC_KEY, 'utf8')
+  : undefined;
+const securityOptions = {
+  allowPublicKeyRetrieval: isLocalEnvironment && !sslEnabled && !pinnedPublicKey,
+  ...(sslEnabled
+    ? {
+        ssl: {
+          rejectUnauthorized: true,
+          ...(process.env.DATABASE_SSL_CA
+            ? { ca: fs.readFileSync(process.env.DATABASE_SSL_CA, 'utf8') }
+            : {}),
+        },
+      }
+    : {}),
+  ...(pinnedPublicKey ? { cachingRsaPublicKey: pinnedPublicKey } : {}),
+};
 
 // Extraire l'hôte de DATABASE_URL ou utiliser 'db' par défaut
 let host = 'db';
@@ -8,7 +35,7 @@ if (process.env.DATABASE_URL) {
     // Remplacer mysql:// par http:// pour pouvoir utiliser le constructeur URL natif
     const url = new URL(process.env.DATABASE_URL.replace('mysql://', 'http://'));
     host = url.hostname;
-  } catch (e) {
+  } catch {
     console.warn('Impossible de parser DATABASE_URL, repli sur host "db"');
   }
 }
@@ -55,7 +82,7 @@ async function verifyDatabase() {
       host,
       port,
       ...credentials,
-      allowPublicKeyRetrieval: true,
+      ...securityOptions,
       connectTimeout: 3000,
     });
     await connection.query('SELECT 1');

@@ -18,6 +18,7 @@ import { ScimAuthGuard } from './scim.guard';
 import { JwtAuthGuard } from '../jwt.guard';
 import { Public } from '../public.decorator';
 import { CreateScimUserDto, ScimPatchRequest } from './scim.dto';
+import { FeatureFlagGuard, RequireFeature } from '../../config/feature-flag.guard';
 
 interface ScimRequest {
   scimWorkspace: {
@@ -34,6 +35,8 @@ interface AuthenticatedUserRequest {
 }
 
 @Controller()
+@RequireFeature('SCIM')
+@UseGuards(FeatureFlagGuard)
 export class ScimController {
   constructor(private readonly scimService: ScimService) {}
 

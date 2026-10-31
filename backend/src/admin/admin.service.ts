@@ -1,8 +1,9 @@
 import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
 import { PlatformRole, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
+import { SessionService } from '../auth/session.service';
+import { AuthService } from '../auth/auth.service';
 import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
 
 @Injectable()
@@ -13,7 +14,8 @@ export class AdminService {
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly firestoreSync: FirestoreSyncService,
-    private readonly jwtService: JwtService,
+    private readonly sessionService: SessionService,
+    private readonly authService: AuthService,
   ) {}
 
   async getOverview() {
@@ -202,9 +204,8 @@ export class AdminService {
       throw new NotFoundException('Utilisateur cible introuvable.');
     }
 
-    const deleted = await this.prisma.refreshToken.deleteMany({
-      where: { userId: targetUserId },
-    });
+    // Révocation réelle (S7) : sessions coupées en moins de 60 s sur HTTP et WebSocket
+    const revokedSessions = await this.sessionService.revokeAllForUser(targetUserId);
 
     await this.prisma.platformAuditLog.create({
       data: {
@@ -214,34 +215,32 @@ export class AdminService {
         targetId: targetUserId,
         metadata: {
           targetEmail: targetUser.email,
-          revokedTokensCount: deleted.count,
+          revokedSessionsCount: revokedSessions,
         },
       },
     });
 
     return {
-      message: `Toutes les sessions de ${targetUser.email} ont été révoquées (${deleted.count} jetons supprimés).`,
-      revokedCount: deleted.count,
+      message: `Toutes les sessions de ${targetUser.email} ont été révoquées (${revokedSessions} session(s)).`,
+      revokedCount: revokedSessions,
     };
   }
 
   async impersonateUser(actorId: string, targetUserId: string) {
     const targetUser = await this.prisma.user.findUnique({
       where: { id: targetUserId },
-      select: { id: true, email: true, name: true, platformRole: true },
+      select: { id: true, email: true, name: true, platformRole: true, isSuspended: true },
     });
 
     if (!targetUser) {
       throw new NotFoundException('Utilisateur cible introuvable.');
     }
 
-    const payload = {
-      sub: targetUser.id,
-      email: targetUser.email,
-      name: targetUser.name,
+    // Session d'impersonation émise par le point d'entrée unique (A3) : 15 min, non renouvelable
+    const login = await this.authService.completeLogin(targetUser, {
+      method: 'impersonation',
       impersonatedBy: actorId,
-    };
-    const accessToken = this.jwtService.sign(payload);
+    });
 
     await this.prisma.platformAuditLog.create({
       data: {
@@ -258,13 +257,8 @@ export class AdminService {
 
     return {
       message: `Connexion temporaire sous l'identité de ${targetUser.email}`,
-      accessToken,
-      user: {
-        id: targetUser.id,
-        email: targetUser.email,
-        name: targetUser.name,
-        platformRole: targetUser.platformRole,
-      },
+      session: login.session,
+      user: login.user,
     };
   }
 

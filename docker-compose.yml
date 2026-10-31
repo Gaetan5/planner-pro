@@ -29,6 +29,8 @@ services:
     ports:
       - '3003:3001'
     environment:
+      # Liste blanche explicite (audit S4/A7) : active les tolérances locales (DSN et clé MySQL)
+      NODE_ENV: development
       DATABASE_URL: mysql://planner_user:planner_password@db:3306/planner_pro
       REDIS_HOST: cache
       REDIS_PORT: 6379

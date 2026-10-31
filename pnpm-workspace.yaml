@@ -9,3 +9,8 @@ allowBuilds:
   'esbuild': true
   'prisma': true
   'unrs-resolver': true
+
+# Audit S4 : pnpm >= 10 lit les overrides ici (et ignore package.json#pnpm) ;
+# l'override de package.json est conservé pour pnpm 9 (packageManager). Garder les deux identiques.
+overrides:
+  mariadb: '>=3.5.4 <4'

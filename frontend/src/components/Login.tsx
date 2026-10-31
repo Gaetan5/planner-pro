@@ -1,35 +1,56 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { isFirebaseAuthConfigured } from '../firebase-config';
+import { startGitHubAuthorization } from '../github-oauth';
+import { requestPasswordReset, resendVerification } from '../account-api';
 import logo from '../logo.png';
 import './Login.css';
 
-export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> = ({
-  oauthError,
-  isLoadingOAuth = false,
-}) => {
+const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+
+export const Login: React.FC<{
+  oauthError?: string;
+  isLoadingOAuth?: boolean;
+  /** Ticket MFA obtenu par un retour OAuth (GitHub, SSO). */
+  initialMfaTicket?: string;
+}> = ({ oauthError, isLoadingOAuth = false, initialMfaTicket }) => {
   const { mockLogin, classicLogin, classicRegister, firebaseLogin, verifyMfa, discoverSso } =
     useApp();
   const [isRegisterMode, setIsRegisterMode] = useState(false);
   const [isSsoMode, setIsSsoMode] = useState(false);
+  // Mot de passe oublié (P6) et renvoi du lien de vérification d'adresse
+  const [isForgotMode, setIsForgotMode] = useState(false);
+  const [unverifiedEmail, setUnverifiedEmail] = useState('');
+  // Onglet SSO masqué tant que le serveur n'a pas confirmé que la fonctionnalité est active (P3)
+  const [ssoFeatureEnabled, setSsoFeatureEnabled] = useState(false);
   const [authProvider, setAuthProvider] = useState<'firebase' | 'legacy'>(
     isFirebaseAuthConfigured ? 'firebase' : 'legacy',
   );
 
   // MFA states
-  const [mfaStep, setMfaStep] = useState(false);
-  const [mfaTicket, setMfaTicket] = useState('');
+  const [mfaStep, setMfaStep] = useState(Boolean(initialMfaTicket));
+  const [mfaTicket, setMfaTicket] = useState(initialMfaTicket ?? '');
   const [mfaCode, setMfaCode] = useState('');
+  // Code de récupération (S6) à la place du code de l'application Authenticator
+  const [useRecoveryCode, setUseRecoveryCode] = useState(false);
+  const [recoveryCode, setRecoveryCode] = useState('');
 
   // SSO discovery states
   const [ssoEmail, setSsoEmail] = useState('');
   const [ssoResult, setSsoResult] = useState<{
     ssoAvailable: boolean;
     domain?: string;
-    workspaceName?: string;
     provider?: string;
     authUrl?: string;
   } | null>(null);
+
+  // Un ticket MFA issu d'un retour OAuth arrive après le montage du composant
+  useEffect(() => {
+    if (initialMfaTicket) {
+      setMfaTicket(initialMfaTicket);
+      setMfaStep(true);
+    }
+  }, [initialMfaTicket]);
 
   // Login fields
   const [loginEmail, setLoginEmail] = useState('');
@@ -48,10 +69,26 @@ export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> 
   const [infoMsg, setInfoMsg] = useState('');
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${BACKEND_URL}/features`)
+      .then((res) => (res.ok ? res.json() : { sso: false }))
+      .then((flags: { sso?: boolean }) => {
+        if (!cancelled) setSsoFeatureEnabled(flags.sso === true);
+      })
+      .catch(() => {
+        if (!cancelled) setSsoFeatureEnabled(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const handleGitHubLogin = () => {
-    const clientId = import.meta.env.VITE_GITHUB_CLIENT_ID || 'votre_client_id_github';
-    const redirectUri = window.location.origin;
-    window.location.href = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&scope=user,repo`;
+    // `state`, `redirect_uri` et portée minimale sont fixés par le serveur (S9)
+    startGitHubAuthorization().catch((err: unknown) => {
+      setErrorMsg(err instanceof Error ? err.message : 'Connexion GitHub indisponible.');
+    });
   };
 
   const handleBypass = async (e: React.FormEvent) => {
@@ -82,7 +119,9 @@ export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> 
         setMfaStep(true);
       }
     } catch (err: unknown) {
-      setErrorMsg(err instanceof Error ? err.message : 'Identifiants incorrects.');
+      const message = err instanceof Error ? err.message : 'Identifiants incorrects.';
+      setErrorMsg(message);
+      if (/non vérifiée/i.test(message)) setUnverifiedEmail(loginEmail);
     } finally {
       setLoading(false);
     }
@@ -90,14 +129,22 @@ export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> 
 
   const handleVerifyMfa = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!mfaCode || mfaCode.length !== 6) {
-      setErrorMsg('Veuillez saisir un code TOTP à 6 chiffres.');
+    if (
+      useRecoveryCode
+        ? recoveryCode.replace(/[^A-Za-z0-9]/g, '').length !== 10
+        : mfaCode.length !== 6
+    ) {
+      setErrorMsg(
+        useRecoveryCode
+          ? 'Veuillez saisir un code de récupération (10 caractères).'
+          : 'Veuillez saisir un code TOTP à 6 chiffres.',
+      );
       return;
     }
     setErrorMsg('');
     setLoading(true);
     try {
-      await verifyMfa(mfaTicket, mfaCode);
+      await verifyMfa(mfaTicket, useRecoveryCode ? { recoveryCode } : { code: mfaCode });
     } catch (err: unknown) {
       setErrorMsg(err instanceof Error ? err.message : 'Code de vérification invalide.');
     } finally {
@@ -137,19 +184,51 @@ export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> 
       setErrorMsg('Veuillez remplir tous les champs.');
       return;
     }
-    if (regPassword.length < 6) {
-      setErrorMsg('Le mot de passe doit faire au moins 6 caractères.');
+    if (regPassword.length < 10) {
+      setErrorMsg('Le mot de passe doit contenir au moins 10 caractères.');
       return;
     }
     setErrorMsg('');
     setLoading(true);
     try {
-      await classicRegister(regEmail, regPassword, regName);
-      // L'inscription déclenchera automatiquement la connexion et l'onboarding côté backend
+      // Réponse générique : aucune session avant la confirmation de l'adresse par e-mail (P6)
+      const message = await classicRegister(regEmail, regPassword, regName);
+      setInfoMsg(message);
+      setLoginEmail(regEmail);
+      setRegPassword('');
+      setIsRegisterMode(false);
     } catch (err: unknown) {
       setErrorMsg(err instanceof Error ? err.message : "Erreur lors de l'inscription.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!loginEmail) {
+      setErrorMsg('Veuillez saisir votre adresse e-mail.');
+      return;
+    }
+    setErrorMsg('');
+    setLoading(true);
+    try {
+      setInfoMsg(await requestPasswordReset(loginEmail));
+      setIsForgotMode(false);
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : 'Demande impossible.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendVerification = async () => {
+    setErrorMsg('');
+    try {
+      setInfoMsg(await resendVerification(unverifiedEmail));
+      setUnverifiedEmail('');
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : 'Envoi impossible.');
     }
   };
 
@@ -194,10 +273,14 @@ export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> 
         return;
       }
 
-      await firebaseLogin(
+      const challenge = await firebaseLogin(
         await credential.user.getIdToken(),
         credential.user.displayName || undefined,
       );
+      if (challenge && challenge.mfaRequired) {
+        setMfaTicket(challenge.mfaTicket);
+        setMfaStep(true);
+      }
     } catch (err: unknown) {
       setErrorMsg(err instanceof Error ? err.message : 'Échec de connexion Firebase.');
     } finally {
@@ -261,6 +344,7 @@ export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> 
               className={`auth-tab ${!isRegisterMode && !isSsoMode ? 'auth-tab--active' : ''}`}
               onClick={() => {
                 setIsRegisterMode(false);
+                setIsForgotMode(false);
                 setIsSsoMode(false);
                 setErrorMsg('');
               }}
@@ -271,22 +355,25 @@ export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> 
               className={`auth-tab ${isRegisterMode ? 'auth-tab--active' : ''}`}
               onClick={() => {
                 setIsRegisterMode(true);
+                setIsForgotMode(false);
                 setIsSsoMode(false);
                 setErrorMsg('');
               }}
             >
               S'inscrire
             </button>
-            <button
-              className={`auth-tab ${isSsoMode ? 'auth-tab--active' : ''}`}
-              onClick={() => {
-                setIsSsoMode(true);
-                setIsRegisterMode(false);
-                setErrorMsg('');
-              }}
-            >
-              SSO Entreprise
-            </button>
+            {ssoFeatureEnabled && (
+              <button
+                className={`auth-tab ${isSsoMode ? 'auth-tab--active' : ''}`}
+                onClick={() => {
+                  setIsSsoMode(true);
+                  setIsRegisterMode(false);
+                  setErrorMsg('');
+                }}
+              >
+                SSO Entreprise
+              </button>
+            )}
           </div>
         )}
 
@@ -296,6 +383,11 @@ export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> 
             <span className="auth-error-icon">⚠️</span>
             <span className="auth-error-text">{errorMsg}</span>
           </div>
+        )}
+        {unverifiedEmail && (
+          <button type="button" className="btn-secondary" onClick={handleResendVerification}>
+            Renvoyer l'e-mail de confirmation
+          </button>
         )}
         {infoMsg && (
           <p className="auth-info" role="status">
@@ -315,33 +407,70 @@ export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> 
                   Validation en deux étapes
                 </h3>
                 <p style={{ fontSize: '0.875rem', opacity: 0.8, marginTop: '0.35rem' }}>
-                  Entrez le code à 6 chiffres généré par votre application Authenticator.
+                  {useRecoveryCode
+                    ? 'Entrez l’un de vos codes de récupération (usage unique).'
+                    : 'Entrez le code à 6 chiffres généré par votre application Authenticator.'}
                 </p>
               </div>
 
               <div className="form-group">
-                <input
-                  type="text"
-                  maxLength={6}
-                  placeholder="000000"
-                  value={mfaCode}
-                  onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, ''))}
-                  className="form-input"
-                  style={{
-                    textAlign: 'center',
-                    fontSize: '1.5rem',
-                    letterSpacing: '0.35rem',
-                    fontWeight: 'bold',
-                  }}
-                  autoFocus
-                  required
-                />
+                {useRecoveryCode ? (
+                  <input
+                    type="text"
+                    maxLength={11}
+                    placeholder="XXXXX-XXXXX"
+                    aria-label="Code de récupération"
+                    value={recoveryCode}
+                    onChange={(e) => setRecoveryCode(e.target.value.toUpperCase())}
+                    className="form-input"
+                    style={{ textAlign: 'center', letterSpacing: '0.2rem', fontWeight: 'bold' }}
+                    autoFocus
+                    required
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    maxLength={6}
+                    placeholder="000000"
+                    value={mfaCode}
+                    onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, ''))}
+                    className="form-input"
+                    style={{
+                      textAlign: 'center',
+                      fontSize: '1.5rem',
+                      letterSpacing: '0.35rem',
+                      fontWeight: 'bold',
+                    }}
+                    autoFocus
+                    required
+                  />
+                )}
               </div>
+
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{ width: '100%', marginBottom: '0.75rem', padding: '0.5rem' }}
+                onClick={() => {
+                  setUseRecoveryCode((value) => !value);
+                  setMfaCode('');
+                  setRecoveryCode('');
+                }}
+              >
+                {useRecoveryCode
+                  ? 'Utiliser mon application Authenticator'
+                  : 'Utiliser un code de récupération'}
+              </button>
 
               <button
                 type="submit"
                 className="btn-primary auth-submit-btn"
-                disabled={loading || mfaCode.length !== 6}
+                disabled={
+                  loading ||
+                  (useRecoveryCode
+                    ? recoveryCode.replace(/[^A-Za-z0-9]/g, '').length !== 10
+                    : mfaCode.length !== 6)
+                }
               >
                 {loading ? 'Vérification...' : 'Valider la connexion'}
               </button>
@@ -352,6 +481,8 @@ export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> 
                   setMfaStep(false);
                   setMfaTicket('');
                   setMfaCode('');
+                  setRecoveryCode('');
+                  setUseRecoveryCode(false);
                 }}
                 className="btn-secondary"
                 style={{ width: '100%', marginTop: '0.75rem', padding: '0.65rem' }}
@@ -359,7 +490,7 @@ export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> 
                 Annuler
               </button>
             </form>
-          ) : isSsoMode ? (
+          ) : isSsoMode && ssoFeatureEnabled ? (
             /* Formulaire SSO Entreprise */
             <form onSubmit={handleSsoDiscovery} className="auth-form fade-in">
               <div style={{ marginBottom: '1rem' }}>
@@ -392,7 +523,7 @@ export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> 
                     fontSize: '0.85rem',
                   }}
                 >
-                  🏢 <strong>{ssoResult.workspaceName}</strong> ({ssoResult.provider})
+                  🏢 Connexion unique ({ssoResult.provider})
                 </div>
               )}
 
@@ -460,6 +591,33 @@ export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> 
                     : 'Se connecter avec Firebase'}
               </button>
             </form>
+          ) : isForgotMode ? (
+            <form onSubmit={handleForgotPassword} className="auth-form fade-in">
+              <div className="form-group">
+                <label className="form-label" htmlFor="forgot-email">
+                  Adresse E-mail
+                </label>
+                <input
+                  id="forgot-email"
+                  type="email"
+                  placeholder="nom@entreprise.com"
+                  value={loginEmail}
+                  onChange={(e) => setLoginEmail(e.target.value)}
+                  className="form-input"
+                  required
+                />
+              </div>
+              <button type="submit" className="btn-primary auth-submit-btn" disabled={loading}>
+                {loading ? 'Envoi en cours...' : 'Envoyer le lien de réinitialisation'}
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setIsForgotMode(false)}
+              >
+                Retour à la connexion
+              </button>
+            </form>
           ) : !isRegisterMode ? (
             /* Login Form */
             <form onSubmit={handleClassicLogin} className="auth-form fade-in">
@@ -491,6 +649,17 @@ export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> 
 
               <button type="submit" className="btn-primary auth-submit-btn" disabled={loading}>
                 {loading ? 'Connexion en cours...' : 'Se connecter'}
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => {
+                  setErrorMsg('');
+                  setInfoMsg('');
+                  setIsForgotMode(true);
+                }}
+              >
+                Mot de passe oublié ?
               </button>
             </form>
           ) : (
@@ -524,7 +693,7 @@ export const Login: React.FC<{ oauthError?: string; isLoadingOAuth?: boolean }> 
                 <label className="form-label">Mot de passe</label>
                 <input
                   type="password"
-                  placeholder="Min. 6 caractères"
+                  placeholder="Min. 10 caractères"
                   value={regPassword}
                   onChange={(e) => setRegPassword(e.target.value)}
                   className="form-input"

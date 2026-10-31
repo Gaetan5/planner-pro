@@ -1,6 +1,8 @@
 model User {
   id                String         @id @default(uuid())
   email             String         @unique
+  // Propriété de l'adresse prouvée par un lien envoyé à cette adresse (P6) ; null = non vérifiée
+  emailVerifiedAt   DateTime?
   name              String?
   passwordHash      String?
   firebaseUid       String?        @unique
@@ -8,9 +10,16 @@ model User {
   githubUsername    String?
   githubAccessToken String?
   ssoUid            String?        @unique
+  // Secret TOTP chiffré (AES-GCM, format iv:tag:data) ; le secret en attente n'est promu qu'à la confirmation (S6)
   mfaSecret         String?
+  mfaPendingSecret  String?
+  // Dernier pas de temps TOTP accepté : anti-rejeu (S6)
+  mfaLastUsedStep   Int?
   mfaEnabled        Boolean        @default(false)
   isSuspended       Boolean        @default(false)
+  // Workspace dont la clé SCIM a créé ce compte (S1) : seul lui peut en modifier le nom
+  provisionedByWorkspaceId String?
+  provisionedByWorkspace   Workspace?    @relation("ScimProvisionedUsers", fields: [provisionedByWorkspaceId], references: [id], onDelete: SetNull)
   platformRole       PlatformRole?
   ownedWorkspaces   Workspace[]    @relation("WorkspaceOwner")
   memberships       Membership[]
@@ -21,6 +30,8 @@ model User {
   resourceAllocations ResourceAllocation[]
   notes             Note[]
   refreshTokens     RefreshToken[]
+  mfaRecoveryCodes  MfaRecoveryCode[]
+  authTokens        AuthToken[]
   timeLogs          TimeLog[]
   sentInvitations    Invitation[]        @relation("SentInvitations")
   comments           Comment[]
@@ -33,6 +44,8 @@ model User {
   aiCommandHistories AiCommandHistory[]
   aiBriefing         AiBriefing?
   createdAt          DateTime            @default(now())
+
+  @@index([provisionedByWorkspaceId])
 }
 
 enum PlatformRole {
@@ -59,9 +72,48 @@ model RefreshToken {
   hashedToken String    @unique
   userId      String
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Session = famille de jetons de rafraîchissement (A3, S7) : `familyId` est le `sid` du jeton d'accès
+  familyId        String
+  // Début de la session (conservé à chaque rotation) : plafond absolu et réauthentification récente
+  authenticatedAt DateTime  @default(now())
   expiresAt   DateTime
   revokedAt   DateTime?
+  // Renseigné quand le jeton est consommé par une rotation (tolérance de rejeu, détection de vol)
+  rotatedAt   DateTime?
+  userAgent   String?   @db.VarChar(255)
   createdAt   DateTime  @default(now())
 
   @@index([userId])
+  @@index([familyId])
+}
+
+// Codes de récupération MFA : 10 codes à usage unique, hachés en Argon2id, affichés une seule fois (S6)
+model MfaRecoveryCode {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash  String    @db.VarChar(255)
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+enum AuthTokenType {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+}
+
+// Jetons à usage unique envoyés par e-mail (P6) : stockés hachés (SHA-256), jamais en clair
+model AuthToken {
+  id        String        @id @default(uuid())
+  userId    String
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      AuthTokenType
+  tokenHash String        @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime      @default(now())
+
+  @@index([userId, type])
 }
