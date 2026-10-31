@@ -1,10 +1,12 @@
 /// <reference types="node" />
 import { defineConfig } from 'prisma/config';
+import { resolveCliDatasourceUrl } from './src/prisma/database-url';
 
 export default defineConfig({
   schema: 'prisma/schema',
   datasource: {
-    url: process.env.DATABASE_URL || 'mysql://root:root_password@localhost:3306/planner_pro',
+    // Aucun repli root hors development/test ; TLS strict si DATABASE_SSL=true (audit S4)
+    url: resolveCliDatasourceUrl(process.env),
   },
   migrations: {
     path: 'prisma/migrations',

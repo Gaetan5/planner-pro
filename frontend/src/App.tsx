@@ -34,6 +34,9 @@ import {
   HelpCircle,
   Wallet,
 } from 'lucide-react';
+import { AccountLinkPage } from './components/AccountLinkPage';
+import { fetchGitHubPurpose, linkGitHub } from './github-oauth';
+import { readAccountLink, type AccountLink } from './account-api';
 import logo from './logo.png';
 import './App.css';
 
@@ -51,6 +54,10 @@ function AppWithSession() {
     apiError,
     dismissApiError,
   } = useApp();
+  // Ticket MFA obtenu par un retour OAuth (GitHub, SSO) : le challenge se fait dans <Login />
+  const [oauthMfaTicket, setOauthMfaTicket] = useState<string | null>(null);
+  // Lien reçu par e-mail (vérification d'adresse, réinitialisation) : jeton retiré de l'URL (P6)
+  const [accountLink, setAccountLink] = useState<AccountLink | null>(() => readAccountLink());
   const [inviteToken, setInviteToken] = useState<string | null>(() => {
     const params = new URLSearchParams(window.location.search);
     return params.get('token') || params.get('invite');
@@ -69,6 +76,7 @@ function AppWithSession() {
   }, [inviteToken]);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [oauthError, setOauthError] = useState<string | null>(null);
+  const [oauthNotice, setOauthNotice] = useState<string | null>(null);
   const [handlingOAuth, setHandlingOAuth] = useState(false);
   const isPlatformAdmin =
     user?.platformRole === 'SUPER_ADMIN' || user?.platformRole === 'PLATFORM_ADMIN';
@@ -106,9 +114,20 @@ function AppWithSession() {
     setHandlingOAuth(true);
     setOauthError(null);
 
-    const authPromise = ssoDomain ? ssoLogin(code!, ssoDomain) : login(code!);
+    // La finalité (connexion, liaison, dépôts) est signée par le serveur dans le cookie de state
+    const githubCallback = async () => {
+      const purpose = await fetchGitHubPurpose();
+      if (purpose === 'login') return login(code!, rawState ?? undefined);
+      await linkGitHub(code!, rawState ?? '');
+      setOauthNotice('Compte GitHub associé.');
+      return undefined;
+    };
+    const authPromise = ssoDomain ? ssoLogin(code!, ssoDomain) : githubCallback();
 
     authPromise
+      .then((challenge) => {
+        if (challenge && challenge.mfaRequired) setOauthMfaTicket(challenge.mfaTicket);
+      })
       .catch((error: unknown) => {
         setOauthError(error instanceof Error ? error.message : "Échec de l'authentification.");
       })
@@ -124,6 +143,10 @@ function AppWithSession() {
     }
   }, [user]);
 
+  if (accountLink) {
+    return <AccountLinkPage link={accountLink} onDone={() => setAccountLink(null)} />;
+  }
+
   if (inviteToken) {
     return <InvitationAcceptance token={inviteToken} onClose={() => setInviteToken(null)} />;
   }
@@ -133,7 +156,9 @@ function AppWithSession() {
   }
 
   if (!user) {
-    return <Login oauthError={oauthError ?? undefined} />;
+    return (
+      <Login oauthError={oauthError ?? undefined} initialMfaTicket={oauthMfaTicket ?? undefined} />
+    );
   }
 
   const renderActiveTab = () => {
@@ -304,6 +329,15 @@ function AppWithSession() {
           </div>
         </div>
       </header>
+
+      {oauthNotice && (
+        <div className="app-api-error" role="status">
+          <span>{oauthNotice}</span>
+          <button onClick={() => setOauthNotice(null)} aria-label="Fermer le message">
+            Fermer
+          </button>
+        </div>
+      )}
 
       {apiError && (
         <div className="app-api-error" role="alert">

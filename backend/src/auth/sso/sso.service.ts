@@ -4,17 +4,34 @@ import {
   BadRequestException,
   UnauthorizedException,
   ForbiddenException,
+  NotImplementedException,
 } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AuthService } from '../auth.service';
 import { ConfigureSsoDto } from './sso.dto';
 import { SSOProvider, WorkspaceRole } from '@prisma/client';
+
+/**
+ * Fournisseurs dont l'échange de code est réellement implémenté (S2).
+ * SAML2 et OIDC_GENERIC ne le sont pas : aucune assertion ni aucun jeton n'est vérifié pour eux.
+ */
+export const IMPLEMENTED_SSO_PROVIDERS: SSOProvider[] = [
+  SSOProvider.OIDC_AZURE_AD,
+  SSOProvider.OIDC_GOOGLE,
+];
+
+function assertProviderImplemented(provider: SSOProvider): void {
+  if (!IMPLEMENTED_SSO_PROVIDERS.includes(provider)) {
+    throw new NotImplementedException(
+      `Le fournisseur SSO ${provider} n'est pas encore pris en charge.`,
+    );
+  }
+}
 
 export interface SsoDiscoveryResult {
   ssoAvailable: boolean;
   domain?: string;
   provider?: SSOProvider;
-  workspaceName?: string;
   enforceSSO?: boolean;
   authUrl?: string;
 }
@@ -23,7 +40,7 @@ export interface SsoDiscoveryResult {
 export class SsoService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly jwtService: JwtService,
+    private readonly authService: AuthService,
   ) {}
 
   /**
@@ -45,11 +62,6 @@ export class SsoService {
 
     const ssoConfig = await this.prisma.sSOConfiguration.findUnique({
       where: { domain },
-      include: {
-        workspace: {
-          select: { name: true },
-        },
-      },
     });
 
     if (!ssoConfig || !ssoConfig.enabled) {
@@ -60,7 +72,6 @@ export class SsoService {
       ssoAvailable: true,
       domain: ssoConfig.domain,
       provider: ssoConfig.provider,
-      workspaceName: ssoConfig.workspace.name,
       enforceSSO: ssoConfig.enforceSSO,
       authUrl: `/api/auth/sso/authorize?domain=${encodeURIComponent(domain)}`,
     };
@@ -77,6 +88,7 @@ export class SsoService {
     if (!ssoConfig || !ssoConfig.enabled) {
       throw new NotFoundException(`Aucune configuration SSO active pour le domaine ${domain}.`);
     }
+    assertProviderImplemented(ssoConfig.provider);
 
     const redirect =
       callbackUrl ||
@@ -104,10 +116,6 @@ export class SsoService {
       return { url };
     }
 
-    if (ssoConfig.entryPoint) {
-      return { url: `${ssoConfig.entryPoint}?RelayState=${state}` };
-    }
-
     throw new BadRequestException(
       'Le fournisseur SSO configuré ne supporte pas la redirection automatique.',
     );
@@ -116,7 +124,7 @@ export class SsoService {
   /**
    * Callback SSO : validation du code d'authentification et Just-In-Time Provisioning
    */
-  async handleCallback(code: string, domain: string, redirectUri?: string) {
+  async handleCallback(code: string, domain: string, redirectUri?: string, userAgent?: string) {
     const ssoConfig = await this.prisma.sSOConfiguration.findUnique({
       where: { domain },
       include: { workspace: true },
@@ -125,6 +133,8 @@ export class SsoService {
     if (!ssoConfig || !ssoConfig.enabled) {
       throw new UnauthorizedException('Configuration SSO invalide ou désactivée.');
     }
+    // Avant tout appel réseau, toute recherche ou création d'utilisateur
+    assertProviderImplemented(ssoConfig.provider);
 
     const redirect =
       redirectUri ||
@@ -199,10 +209,8 @@ export class SsoService {
       name = claims.name || email.split('@')[0];
       ssoUid = `google:${claims.sub}`;
     } else {
-      // Cas générique simulé ou SAML fallback
-      email = `user@${domain}`;
-      name = `Collaborateur ${domain}`;
-      ssoUid = `generic:${domain}:${code}`;
+      // Jamais atteint (assertProviderImplemented) : refus explicite par sécurité
+      throw new NotImplementedException('Fournisseur SSO non pris en charge.');
     }
 
     if (!email) {
@@ -263,23 +271,10 @@ export class SsoService {
       });
     }
 
-    // Génération du JWT de session
-    const accessToken = this.jwtService.sign({
-      sub: user.id,
-      email: user.email,
-      name: user.name,
-    });
+    // Session émise par le point d'entrée unique (A3)
+    const login = await this.authService.completeLogin(user, { method: 'sso', userAgent });
 
-    return {
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        platformRole: user.platformRole,
-      },
-      accessToken,
-      workspaceId: ssoConfig.workspaceId,
-    };
+    return { ...login, workspaceId: ssoConfig.workspaceId };
   }
 
   /**

@@ -12,7 +12,7 @@ interface Integration {
   calendarId: string | null;
   active: boolean;
   createdAt: string;
-  status?: 'CONNECTED' | 'EXPIRED' | 'DEMO' | 'DISABLED';
+  status?: 'CONNECTED' | 'EXPIRED' | 'NOT_CONFIGURED' | 'DISABLED';
 }
 
 interface CalendarConflict {
@@ -39,12 +39,10 @@ export const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({ workspaceI
     deleteIntegration,
     exportToCalendar,
     getCalendarConflicts,
-    user,
   } = useApp();
 
   const getHeaders = () => ({
     'Content-Type': 'application/json',
-    Authorization: user?.token ? `Bearer ${user.token}` : '',
   });
 
   const [integrations, setIntegrations] = useState<Integration[]>([]);
@@ -254,15 +252,10 @@ export const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({ workspaceI
                           <span className="pulse-dot"></span>
                           Expiré
                         </span>
-                      ) : integration.status === 'DEMO' ? (
-                        <span className="integration-status-badge demo">
-                          <span className="pulse-dot"></span>
-                          Démonstration
-                        </span>
                       ) : (
-                        <span className="integration-status-badge connected">
-                          <span className="pulse-dot"></span>
-                          Actif
+                        // État réel renvoyé par le serveur : aucune source configurée (P1)
+                        <span className="integration-status-badge not-configured">
+                          Non configuré
                         </span>
                       )
                     ) : (
@@ -391,10 +384,10 @@ export const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({ workspaceI
                   />
                 </div>
                 <div className="form-group">
-                  <label>URL de flux (ICS / JSON ou Simulateur) — Optionnel</label>
+                  <label>URL de flux (ICS / JSON) — Optionnel</label>
                   <input
                     type="url"
-                    placeholder="Ex: http://localhost:3001/projects/mock-calendar?email=alice@test.com"
+                    placeholder="Ex: https://calendar.example.com/agenda.ics"
                     value={url}
                     onChange={(e) => setUrl(e.target.value)}
                   />

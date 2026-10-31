@@ -8,6 +8,22 @@ export interface IntegrationDto {
   calendarId?: string;
 }
 
+/**
+ * Champs d'une intégration renvoyables par l'API : jamais `accessToken` ni `refreshToken` (S14).
+ */
+export const INTEGRATION_PUBLIC_SELECT = {
+  id: true,
+  type: true,
+  name: true,
+  url: true,
+  calendarId: true,
+  active: true,
+  expiresAt: true,
+  workspaceId: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
+
 @Injectable()
 export class IntegrationService {
   private readonly logger = new Logger(IntegrationService.name);
@@ -28,6 +44,7 @@ export class IntegrationService {
         calendarId: dto.calendarId || null,
         active: true,
       },
+      select: INTEGRATION_PUBLIC_SELECT,
     });
   }
 
@@ -35,12 +52,14 @@ export class IntegrationService {
    * Liste les intégrations d'un workspace.
    */
   async listIntegrations(workspaceId: string) {
+    // Projection explicite : les jetons OAuth, même chiffrés, ne sortent jamais de l'API (S14)
     const integrations = await this.prisma.integration.findMany({
       where: { workspaceId },
       orderBy: { createdAt: 'desc' },
+      select: INTEGRATION_PUBLIC_SELECT,
     });
 
-    // Masquer les tokens/urls sensibles pour des raisons de sécurité
+    // Masquer les URL sensibles (webhooks, flux privés)
     return integrations.map((integration) => {
       if (integration.url) {
         integration.url = this.maskSensitiveUrl(integration.url);
@@ -62,6 +81,7 @@ export class IntegrationService {
     return this.prisma.integration.update({
       where: { id: integrationId },
       data: { active: !integration.active },
+      select: INTEGRATION_PUBLIC_SELECT,
     });
   }
 
@@ -158,17 +178,17 @@ export class IntegrationService {
   }
 
   /**
-   * Retourne l'état de statut détaillé de chaque intégration d'un workspace.
+   * Retourne l'état réel de chaque intégration d'un workspace (P1) :
+   * NOT_CONFIGURED tant qu'aucune source réelle n'existe (URL de flux ou de webhook, ou jeton OAuth
+   * avec identifiants serveur), jamais d'état « démo ».
    */
   async getIntegrationsStatus(workspaceId: string) {
     const integrations = await this.prisma.integration.findMany({
       where: { workspaceId },
     });
 
-    const isProduction = process.env.NODE_ENV === 'production';
-
     return integrations.map((integration) => {
-      let status = 'CONNECTED';
+      let status: 'CONNECTED' | 'EXPIRED' | 'NOT_CONFIGURED' | 'DISABLED' = 'CONNECTED';
 
       if (!integration.active) {
         status = 'DISABLED';
@@ -177,12 +197,19 @@ export class IntegrationService {
           integration.type === 'GOOGLE_CALENDAR'
             ? process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
             : process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET;
+        const hasOAuthSource = Boolean(integration.accessToken && hasCredentials);
 
-        if (!hasCredentials && !isProduction) {
-          status = 'DEMO';
-        } else if (integration.expiresAt && new Date(integration.expiresAt) < new Date()) {
+        if (!integration.url && !hasOAuthSource) {
+          status = 'NOT_CONFIGURED';
+        } else if (
+          !integration.url &&
+          integration.expiresAt &&
+          new Date(integration.expiresAt) < new Date()
+        ) {
           status = 'EXPIRED';
         }
+      } else if (!integration.url) {
+        status = 'NOT_CONFIGURED';
       }
 
       return {

@@ -1,9 +1,12 @@
-import { BadRequestException } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuthService } from './auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { FirebaseIdentityService } from './firebase-identity.service';
+import { TokenService } from './token.service';
+import { SessionService } from './session.service';
+import { MailService } from '../mail/mail.service';
+import { RedisService } from '../redis/redis.service';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -18,18 +21,28 @@ describe('AuthService', () => {
   };
   const prisma = {
     user: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
+    authToken: { updateMany: jest.fn(), create: jest.fn() },
     $transaction: jest.fn(),
   };
-  const jwtService = { sign: jest.fn().mockReturnValue('signed-token') };
+  const sessionService = {
+    issue: jest.fn().mockResolvedValue({ sid: 'sid-1', accessToken: 'signed-token' }),
+  };
   const firebaseIdentity = { verifyIdToken: jest.fn() };
+  const mail = {
+    sendEmailVerificationEmail: jest.fn().mockResolvedValue(true),
+    sendAccountExistsEmail: jest.fn().mockResolvedValue(true),
+  };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
         { provide: PrismaService, useValue: prisma },
-        { provide: JwtService, useValue: jwtService },
         { provide: FirebaseIdentityService, useValue: firebaseIdentity },
+        { provide: TokenService, useValue: {} },
+        { provide: SessionService, useValue: sessionService },
+        { provide: MailService, useValue: mail },
+        { provide: RedisService, useValue: { get: jest.fn(), set: jest.fn(), del: jest.fn() } },
       ],
     }).compile();
 
@@ -53,7 +66,7 @@ describe('AuthService', () => {
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(transaction.workspace.create).toHaveBeenCalledTimes(1);
-    expect(jwtService.sign).not.toHaveBeenCalled();
+    expect(sessionService.issue).not.toHaveBeenCalled();
   });
 
   it('crée le compte et ses données initiales dans une transaction unique', async () => {
@@ -81,7 +94,13 @@ describe('AuthService', () => {
       }),
     );
     expect(transaction.taskDependency.create).toHaveBeenCalledTimes(1);
-    expect(result.accessToken).toBe('signed-token');
+    // P6 : réponse générique, aucune session avant la vérification de l'adresse
+    expect(result).toEqual({ message: expect.any(String) });
+    expect(sessionService.issue).not.toHaveBeenCalled();
+    expect(mail.sendEmailVerificationEmail).toHaveBeenCalledWith(
+      'ada@example.com',
+      expect.any(String),
+    );
   });
 
   it('refuse les champs obligatoires manquants avant toute transaction', async () => {
@@ -103,7 +122,7 @@ describe('AuthService', () => {
     expect(prisma.user.create).toHaveBeenCalledTimes(2);
   });
 
-  it('lie une identité Firebase vérifiée au compte existant sans créer un nouvel utilisateur', async () => {
+  it('S8 : refuse la liaison automatique d’une identité Firebase à un compte existant (409)', async () => {
     firebaseIdentity.verifyIdToken.mockResolvedValue({
       uid: 'firebase-1',
       email: 'ada@example.com',
@@ -116,20 +135,12 @@ describe('AuthService', () => {
       name: 'Ada',
       firebaseUid: null,
     });
-    prisma.user.update.mockResolvedValue({
-      id: 'legacy-1',
-      email: 'ada@example.com',
-      name: 'Ada',
-    });
 
-    const result = await service.loginWithFirebase('firebase-token');
+    await expect(service.loginWithFirebase('firebase-token')).rejects.toThrow(ConflictException);
 
-    expect(prisma.user.update).toHaveBeenCalledWith({
-      where: { id: 'legacy-1' },
-      data: { firebaseUid: 'firebase-1', name: 'Ada' },
-    });
+    expect(prisma.user.update).not.toHaveBeenCalled();
     expect(prisma.$transaction).not.toHaveBeenCalled();
-    expect(result.user.id).toBe('legacy-1');
+    expect(sessionService.issue).not.toHaveBeenCalled();
   });
 
   it('refuse de lier un compte existant avec une adresse Firebase non vérifiée', async () => {
@@ -174,9 +185,10 @@ describe('AuthService', () => {
         email: 'grace@example.com',
         name: 'Grace Hopper',
         firebaseUid: 'firebase-2',
+        emailVerifiedAt: expect.any(Date),
       },
     });
-    expect(result.user.id).toBe('firebase-user-1');
+    expect('user' in result && result.user.id).toBe('firebase-user-1');
   });
 
   describe('linkFirebaseAccount', () => {

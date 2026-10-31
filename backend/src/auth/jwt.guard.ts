@@ -1,13 +1,21 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  CanActivate,
+  ExecutionContext,
+  ForbiddenException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { JwtService } from '@nestjs/jwt';
 import { Request } from 'express';
+import { IS_FORBIDDEN_IN_IMPERSONATION } from './forbidden-in-impersonation.decorator';
 import { IS_PUBLIC_KEY } from './public.decorator';
+import { SessionService } from './session.service';
+import { readAccessCookie } from './session-cookies';
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
   constructor(
-    private jwtService: JwtService,
+    private sessionService: SessionService,
     private reflector: Reflector,
   ) {}
 
@@ -27,24 +35,31 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException("Token d'authentification manquant.");
     }
 
-    try {
-      if (!process.env.JWT_SECRET) {
-        throw new Error("JWT_SECRET n'est pas défini.");
+    // Jeton d'accès (typ 'access', S3) ET session active, compte non suspendu (S7)
+    const payload = await this.sessionService.verifyAccess(token);
+    if (payload.impersonatedBy) {
+      const forbidden = this.reflector.getAllAndOverride<boolean>(IS_FORBIDDEN_IN_IMPERSONATION, [
+        context.getHandler(),
+        context.getClass(),
+      ]);
+      if (forbidden) {
+        throw new ForbiddenException('Action interdite pendant une session d’impersonation.');
       }
-      const payload = await this.jwtService.verifyAsync(token, {
-        secret: process.env.JWT_SECRET,
-      });
-      // Assigner l'utilisateur décodé à la requête
-      request['user'] = { id: payload.sub, email: payload.email, name: payload.name };
-    } catch {
-      throw new UnauthorizedException("Token d'authentification invalide ou expiré.");
     }
+    // Assigner l'utilisateur décodé à la requête
+    request['user'] = {
+      id: payload.sub,
+      email: payload.email,
+      name: payload.name,
+      sid: payload.sid,
+      impersonatedBy: payload.impersonatedBy,
+    };
 
     return true;
   }
 
   private extractToken(request: Request): string | undefined {
-    const cookieToken = request.cookies?.accessToken;
+    const cookieToken = readAccessCookie(request);
     if (cookieToken) return cookieToken;
 
     const authorization = request.headers.authorization;

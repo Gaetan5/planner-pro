@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes, pbkdf2Sync } from 'crypto';
+import { createCipheriv, createDecipheriv, randomBytes, pbkdf2Sync, timingSafeEqual } from 'crypto';
 import * as argon2 from 'argon2';
 
 const ALGORITHM = 'aes-256-gcm';
@@ -92,7 +92,10 @@ export async function verifyPassword(
     return { isValid: false, needsMigration: false };
   }
   const [salt, hash] = parts;
-  const verifyHash = pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+  const expected = Buffer.from(hash, 'hex');
+  const actual = pbkdf2Sync(password, salt, 1000, 64, 'sha512');
+  // Comparaison en temps constant (S27) ; `timingSafeEqual` exige des longueurs égales
+  const isValid = expected.length === actual.length && timingSafeEqual(expected, actual);
 
-  return { isValid: hash === verifyHash, needsMigration: true };
+  return { isValid, needsMigration: true };
 }

@@ -1,5 +1,23 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
+import { maskEmail } from '../projects/mask-email';
+
+/** Échappe une valeur interpolée dans un gabarit HTML (prévention de l'injection de contenu). */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
+ * Environnements où le corps des e-mails peut apparaître dans la console (mode simulé). Partout
+ * ailleurs, il contient des liens secrets (vérification, réinitialisation) et n'est jamais écrit
+ * dans les journaux (CWE-532, P6-a).
+ */
+const isDevelopmentLike = () => ['development', 'test'].includes(process.env.NODE_ENV ?? '');
 
 @Injectable()
 export class MailService {
@@ -17,6 +35,14 @@ export class MailService {
     const user = process.env.SMTP_USER;
     const pass = process.env.SMTP_PASS;
 
+    // Fail-closed (P6-a) : sans SMTP, la production ne pourrait ni vérifier les adresses ni
+    // réinitialiser les mots de passe, et serait tentée de « simuler » en journalisant les liens.
+    if (process.env.NODE_ENV === 'production' && !(host && port)) {
+      throw new Error(
+        'SMTP_HOST et SMTP_PORT sont obligatoires en production (envoi des liens de vérification et de réinitialisation).',
+      );
+    }
+
     if (host && port) {
       this.logger.log(`Initialisation de l'expéditeur SMTP réel sur ${host}:${port}`);
       try {
@@ -28,9 +54,9 @@ export class MailService {
         });
       } catch (error: unknown) {
         this.logger.error(
-          'Échec de création du transporteur SMTP réel, repli sur le mode simulé.',
-          error,
+          `Échec de création du transporteur SMTP réel : ${error instanceof Error ? error.message : String(error)}`,
         );
+        if (process.env.NODE_ENV === 'production') throw error;
         this.transporter = null;
       }
     } else {
@@ -297,6 +323,66 @@ export class MailService {
   }
 
   /**
+   * E-mail de vérification d'adresse (P6) : lien à usage unique valable 24 h.
+   */
+  async sendEmailVerificationEmail(to: string, rawToken: string): Promise<boolean> {
+    const link = `${this.frontendUrl}/?verify=${encodeURIComponent(rawToken)}`;
+    const subject = 'Confirmez votre adresse e-mail Planner-Pro';
+    const html = this.simpleMailHtml(
+      subject,
+      `<p>Bonjour,</p><p>Confirmez votre adresse e-mail pour activer votre compte Planner-Pro. Ce lien est valable 24 heures.</p>`,
+      'Confirmer mon adresse',
+      link,
+    );
+    const text = `Bonjour,\n\nConfirmez votre adresse e-mail pour activer votre compte Planner-Pro (lien valable 24 heures) :\n${link}\n\nSi vous n'êtes pas à l'origine de cette inscription, ignorez ce message.`;
+    return this.sendMail(to, subject, text, html);
+  }
+
+  /**
+   * E-mail de réinitialisation de mot de passe (P6) : lien à usage unique valable 30 minutes.
+   */
+  async sendPasswordResetEmail(to: string, rawToken: string): Promise<boolean> {
+    const link = `${this.frontendUrl}/?reset=${encodeURIComponent(rawToken)}`;
+    const subject = 'Réinitialisation de votre mot de passe Planner-Pro';
+    const html = this.simpleMailHtml(
+      subject,
+      '<p>Une réinitialisation de mot de passe a été demandée pour votre compte. Ce lien est valable 30 minutes et ne peut être utilisé qu’une fois. Toutes vos sessions seront fermées après le changement.</p>',
+      'Choisir un nouveau mot de passe',
+      link,
+    );
+    const text = `Une réinitialisation de mot de passe a été demandée pour votre compte Planner-Pro.\n\nLien (valable 30 minutes, usage unique) :\n${link}\n\nSi vous n'êtes pas à l'origine de cette demande, ignorez ce message : votre mot de passe reste inchangé.`;
+    return this.sendMail(to, subject, text, html);
+  }
+
+  /**
+   * Notification envoyée quand quelqu'un tente de s'inscrire avec une adresse déjà utilisée :
+   * la réponse de l'API reste identique (pas d'énumération de comptes, S27).
+   */
+  async sendAccountExistsEmail(to: string): Promise<boolean> {
+    const link = `${this.frontendUrl}/`;
+    const subject = 'Une inscription a été tentée avec votre adresse e-mail';
+    const html = this.simpleMailHtml(
+      subject,
+      '<p>Quelqu’un a tenté de créer un compte Planner-Pro avec cette adresse, qui possède déjà un compte. Si c’est vous, connectez-vous ou utilisez « Mot de passe oublié ». Sinon, ignorez ce message.</p>',
+      'Aller à Planner-Pro',
+      link,
+    );
+    const text = `Quelqu'un a tenté de créer un compte Planner-Pro avec cette adresse, qui possède déjà un compte.\nSi c'est vous, connectez-vous ou utilisez « Mot de passe oublié » : ${link}\nSinon, ignorez ce message.`;
+    return this.sendMail(to, subject, text, html);
+  }
+
+  private simpleMailHtml(title: string, bodyHtml: string, buttonLabel: string, link: string) {
+    const safeLink = escapeHtml(link);
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head>
+<body style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#0f172a;color:#f8fafc;padding:32px">
+<div style="max-width:560px;margin:0 auto;background:#1e293b;border-radius:16px;padding:32px">
+<h2 style="margin-top:0">${escapeHtml(title)}</h2>${bodyHtml}
+<p style="text-align:center;margin:28px 0"><a href="${safeLink}" style="background:#6366f1;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none">${escapeHtml(buttonLabel)}</a></p>
+<p style="font-size:12px;opacity:.7">Si le bouton ne fonctionne pas, copiez ce lien : ${safeLink}</p>
+</div></body></html>`;
+  }
+
+  /**
    * Méthode générique d'envoi d'email.
    */
   private async sendMail(
@@ -314,17 +400,36 @@ export class MailService {
           text,
           html,
         });
-        this.logger.log(`Email envoyé avec succès à ${to}. MessageId: ${info.messageId}`);
+        this.logger.log(
+          `Email envoyé à ${this.describeRecipient(to)}. MessageId: ${info.messageId}`,
+        );
         return true;
       } catch (error: unknown) {
-        this.logger.error(`Échec de l'envoi de l'email réel à ${to} :`, error);
-        this.logSimulatedEmail(to, subject, text);
+        // Jamais l'objet d'erreur complet ni le corps : seulement le message
+        this.logger.error(
+          `Échec de l'envoi de l'email à ${this.describeRecipient(to)} (« ${subject} ») : ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        // Repli « simulé » réservé au développement (le corps contient des liens secrets)
+        if (isDevelopmentLike()) this.logSimulatedEmail(to, subject, text);
         return false;
       }
-    } else {
+    }
+
+    if (isDevelopmentLike()) {
       this.logSimulatedEmail(to, subject, text);
       return true;
     }
+    this.logger.warn(
+      `Aucun SMTP configuré : email « ${subject} » non envoyé à ${this.describeRecipient(to)}.`,
+    );
+    return false;
+  }
+
+  /** Destinataire journalisé : en clair en développement, masqué sinon. */
+  private describeRecipient(to: string): string {
+    return isDevelopmentLike() ? to : maskEmail(to);
   }
 
   /**

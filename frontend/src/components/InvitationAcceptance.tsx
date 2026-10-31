@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
+import { startGitHubAuthorization } from '../github-oauth';
 import { ShieldCheck, Loader, AlertCircle, ArrowRight, CheckCircle2 } from 'lucide-react';
 import logo from '../logo.png';
 import './Login.css'; // Réutiliser les styles globaux du login
@@ -52,9 +53,8 @@ export const InvitationAcceptance: React.FC<InvitationAcceptanceProps> = ({ toke
   }, [token]);
 
   const handleGitHubLogin = () => {
-    const clientId = import.meta.env.VITE_GITHUB_CLIENT_ID || 'votre_client_id_github';
-    const redirectUri = window.location.origin;
-    window.location.href = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&scope=user,repo`;
+    // `state`, `redirect_uri` et portée minimale sont fixés par le serveur (S9)
+    startGitHubAuthorization().catch(() => alert('Connexion GitHub indisponible.'));
   };
 
   const handleBypass = async (e: React.FormEvent) => {

@@ -20,15 +20,18 @@ export class ScimService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Mappe un utilisateur Prisma en ressource SCIM 2.0 User
+   * Mappe un utilisateur Prisma en ressource SCIM 2.0 User.
+   * `active` reflète l'appartenance au workspace de la clé SCIM, jamais l'état global du compte (S1).
    */
-  private mapToScimUser(user: {
-    id: string;
-    email: string;
-    name: string | null;
-    isSuspended: boolean;
-    createdAt: Date;
-  }): ScimUserResource {
+  private mapToScimUser(
+    user: {
+      id: string;
+      email: string;
+      name: string | null;
+      createdAt: Date;
+    },
+    active: boolean,
+  ): ScimUserResource {
     return {
       schemas: ['urn:ietf:params:scim:schemas:core:2.0:User'],
       id: user.id,
@@ -46,7 +49,7 @@ export class ScimService {
           primary: true,
         },
       ],
-      active: !user.isSuspended,
+      active,
       meta: {
         resourceType: 'User',
         created: user.createdAt.toISOString(),
@@ -54,6 +57,72 @@ export class ScimService {
         location: `/api/scim/v2/Users/${user.id}`,
       },
     };
+  }
+
+  private scimError(status: number, detail: string, scimType?: string) {
+    return {
+      schemas: ['urn:ietf:params:scim:api:messages:2.0:Error'],
+      status: String(status),
+      ...(scimType ? { scimType } : {}),
+      detail,
+    };
+  }
+
+  /**
+   * Résout un utilisateur visible par le workspace de la clé SCIM : membre du workspace,
+   * ou compte créé par ce workspace (pour permettre la réactivation). Sinon 404 (S1).
+   */
+  private async resolveScimUser(workspaceId: string, userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { memberships: { where: { workspaceId } } },
+    });
+
+    const membership = user?.memberships.find((m) => m.workspaceId === workspaceId) ?? null;
+    const provisionedHere = user?.provisionedByWorkspaceId === workspaceId;
+
+    if (!user || (!membership && !provisionedHere)) {
+      throw new NotFoundException(`Utilisateur ${userId} introuvable dans cet espace.`);
+    }
+
+    return { user, membership, provisionedHere };
+  }
+
+  /**
+   * Applique l'état `active` SCIM à l'appartenance au workspace uniquement :
+   * false retire la membership, true la recrée (comptes provisionnés par ce workspace).
+   * `User.isSuspended` n'est jamais modifié par SCIM (S1).
+   */
+  private async applyActiveState(
+    workspaceId: string,
+    userId: string,
+    membership: { role: WorkspaceRole } | null,
+    active: boolean,
+  ): Promise<boolean> {
+    if (!active && membership) {
+      if (membership.role === WorkspaceRole.OWNER) {
+        throw new BadRequestException(
+          this.scimError(
+            400,
+            "Le propriétaire de l'espace de travail ne peut pas être désactivé par SCIM.",
+            'mutability',
+          ),
+        );
+      }
+      await this.prisma.membership.delete({
+        where: { workspaceId_userId: { workspaceId, userId } },
+      });
+      return false;
+    }
+
+    if (active && !membership) {
+      await this.prisma.membership.create({
+        data: { workspaceId, userId, role: WorkspaceRole.MEMBER },
+      });
+      return true;
+    }
+
+    return membership !== null;
   }
 
   /**
@@ -79,7 +148,7 @@ export class ScimService {
       }),
     ]);
 
-    const resources = memberships.map((m) => this.mapToScimUser(m.user));
+    const resources = memberships.map((m) => this.mapToScimUser(m.user, true));
 
     return {
       schemas: ['urn:ietf:params:scim:api:messages:2.0:ListResponse'],
@@ -94,22 +163,14 @@ export class ScimService {
    * Récupère un utilisateur SCIM par son ID
    */
   async getUser(workspaceId: string, userId: string): Promise<ScimUserResource> {
-    const membership = await this.prisma.membership.findUnique({
-      where: {
-        workspaceId_userId: { workspaceId, userId },
-      },
-      include: { user: true },
-    });
-
-    if (!membership) {
-      throw new NotFoundException(`Utilisateur ${userId} introuvable dans cet espace.`);
-    }
-
-    return this.mapToScimUser(membership.user);
+    const { user, membership } = await this.resolveScimUser(workspaceId, userId);
+    return this.mapToScimUser(user, membership !== null);
   }
 
   /**
-   * Provisionne un nouvel utilisateur via SCIM 2.0
+   * Provisionne un nouvel utilisateur via SCIM 2.0.
+   * Un e-mail déjà connu de la plateforme n'est jamais rattaché silencieusement (409) : la preuve
+   * de propriété du domaine arrive en Phase 2 (S10).
    */
   async createUser(workspaceId: string, dto: CreateScimUserDto): Promise<ScimUserResource> {
     const email = (dto.emails?.[0]?.value || dto.userName || '').toLowerCase().trim();
@@ -120,131 +181,139 @@ export class ScimService {
       );
     }
 
-    const name = dto.displayName || dto.name?.formatted || email.split('@')[0];
-    const isSuspended = dto.active === false;
-
-    let user = await this.prisma.user.findUnique({ where: { email } });
-
-    if (user) {
-      // Si l'utilisateur existe déjà, vérifier s'il est déjà membre
-      const existingMembership = await this.prisma.membership.findUnique({
-        where: { workspaceId_userId: { workspaceId, userId: user.id } },
-      });
-
-      if (existingMembership) {
-        throw new ConflictException(`L'utilisateur ${email} est déjà membre de cet espace.`);
-      }
-
-      await this.prisma.membership.create({
-        data: {
-          workspaceId,
-          userId: user.id,
-          role: WorkspaceRole.MEMBER,
-        },
-      });
-
-      if (dto.active !== undefined) {
-        user = await this.prisma.user.update({
-          where: { id: user.id },
-          data: { isSuspended },
-        });
-      }
-    } else {
-      user = await this.prisma.user.create({
-        data: {
-          email,
-          name,
-          isSuspended,
-          memberships: {
-            create: {
-              workspaceId,
-              role: WorkspaceRole.MEMBER,
-            },
-          },
-        },
-      });
+    const existing = await this.prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      throw new ConflictException(
+        this.scimError(409, `L'utilisateur ${email} existe déjà.`, 'uniqueness'),
+      );
     }
 
-    return this.mapToScimUser(user);
+    const name = dto.displayName || dto.name?.formatted || email.split('@')[0];
+    const active = dto.active !== false;
+
+    const user = await this.prisma.user.create({
+      data: {
+        email,
+        name,
+        provisionedByWorkspaceId: workspaceId,
+        ...(active ? { memberships: { create: { workspaceId, role: WorkspaceRole.MEMBER } } } : {}),
+      },
+    });
+
+    return this.mapToScimUser(user, active);
   }
 
   /**
-   * Met à jour complètement un utilisateur via SCIM (PUT)
+   * Vérifie qu'une requête SCIM ne tente pas de changer l'e-mail (identifiant global) du compte.
+   */
+  private assertEmailUnchanged(currentEmail: string, requested?: string) {
+    const normalized = (requested || '').toLowerCase().trim();
+    if (normalized && normalized !== currentEmail.toLowerCase()) {
+      throw new BadRequestException(
+        this.scimError(
+          400,
+          "L'adresse e-mail d'un compte ne peut pas être modifiée par SCIM.",
+          'mutability',
+        ),
+      );
+    }
+  }
+
+  /**
+   * Met à jour un utilisateur via SCIM (PUT).
+   * Seuls le nom (comptes provisionnés par ce workspace) et l'état actif dans le workspace changent.
    */
   async updateUser(
     workspaceId: string,
     userId: string,
     dto: CreateScimUserDto,
   ): Promise<ScimUserResource> {
-    await this.getUser(workspaceId, userId);
+    const { user, membership, provisionedHere } = await this.resolveScimUser(workspaceId, userId);
 
-    const email = (dto.emails?.[0]?.value || dto.userName || '').toLowerCase().trim();
+    this.assertEmailUnchanged(user.email, dto.emails?.[0]?.value || dto.userName);
+
+    let current = user;
     const name = dto.displayName || dto.name?.formatted;
-    const isSuspended = dto.active === false;
+    if (name && provisionedHere && name !== user.name) {
+      current = {
+        ...user,
+        ...(await this.prisma.user.update({ where: { id: userId }, data: { name } })),
+      };
+    }
 
-    const updatedUser = await this.prisma.user.update({
-      where: { id: userId },
-      data: {
-        email: email || undefined,
-        name: name || undefined,
-        isSuspended,
-      },
-    });
+    const active = await this.applyActiveState(
+      workspaceId,
+      userId,
+      membership,
+      dto.active !== false,
+    );
 
-    return this.mapToScimUser(updatedUser);
+    return this.mapToScimUser(current, active);
   }
 
   /**
-   * Applique un patch SCIM (PATCH) - Utilisé par Entra ID/Okta pour activer/suspendre
+   * Applique un patch SCIM (PATCH) - Utilisé par Entra ID/Okta pour activer/désactiver
    */
   async patchUser(
     workspaceId: string,
     userId: string,
     patchRequest: ScimPatchRequest,
   ): Promise<ScimUserResource> {
-    await this.getUser(workspaceId, userId);
+    const { user, membership, provisionedHere } = await this.resolveScimUser(workspaceId, userId);
 
-    let isSuspendedUpdate: boolean | undefined = undefined;
+    let activeUpdate: boolean | undefined = undefined;
     let nameUpdate: string | undefined = undefined;
 
     for (const op of patchRequest.Operations || []) {
       const path = (op.path || '').toLowerCase();
       if (path === 'active' || op.value?.active !== undefined) {
         const activeVal = path === 'active' ? op.value : op.value?.active;
-        isSuspendedUpdate = !activeVal;
+        activeUpdate = activeVal === true || activeVal === 'true' || activeVal === 'True';
       }
       if (path === 'displayname' || op.value?.displayName) {
         nameUpdate = path === 'displayname' ? String(op.value) : String(op.value?.displayName);
       }
+      if (path === 'username' || path.startsWith('emails') || op.value?.userName) {
+        this.assertEmailUnchanged(
+          user.email,
+          path === 'username' ? String(op.value) : op.value?.userName,
+        );
+      }
     }
 
-    const updated = await this.prisma.user.update({
-      where: { id: userId },
-      data: {
-        isSuspended: isSuspendedUpdate !== undefined ? isSuspendedUpdate : undefined,
-        name: nameUpdate || undefined,
-      },
-    });
+    let current = user;
+    if (nameUpdate && provisionedHere && nameUpdate !== user.name) {
+      current = {
+        ...user,
+        ...(await this.prisma.user.update({ where: { id: userId }, data: { name: nameUpdate } })),
+      };
+    }
 
-    return this.mapToScimUser(updated);
+    const active =
+      activeUpdate === undefined
+        ? membership !== null
+        : await this.applyActiveState(workspaceId, userId, membership, activeUpdate);
+
+    return this.mapToScimUser(current, active);
   }
 
   /**
-   * Déprovisionne ou retire un utilisateur de l'espace de travail (DELETE)
+   * Déprovisionne l'utilisateur de l'espace de travail (DELETE) : retire la membership et,
+   * pour un compte créé par ce workspace, abandonne le rattachement de provisionnement.
    */
   async deleteUser(workspaceId: string, userId: string): Promise<void> {
-    const membership = await this.prisma.membership.findUnique({
-      where: { workspaceId_userId: { workspaceId, userId } },
-    });
+    const { membership, provisionedHere } = await this.resolveScimUser(workspaceId, userId);
 
-    if (!membership) {
-      throw new NotFoundException(`Utilisateur ${userId} introuvable dans cet espace.`);
+    if (membership) {
+      await this.applyActiveState(workspaceId, userId, membership, false);
     }
 
-    // Retirer le membre du workspace
-    await this.prisma.membership.delete({
-      where: { workspaceId_userId: { workspaceId, userId } },
-    });
+    if (provisionedHere) {
+      await this.prisma.user.updateMany({
+        where: { id: userId, provisionedByWorkspaceId: workspaceId },
+        data: { provisionedByWorkspaceId: null },
+      });
+    }
   }
 
   /**
@@ -315,10 +384,16 @@ export class ScimService {
   async revokeApiKey(workspaceId: string, userId: string, keyId: string) {
     await this.verifyWorkspaceAdmin(workspaceId, userId);
 
-    return this.prisma.sCIMApiKey.update({
-      where: { id: keyId },
-      data: { revokedAt: new Date() },
+    // Révocation limitée aux clés du workspace de l'appelant (S1)
+    const revokedAt = new Date();
+    const result = await this.prisma.sCIMApiKey.updateMany({
+      where: { id: keyId, workspaceId, revokedAt: null },
+      data: { revokedAt },
     });
+    if (result.count === 0) {
+      throw new NotFoundException('Clé API SCIM introuvable dans cet espace.');
+    }
+    return { id: keyId, revokedAt };
   }
 
   private async verifyWorkspaceAdmin(workspaceId: string, userId: string) {

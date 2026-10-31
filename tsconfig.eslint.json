@@ -16,6 +16,7 @@
     "backend/src/**/*.ts",
     "backend/tests/**/*.ts",
     "backend/prisma/**/*.ts",
+    "backend/scripts/**/*.ts",
     "backend/*.ts"
   ],
   "exclude": ["node_modules", "backend/dist", "frontend/dist"]

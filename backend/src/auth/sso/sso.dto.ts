@@ -1,4 +1,12 @@
-import { IsEmail, IsNotEmpty, IsString, IsOptional, IsEnum, IsBoolean } from 'class-validator';
+import {
+  IsEmail,
+  IsNotEmpty,
+  IsString,
+  IsOptional,
+  IsEnum,
+  IsBoolean,
+  IsIn,
+} from 'class-validator';
 import { SSOProvider, WorkspaceRole } from '@prisma/client';
 
 export class DiscoverSsoDto {
@@ -22,7 +30,10 @@ export class SsoCallbackDto {
 }
 
 export class ConfigureSsoDto {
-  @IsEnum(SSOProvider, { message: 'Fournisseur SSO invalide.' })
+  // Seuls les fournisseurs réellement implémentés sont acceptés (S2) ; SAML2 et OIDC_GENERIC en Phase 2
+  @IsIn([SSOProvider.OIDC_AZURE_AD, SSOProvider.OIDC_GOOGLE], {
+    message: 'Fournisseur SSO non pris en charge (OIDC_AZURE_AD ou OIDC_GOOGLE).',
+  })
   provider!: SSOProvider;
 
   @IsString()

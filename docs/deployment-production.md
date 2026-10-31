@@ -176,6 +176,54 @@ production ; ne pas exécuter sa création sur des tables existantes.
    Cette stack réutilise le volume déclaré dans `MYSQL_VOLUME_NAME`. Vérifier les logs
    du backend avant d’ouvrir le trafic.
 
+## TLS MySQL (obligatoire)
+
+Depuis le correctif de sécurité S4, toutes les connexions à MySQL sont chiffrées et
+vérifiées :
+
+- MySQL démarre avec `--require-secure-transport=ON` et refuse les connexions TCP en clair ;
+- le backend (`DATABASE_SSL=true`, `DATABASE_SSL_CA=/run/secrets/mysql-ca.pem`) vérifie le
+  certificat du serveur ; il refuse de démarrer en production sans `DATABASE_SSL=true` ;
+- `wait-for-db.js` et `prisma migrate deploy` utilisent la même AC (la configuration
+  Prisma ajoute `sslaccept=strict` et `sslcert` au DSN de la CLI).
+
+### Première installation
+
+Sur l'hôte, depuis la racine du dépôt, **avant** le premier `docker compose up` :
+
+```bash
+ops/mysql-tls/generate-certs.sh            # écrit dans secrets/mysql/ (ignoré par Git)
+```
+
+Le script produit `ca.pem` (AC publique, montée dans `db` et `backend`), `ca-key.pem`
+(clé de l'AC, montée nulle part : à sauvegarder hors ligne puis à retirer de l'hôte si
+possible), `server-cert.pem` (SAN `DNS:db`) et `server-key.pem` (droits `600`, attribuée à
+l'utilisateur `mysql` de l'image via un conteneur jetable : aucun `sudo` requis). Il faut
+que Docker soit utilisable par l'utilisateur qui lance le script.
+
+### Vérification après démarrage
+
+```bash
+# Chiffrement effectif depuis le backend (doit afficher un chiffrement non vide)
+docker compose -f docker-compose.prod.yml --env-file .env.production exec backend \
+  node -e "const m=require('mariadb');const {buildMariaDbOptions}=require('./dist/prisma/prisma.service');m.createConnection(buildMariaDbOptions()).then(async c=>{console.log(await c.query(\"SHOW SESSION STATUS LIKE 'Ssl_cipher'\"));await c.end()})"
+
+# Refus des connexions en clair (doit échouer avec « insecure transport are prohibited »)
+docker compose -f docker-compose.prod.yml --env-file .env.production exec db \
+  sh -c 'mysql --ssl-mode=DISABLED -h 127.0.0.1 -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" -e "SELECT 1"'
+```
+
+### Rotation
+
+Le certificat serveur est valable 825 jours (`MYSQL_TLS_DAYS`), l'AC 3650 jours
+(`MYSQL_TLS_CA_DAYS`). Pour renouveler le certificat serveur en conservant l'AC, relancer
+`ops/mysql-tls/generate-certs.sh`, puis redémarrer `db` et `backend`. Pour remplacer aussi
+l'AC (compromission ou expiration), utiliser `ROTATE_CA=1 ops/mysql-tls/generate-certs.sh`,
+puis redémarrer `db` et `backend` ensemble : l'ancienne AC n'est plus acceptée.
+
+La clé publique RSA épinglée (`DATABASE_RSA_PUBLIC_KEY`) n'est pas autorisée en production :
+elle protège le mot de passe mais ne chiffre pas le trafic (développement et staging seulement).
+
 ## Nouvelle base vide
 
 Créer d’abord le volume nommé dans `MYSQL_VOLUME_NAME`, puis lancer la commande de

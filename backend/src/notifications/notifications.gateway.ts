@@ -7,11 +7,12 @@ import {
   OnGatewayInit,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { JwtService } from '@nestjs/jwt';
 import { SkipThrottle } from '@nestjs/throttler';
 import { createAdapter } from '@socket.io/redis-adapter';
 import { createClient } from 'redis';
 import { PrismaService } from '../prisma/prisma.service';
+import { SessionService } from '../auth/session.service';
+import { authenticateSocket, stopSessionWatch } from '../auth/ws-auth';
 
 @SkipThrottle()
 @WebSocketGateway({
@@ -29,7 +30,7 @@ export class NotificationsGateway
   server!: Server;
 
   constructor(
-    private readonly jwtService: JwtService,
+    private readonly sessionService: SessionService,
     private readonly prisma: PrismaService,
   ) {}
 
@@ -51,20 +52,9 @@ export class NotificationsGateway
   }
 
   async handleConnection(client: Socket) {
-    let token = client.handshake.auth?.token || client.handshake.headers?.authorization;
-    if (token && token.startsWith('Bearer ')) {
-      token = token.slice(7);
-    }
-
-    if (!token) {
-      this.logger.warn(`Disconnecting socket ${client.id}: no authentication token provided.`);
-      client.disconnect(true);
-      return;
-    }
-
     try {
-      const payload = await this.jwtService.verifyAsync(token);
-      client.data.userId = payload.sub;
+      // Même vérification que le guard HTTP : jeton d'accès (S3), session active (S7)
+      await authenticateSocket(client, this.sessionService);
       client.join(`user:${client.data.userId}`);
       console.log(
         `Notifications Gateway: Client connecté et authentifié : ${client.data.userId} (Socket: ${client.id})`,
@@ -91,6 +81,7 @@ export class NotificationsGateway
   }
 
   handleDisconnect(client: Socket) {
+    stopSessionWatch(client);
     console.log(`Notifications Gateway: Client déconnecté : ${client.id}`);
   }
 

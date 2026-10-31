@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { WorkspaceRole, InvitationStatus, ProjectRole } from '@prisma/client';
 import * as crypto from 'crypto';
+import { maskEmail } from './mask-email';
 import { MailService } from '../mail/mail.service';
 import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
 
@@ -181,7 +182,7 @@ export class InvitationsService {
       where: { tokenHash },
       include: {
         workspace: { select: { name: true } },
-        invitedBy: { select: { name: true, email: true } },
+        invitedBy: { select: { name: true } },
         project: { select: { id: true, name: true } },
       },
     });
@@ -192,12 +193,12 @@ export class InvitationsService {
 
     return {
       workspaceName: invitation.workspace.name,
-      invitedByName:
-        invitation.invitedBy?.name || invitation.invitedBy?.email || 'Un collaborateur',
+      // Route publique : ni l'adresse de l'invité ni celle de l'invitant en clair (S27)
+      invitedByName: invitation.invitedBy?.name || 'Un collaborateur',
       role: invitation.role,
       projectName: invitation.project?.name || null,
       projectId: invitation.projectId || null,
-      email: invitation.email || null,
+      email: invitation.email ? maskEmail(invitation.email) : null,
     };
   }
 

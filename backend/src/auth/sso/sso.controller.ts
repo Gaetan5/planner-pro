@@ -10,12 +10,14 @@ import {
   Req,
   Res,
 } from '@nestjs/common';
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { SsoService } from './sso.service';
 import { DiscoverSsoDto, SsoCallbackDto, ConfigureSsoDto } from './sso.dto';
 import { JwtAuthGuard } from '../jwt.guard';
 import { Public } from '../public.decorator';
+import { respondWithLogin, userAgentOf } from '../login-response';
+import { FeatureFlagGuard, RequireFeature } from '../../config/feature-flag.guard';
 
 interface AuthenticatedUserRequest {
   user: {
@@ -26,17 +28,10 @@ interface AuthenticatedUserRequest {
 }
 
 @Controller()
+@RequireFeature('SSO')
+@UseGuards(FeatureFlagGuard)
 export class SsoController {
   constructor(private readonly ssoService: SsoService) {}
-
-  private setTokenCookie(res: Response, token: string) {
-    res.cookie('accessToken', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 3600000 * 24 * 7, // 7 jours
-    });
-  }
 
   /**
    * Endpoint de découverte SSO à partir de l'email professionnel
@@ -66,10 +61,18 @@ export class SsoController {
   @Public()
   @Post('auth/sso/callback')
   @Throttle({ default: { limit: 10, ttl: 60000 } })
-  async handleCallback(@Body() dto: SsoCallbackDto, @Res({ passthrough: true }) res: Response) {
-    const result = await this.ssoService.handleCallback(dto.code, dto.domain, dto.redirectUri);
-    this.setTokenCookie(res, result.accessToken);
-    return result;
+  async handleCallback(
+    @Body() dto: SsoCallbackDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { workspaceId, ...login } = await this.ssoService.handleCallback(
+      dto.code,
+      dto.domain,
+      dto.redirectUri,
+      userAgentOf(req),
+    );
+    return { ...respondWithLogin(res, login), workspaceId };
   }
 
   /**

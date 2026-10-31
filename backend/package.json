@@ -39,7 +39,7 @@
     "firebase-admin": "^13.5.0",
     "helmet": "^8.2.0",
     "ioredis": "5.4.1",
-    "mariadb": "^3.5.3",
+    "mariadb": "^3.5.4",
     "nodemailer": "^8.0.10",
     "redis": "4.7.1",
     "reflect-metadata": "0.2.0",
@@ -66,14 +66,17 @@
   },
   "jest": {
     "moduleFileExtensions": [
+      "ts",
       "js",
-      "json",
-      "ts"
+      "json"
     ],
     "rootDir": ".",
     "roots": [
       "<rootDir>/src",
       "<rootDir>/tests"
+    ],
+    "setupFiles": [
+      "<rootDir>/tests/support/jest-env.ts"
     ],
     "testRegex": ".*\\.spec\\.ts$",
     "testPathIgnorePatterns": [
