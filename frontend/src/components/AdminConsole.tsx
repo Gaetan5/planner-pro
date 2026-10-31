@@ -143,13 +143,12 @@ export function AdminConsole() {
   const getHeaders = useCallback(() => {
     return {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${user?.token || ''}`,
     };
-  }, [user?.token]);
+  }, []);
 
   // Load Overview & Health
   const loadOverviewAndHealth = useCallback(async () => {
-    if (!user?.token) return;
+    if (!user) return;
     try {
       const [ovRes, hlRes] = await Promise.all([
         fetch(`${API_URL}/admin/overview`, { headers: getHeaders() }),
@@ -166,11 +165,11 @@ export function AdminConsole() {
     } catch (e) {
       console.error(e);
     }
-  }, [user?.token, getHeaders]);
+  }, [user, getHeaders]);
 
   // Load Users
   const loadUsers = useCallback(async () => {
-    if (!user?.token) return;
+    if (!user) return;
     setIsLoading(true);
     setError(null);
     try {
@@ -191,11 +190,11 @@ export function AdminConsole() {
     } finally {
       setIsLoading(false);
     }
-  }, [user?.token, usersPage, usersSearch, getHeaders]);
+  }, [user, usersPage, usersSearch, getHeaders]);
 
   // Load Workspaces
   const loadWorkspaces = useCallback(async () => {
-    if (!user?.token) return;
+    if (!user) return;
     setIsLoading(true);
     setError(null);
     try {
@@ -216,11 +215,11 @@ export function AdminConsole() {
     } finally {
       setIsLoading(false);
     }
-  }, [user?.token, workspacesPage, workspacesSearch, getHeaders]);
+  }, [user, workspacesPage, workspacesSearch, getHeaders]);
 
   // Load Activity
   const loadActivity = useCallback(async () => {
-    if (!user?.token) return;
+    if (!user) return;
     setIsLoading(true);
     setError(null);
     try {
@@ -241,7 +240,7 @@ export function AdminConsole() {
     } finally {
       setIsLoading(false);
     }
-  }, [user?.token, activityPage, activitySearch, getHeaders]);
+  }, [user, activityPage, activitySearch, getHeaders]);
 
   // Drapeau d'impersonation, chargé à la première ouverture de l'onglet Utilisateurs
   useEffect(() => {
@@ -327,18 +326,17 @@ export function AdminConsole() {
       if (!res.ok) throw new Error("Échec de l'impersonation.");
       const data = await res.json();
 
-      // Sauvegarder la session admin actuelle
+      // Le serveur a remplacé les cookies par ceux de la session d'impersonation (15 min, sans
+      // rafraîchissement) : on mémorise seulement le profil de l'administrateur pour la bannière.
       const currentSession = localStorage.getItem('planner_user');
       if (currentSession) {
         sessionStorage.setItem('planner_admin_original_session', currentSession);
       }
 
-      // Appliquer la nouvelle session et recharger
       const newUserSession = {
         id: data.user.id,
         name: data.user.name,
         email: data.user.email,
-        token: data.accessToken,
         platformRole: data.user.platformRole ?? null,
       };
       localStorage.setItem('planner_user', JSON.stringify(newUserSession));
@@ -349,12 +347,14 @@ export function AdminConsole() {
     }
   };
 
-  // Action: Restore Admin Session
+  // Action: quitter l'impersonation. La session d'impersonation est révoquée côté serveur ; la
+  // session de l'administrateur n'est pas restaurable (aucun jeton côté navigateur) : il se reconnecte.
   const handleRestoreAdminSession = () => {
-    if (!backupSession) return;
-    localStorage.setItem('planner_user', backupSession);
     sessionStorage.removeItem('planner_admin_original_session');
-    window.location.reload();
+    localStorage.removeItem('planner_user');
+    void fetch(`${API_URL}/auth/logout`, { method: 'POST' })
+      .catch(() => undefined)
+      .finally(() => window.location.reload());
   };
 
   const totalCards = overview

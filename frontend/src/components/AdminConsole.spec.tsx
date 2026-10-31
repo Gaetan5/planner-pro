@@ -13,7 +13,7 @@ describe('AdminConsole', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(useApp).mockReturnValue({
-      user: { id: 'admin-1', name: 'Admin', email: 'admin@example.com', token: 'admin-token' },
+      user: { id: 'admin-1', name: 'Admin', email: 'admin@example.com' },
     } as unknown as ReturnType<typeof useApp>);
   });
 
@@ -79,12 +79,12 @@ describe('AdminConsole', () => {
     });
     expect(screen.getByText('admin@example.com')).toBeInTheDocument();
     expect(global.fetch).toHaveBeenCalledTimes(3);
-    expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining('/admin/overview'),
-      expect.objectContaining({
-        headers: expect.objectContaining({ Authorization: 'Bearer admin-token' }),
-      }),
-    );
+    // S7 : l'authentification passe par les cookies de session, plus par un en-tête Authorization
+    const overviewCall = vi
+      .mocked(global.fetch)
+      .mock.calls.find(([url]) => String(url).includes('/admin/overview'));
+    expect(overviewCall).toBeDefined();
+    expect(JSON.stringify(overviewCall![1])).not.toMatch(/Authorization|Bearer/i);
   });
 
   it('explains when an authenticated account is not a platform administrator', async () => {

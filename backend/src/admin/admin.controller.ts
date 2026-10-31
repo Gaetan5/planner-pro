@@ -6,17 +6,23 @@ import {
   Patch,
   Post,
   Query,
+  Res,
   UseGuards,
   UsePipes,
   ValidationPipe,
 } from '@nestjs/common';
+import { Response } from 'express';
+import { ForbiddenInImpersonation } from '../auth/forbidden-in-impersonation.decorator';
 import { JwtAuthGuard } from '../auth/jwt.guard';
+import { setSessionCookies } from '../auth/session-cookies';
 import { User, AuthenticatedUser } from '../auth/user.decorator';
 import { AdminService } from './admin.service';
 import { PlatformAdminGuard } from './platform-admin.guard';
 import { AdminPaginationQueryDto, UpdateUserRoleDto } from './dto/admin.dto';
 import { FeatureFlagGuard, RequireFeature } from '../config/feature-flag.guard';
 
+// Aucune action d'administration depuis une session d'impersonation (S18.2)
+@ForbiddenInImpersonation()
 @Controller('admin')
 // FeatureFlagGuard en premier : une route désactivée répond 404 avant toute authentification
 @UseGuards(FeatureFlagGuard, JwtAuthGuard, PlatformAdminGuard)
@@ -60,8 +66,15 @@ export class AdminController {
 
   @Post('users/:id/impersonate')
   @RequireFeature('IMPERSONATION')
-  impersonateUser(@User() actor: AuthenticatedUser, @Param('id') targetUserId: string) {
-    return this.adminService.impersonateUser(actor.id, targetUserId);
+  async impersonateUser(
+    @User() actor: AuthenticatedUser,
+    @Param('id') targetUserId: string,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { session, ...body } = await this.adminService.impersonateUser(actor.id, targetUserId);
+    // La session d'impersonation remplace les cookies du navigateur ; aucun jeton dans le corps
+    setSessionCookies(res, session);
+    return body;
   }
 
   @Get('workspaces')

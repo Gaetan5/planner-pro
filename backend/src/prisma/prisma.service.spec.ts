@@ -28,13 +28,21 @@ describe('PrismaService : configuration de connexion (S4)', () => {
     },
   );
 
-  it.each(['development', 'test'])(
-    'NODE_ENV=%s sans DATABASE_URL : repli local autorisé',
-    (nodeEnv) => {
-      const options = buildMariaDbOptions({ NODE_ENV: nodeEnv });
-      expect(options.host).toBe('localhost');
-    },
-  );
+  it('NODE_ENV=development sans DATABASE_URL : repli local autorisé', () => {
+    const options = buildMariaDbOptions({ NODE_ENV: 'development' });
+    expect(options.host).toBe('localhost');
+  });
+
+  // A7 : une suite de tests ne doit jamais viser par défaut la base de développement locale
+  it('NODE_ENV=test sans DATABASE_URL : erreur, aucun repli vers le DSN local', () => {
+    expect(() => buildMariaDbOptions({ NODE_ENV: 'test' })).toThrow(/DATABASE_URL/);
+  });
+
+  it('sous Jest, DATABASE_URL est fixée sur une adresse injoignable (jamais la base de dev)', () => {
+    const parsed = new URL(process.env.DATABASE_URL as string);
+    expect(parsed.hostname).toBe('127.0.0.1');
+    expect(parsed.port).toBe('1');
+  });
 
   it('analyse DATABASE_URL (hôte, port, identifiants décodés, base)', () => {
     const options = buildMariaDbOptions({ NODE_ENV: 'staging', DATABASE_URL: DSN });

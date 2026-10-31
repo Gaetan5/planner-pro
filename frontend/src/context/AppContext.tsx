@@ -8,6 +8,7 @@ import React, {
   useCallback,
 } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { SESSION_EXPIRED_EVENT, refreshSession } from '../api-session';
 
 export interface TaskAssignee {
   id: string;
@@ -193,6 +194,12 @@ export type CreateTaskOptions = {
   storyPoints?: number;
   sprintId?: string;
 };
+/** Second facteur requis : aucune session n'existe tant que le challenge n'est pas validé (S8). */
+export interface MfaChallenge {
+  mfaRequired: true;
+  mfaTicket: string;
+}
+
 interface AppContextType {
   apiError: string | null;
   dismissApiError: () => void;
@@ -200,7 +207,6 @@ interface AppContextType {
     id: string;
     name: string;
     email: string;
-    token?: string;
     platformRole?: 'SUPER_ADMIN' | 'PLATFORM_ADMIN' | null;
   } | null;
   projects: Project[];
@@ -225,23 +231,19 @@ interface AppContextType {
     | 'finances'
     | 'admin';
   isConnected: boolean;
-  login: (code: string) => Promise<void>;
-  classicLogin: (
-    email: string,
-    passwordRaw: string,
-  ) => Promise<{ mfaRequired?: boolean; mfaTicket?: string } | void>;
-  verifyMfa: (mfaTicket: string, code: string) => Promise<void>;
+  login: (code: string, state?: string) => Promise<MfaChallenge | void>;
+  classicLogin: (email: string, passwordRaw: string) => Promise<MfaChallenge | void>;
+  verifyMfa: (mfaTicket: string, factor: { code?: string; recoveryCode?: string }) => Promise<void>;
   discoverSso: (email: string) => Promise<{
     ssoAvailable: boolean;
     domain?: string;
     provider?: string;
-    workspaceName?: string;
     enforceSSO?: boolean;
     authUrl?: string;
   }>;
-  classicRegister: (email: string, passwordRaw: string, name: string) => Promise<void>;
-  firebaseLogin: (idToken: string, name?: string) => Promise<void>;
-  ssoLogin: (code: string, domain: string) => Promise<void>;
+  classicRegister: (email: string, passwordRaw: string, name: string) => Promise<string>;
+  firebaseLogin: (idToken: string, name?: string) => Promise<MfaChallenge | void>;
+  ssoLogin: (code: string, domain: string) => Promise<MfaChallenge | void>;
   logout: () => void;
   mockLogin: (name: string) => Promise<void>;
   setActiveTab: (
@@ -509,23 +511,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     (localStorage.getItem('planner_theme') as 'dark' | 'light') || 'dark',
   );
 
-  // Charger la session utilisateur au démarrage
+  // Charger le profil de la session au démarrage. Le jeton n'est plus stocké côté navigateur (S7) :
+  // la session vit dans des cookies httpOnly. Un ancien profil qui contiendrait encore un jeton
+  // (version précédente) est purgé de localStorage.
   useEffect(() => {
     const savedUser = localStorage.getItem('planner_user');
     if (savedUser) {
-      setUser(JSON.parse(savedUser));
+      const { token: legacyToken, ...profile } = JSON.parse(savedUser) as Record<string, unknown>;
+      if (legacyToken !== undefined) {
+        localStorage.setItem('planner_user', JSON.stringify(profile));
+      }
+      setUser(profile as unknown as NonNullable<AppContextType['user']>);
     }
   }, []);
 
-  // Helper pour générer les headers HTTP avec le token JWT
+  // Headers HTTP : l'authentification passe par les cookies de session (credentials: 'include')
   const getHeaders = useCallback(() => {
     return {
       'Content-Type': 'application/json',
-      Authorization: user?.token ? `Bearer ${user.token}` : '',
     };
-  }, [user?.token]);
+  }, []);
 
   const logout = useCallback(() => {
+    // Déconnexion serveur : révoque la session et efface les cookies httpOnly (S7)
+    void fetch(`${BACKEND_URL}/auth/logout`, { method: 'POST' }).catch(() => undefined);
     void import('../firebase-auth')
       .then(({ signOutFirebase }) => signOutFirebase())
       .catch((error: unknown) => {
@@ -543,6 +552,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setActiveTimer(null);
     if (socket) socket.disconnect();
   }, [socket]);
+
+  // Session perdue (rotation impossible, révocation, suspension) : retour à l'écran de connexion
+  useEffect(() => {
+    window.addEventListener(SESSION_EXPIRED_EVENT, logout);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, logout);
+  }, [logout]);
 
   const reportApiError = async (res: Response, action: string): Promise<never> => {
     if (res.status === 401) {
@@ -594,11 +609,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setIsConnected(true);
 
           // Initialisation du WebSocket
-          const newSocket = io(BACKEND_URL, {
-            extraHeaders: {
-              Authorization: user.token ? `Bearer ${user.token}` : '',
-            },
-          });
+          // Authentification par le cookie httpOnly au handshake (S7)
+          const newSocket = io(BACKEND_URL, { withCredentials: true });
           activeSocket = newSocket;
           setSocket(newSocket);
 
@@ -693,6 +705,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             }
           };
 
+          // Cookie d'accès expiré pendant l'absence : on renouvelle la session puis on se reconnecte
+          let reconnectAttempts = 0;
+          newSocket.on('connect', () => {
+            reconnectAttempts = 0;
+          });
+          newSocket.on('connect_error', () => {
+            if (reconnectAttempts >= 3) return;
+            reconnectAttempts += 1;
+            void refreshSession().then((renewed) => {
+              if (renewed) newSocket.connect();
+            });
+          });
           newSocket.on('connect', handleConnect);
           newSocket.on('active-timer-state', handleActiveTimerState);
           newSocket.on('timer-started', handleTimerStarted);
@@ -801,25 +825,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     refreshData();
   }, [user, isConnected]);
 
+  // Réponse d'une connexion : ticket MFA ou profil (la session est dans les cookies httpOnly)
+  const applyLoginResponse = (data: {
+    mfaRequired?: boolean;
+    mfaTicket?: string;
+    user: {
+      id: string;
+      name: string;
+      email: string;
+      platformRole?: 'SUPER_ADMIN' | 'PLATFORM_ADMIN' | null;
+    };
+  }): MfaChallenge | void => {
+    if (data.mfaRequired && data.mfaTicket) {
+      return { mfaRequired: true, mfaTicket: data.mfaTicket };
+    }
+    const userData = {
+      id: data.user.id,
+      name: data.user.name,
+      email: data.user.email,
+      platformRole: data.user.platformRole ?? null,
+    };
+    setUser(userData);
+    localStorage.setItem('planner_user', JSON.stringify(userData));
+  };
+
   // SSO & Auth
-  const login = async (code: string) => {
+  const login = async (code: string, state?: string) => {
     try {
       const res = await fetch(`${BACKEND_URL}/auth/github/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code }),
+        body: JSON.stringify({ code, state }),
       });
       if (!res.ok) throw new Error('Échec OAuth');
       const data = await res.json();
-      const userData = {
-        id: data.user.id,
-        name: data.user.name,
-        email: data.user.email,
-        token: data.accessToken,
-        platformRole: data.user.platformRole ?? null,
-      };
-      setUser(userData);
-      localStorage.setItem('planner_user', JSON.stringify(userData));
+      return applyLoginResponse(data);
     } catch (e) {
       console.error(e);
       throw e;
@@ -835,15 +875,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
       if (!res.ok) throw new Error('Échec simulation login');
       const data = await res.json();
-      const userData = {
-        id: data.user.id,
-        name: data.user.name,
-        email: data.user.email,
-        token: data.accessToken,
-        platformRole: data.user.platformRole ?? null,
-      };
-      setUser(userData);
-      localStorage.setItem('planner_user', JSON.stringify(userData));
+      applyLoginResponse(data);
     } catch (e) {
       console.error(e);
       throw e;
@@ -863,46 +895,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       const data = await res.json();
 
-      if (data.mfaRequired) {
-        return { mfaRequired: true, mfaTicket: data.mfaTicket };
-      }
-
-      const userData = {
-        id: data.user.id,
-        name: data.user.name,
-        email: data.user.email,
-        token: data.accessToken,
-        platformRole: data.user.platformRole ?? null,
-      };
-      setUser(userData);
-      localStorage.setItem('planner_user', JSON.stringify(userData));
+      return applyLoginResponse(data);
     } catch (e) {
       console.error(e);
       throw e;
     }
   };
 
-  const verifyMfa = async (mfaTicket: string, code: string) => {
+  const verifyMfa = async (mfaTicket: string, factor: { code?: string; recoveryCode?: string }) => {
     try {
       const res = await fetch(`${BACKEND_URL}/auth/mfa/challenge`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mfaTicket, code }),
+        body: JSON.stringify({ mfaTicket, ...factor }),
       });
       if (!res.ok) {
         const errData = await res.json();
         throw new Error(errData.message || 'Code d’authentification TOTP invalide');
       }
       const data = await res.json();
-      const userData = {
-        id: data.user.id,
-        name: data.user.name,
-        email: data.user.email,
-        token: data.accessToken,
-        platformRole: data.user.platformRole ?? null,
-      };
-      setUser(userData);
-      localStorage.setItem('planner_user', JSON.stringify(userData));
+      applyLoginResponse(data);
     } catch (e) {
       console.error(e);
       throw e;
@@ -937,15 +949,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         throw new Error(errData.message || 'Échec de l’authentification SSO');
       }
       const data = await res.json();
-      const userData = {
-        id: data.user.id,
-        name: data.user.name,
-        email: data.user.email,
-        token: data.accessToken,
-        platformRole: data.user.platformRole ?? null,
-      };
-      setUser(userData);
-      localStorage.setItem('planner_user', JSON.stringify(userData));
+      return applyLoginResponse(data);
     } catch (e) {
       console.error(e);
       throw e;
@@ -963,16 +967,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const errData = await res.json();
         throw new Error(errData.message || "Échec de l'inscription");
       }
-      const data = await res.json();
-      const userData = {
-        id: data.user.id,
-        name: data.user.name,
-        email: data.user.email,
-        token: data.accessToken,
-        platformRole: data.user.platformRole ?? null,
-      };
-      setUser(userData);
-      localStorage.setItem('planner_user', JSON.stringify(userData));
+      // 202 générique : aucune session avant la vérification de l'adresse e-mail (P6, S27)
+      const data = (await res.json().catch(() => ({}))) as { message?: string };
+      return data.message ?? "Un e-mail de confirmation vient d'être envoyé.";
     } catch (e) {
       console.error(e);
       throw e;
@@ -990,15 +987,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       throw new Error(errData.message || 'Connexion Firebase refusée.');
     }
     const data = await res.json();
-    const userData = {
-      id: data.user.id,
-      name: data.user.name,
-      email: data.user.email,
-      token: data.accessToken,
-      platformRole: data.user.platformRole ?? null,
-    };
-    setUser(userData);
-    localStorage.setItem('planner_user', JSON.stringify(userData));
+    return applyLoginResponse(data);
   };
 
   // CRUD Projets
@@ -1670,9 +1659,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const res = await fetch(`${BACKEND_URL}/projects/ai/voice`, {
       method: 'POST',
-      headers: {
-        Authorization: user?.token ? `Bearer ${user.token}` : '',
-      },
       body: formData,
     });
 
@@ -1698,9 +1684,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const res = await fetch(`${BACKEND_URL}/projects/ai/vision`, {
       method: 'POST',
-      headers: {
-        Authorization: user?.token ? `Bearer ${user.token}` : '',
-      },
       body: formData,
     });
 

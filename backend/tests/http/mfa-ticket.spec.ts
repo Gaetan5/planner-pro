@@ -9,8 +9,23 @@ import { generateTotpCode, generateTotpSecret } from '../../src/auth/totp.util';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { RedisService } from '../../src/redis/redis.service';
 import { TokenModule } from '../../src/auth/token.module';
+import { SessionService } from '../../src/auth/session.service';
+import { MailService } from '../../src/mail/mail.service';
+import { FakePrisma } from './fake-prisma';
 import { FakeRedisService } from './fake-redis';
 import { startHttpTestApp } from './http-test-app';
+
+/**
+ * Le délai Redis est de 2 s (borne le parcours) ; la marge de 1 s absorbe la vérification Argon2 du
+ * mot de passe et la charge des exécutions parallèles de la suite.
+ */
+const MAX_RESPONSE_MS = 3000;
+
+const mailStub = {
+  sendEmailVerificationEmail: jest.fn().mockResolvedValue(true),
+  sendPasswordResetEmail: jest.fn().mockResolvedValue(true),
+  sendAccountExistsEmail: jest.fn().mockResolvedValue(true),
+};
 
 @Controller('protected')
 @UseGuards(JwtAuthGuard)
@@ -32,33 +47,30 @@ describe('S3 : séparation ticket MFA / jeton d’accès (HTTP)', () => {
   let redis: FakeRedisService;
   const savedEnv = { ...process.env };
 
-  const user: Record<string, unknown> = {
-    id: 'user-mfa',
-    email: 'victime@corp.com',
-    name: 'Victime',
-    platformRole: null,
-    isSuspended: false,
-    mfaEnabled: true,
-  };
-  const prisma = {
-    user: {
-      findUnique: jest.fn(async () => user),
-      update: jest.fn(),
-    },
-  };
+  const prisma = new FakePrisma();
 
   beforeAll(async () => {
     process.env.JWT_SECRET = JWT_SECRET;
-    user.passwordHash = await hashPassword('MotDePasse!2026');
     mfaSecret = generateTotpSecret();
-    user.mfaSecret = mfaSecret;
+    await prisma.user.create({
+      data: {
+        id: 'user-mfa',
+        email: 'victime@corp.com',
+        name: 'Victime',
+        passwordHash: await hashPassword('MotDePasse!2026'),
+        mfaEnabled: true,
+        mfaSecret,
+      },
+    });
     redis = new FakeRedisService();
     ({ app, baseUrl } = await startHttpTestApp({
       imports: [JwtModule.register({ global: true, secret: JWT_SECRET }), TokenModule],
       controllers: [AuthController, ProtectedController],
       providers: [
         AuthService,
+        { provide: MailService, useValue: mailStub },
         JwtAuthGuard,
+        SessionService,
         { provide: PrismaService, useValue: prisma },
         { provide: FirebaseIdentityService, useValue: {} },
         { provide: RedisService, useValue: redis },
@@ -147,7 +159,12 @@ describe('S3 : séparation ticket MFA / jeton d’accès (HTTP)', () => {
       code: generateTotpCode(mfaSecret),
     });
     expect(first.status).toBe(201);
-    const { accessToken } = await first.json();
+    const accessToken = first.headers
+      .getSetCookie()
+      .find((c) => c.startsWith('accessToken='))!
+      .split(';')[0]
+      .slice('accessToken='.length);
+    expect((await first.clone().json()).accessToken).toBeUndefined();
     expect((await getProtected(accessToken)).status).toBe(200);
 
     const replay = await postJson('/auth/mfa/challenge', {
@@ -186,7 +203,7 @@ describe('S3 : séparation ticket MFA / jeton d’accès (HTTP)', () => {
           postJson('/auth/login', { email: 'victime@corp.com', passwordRaw: 'MotDePasse!2026' }),
         );
         expect(res.status).toBe(503);
-        expect(elapsed).toBeLessThan(2500);
+        expect(elapsed).toBeLessThan(MAX_RESPONSE_MS);
         expect(body.mfaTicket).toBeUndefined();
         expect(body.accessToken).toBeUndefined();
       },
@@ -201,10 +218,23 @@ describe('S3 : séparation ticket MFA / jeton d’accès (HTTP)', () => {
           postJson('/auth/mfa/challenge', { mfaTicket: ticket, code: generateTotpCode(mfaSecret) }),
         );
         expect(res.status).toBe(503);
-        expect(elapsed).toBeLessThan(2500);
+        expect(elapsed).toBeLessThan(MAX_RESPONSE_MS);
         expect(body.accessToken).toBeUndefined();
         expect(res.headers.get('set-cookie')).toBeNull();
       },
     );
+  });
+
+  // S6 : corps validés (DTO) sur le challenge
+  describe('validation du corps du challenge', () => {
+    it.each([
+      ['code non numérique', { mfaTicket: 't', code: 'abcdef' }],
+      ['code de 5 chiffres', { mfaTicket: 't', code: '12345' }],
+      ['champ inattendu', { mfaTicket: 't', code: '123456', admin: true }],
+      ['ticket manquant', { code: '123456' }],
+    ])('%s : 400 avant toute consommation du ticket', async (_label, body) => {
+      const res = await postJson('/auth/mfa/challenge', body);
+      expect(res.status).toBe(400);
+    });
   });
 });

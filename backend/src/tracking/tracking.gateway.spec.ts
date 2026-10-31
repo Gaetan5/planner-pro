@@ -8,6 +8,8 @@ import { AiService } from '../projects/ai.service';
 import { ProjectPermissionsService } from '../projects/project-permissions.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TokenService } from '../auth/token.service';
+import { SessionService } from '../auth/session.service';
+import { STUB_SID, sessionServiceStub } from '../../tests/support/session.test-support';
 import { Socket } from 'socket.io';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 
@@ -47,6 +49,11 @@ describe('TrackingGateway', () => {
         { provide: TrackingService, useValue: mockTrackingService },
         { provide: JwtService, useValue: realJwtService },
         TokenService,
+        {
+          provide: SessionService,
+          useFactory: (tokens: TokenService) => sessionServiceStub(tokens),
+          inject: [TokenService],
+        },
         { provide: AiService, useValue: mockAiService },
         { provide: ProjectPermissionsService, useValue: mockProjectPermissionsService },
         { provide: PrismaService, useValue: mockPrismaService },

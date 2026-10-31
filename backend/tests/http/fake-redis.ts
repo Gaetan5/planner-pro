@@ -3,6 +3,9 @@
  */
 export class FakeRedisService {
   readonly store = new Map<string, string>();
+  /** TTL (en secondes) demandés à chaque écriture : permet de vérifier les caches bornés. */
+  readonly ttls: Array<{ key: string; ttl?: number }> = [];
+  private readonly expiries = new Map<string, number>();
   /** 'reject' : chaque commande échoue ; 'hang' : chaque commande reste sans réponse. */
   mode: 'ok' | 'reject' | 'hang' = 'ok';
 
@@ -13,16 +16,25 @@ export class FakeRedisService {
 
   async get(key: string): Promise<string | null> {
     await this.availability();
+    const expiry = this.expiries.get(key);
+    if (expiry !== undefined && Date.now() >= expiry) {
+      this.store.delete(key);
+      this.expiries.delete(key);
+    }
     return this.store.has(key) ? (this.store.get(key) as string) : null;
   }
 
-  async set(key: string, value: string): Promise<void> {
+  async set(key: string, value: string, ttlSeconds?: number): Promise<void> {
     await this.availability();
     this.store.set(key, value);
+    this.ttls.push({ key, ttl: ttlSeconds });
+    if (ttlSeconds) this.expiries.set(key, Date.now() + ttlSeconds * 1000);
+    else this.expiries.delete(key);
   }
 
   async del(key: string): Promise<number> {
     await this.availability();
+    this.expiries.delete(key);
     return this.store.delete(key) ? 1 : 0;
   }
 

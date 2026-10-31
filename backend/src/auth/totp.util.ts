@@ -95,17 +95,19 @@ export function generateTotpCode(
 }
 
 /**
- * Vérifie un code TOTP avec tolérance d'horloge (fenêtre de ±1 step = ±30s)
+ * Vérifie un code TOTP avec tolérance d'horloge (fenêtre de ±1 step = ±30s) et renvoie le pas de
+ * temps (compteur RFC 6238) qui correspond, ou null. Le pas permet l'anti-rejeu (S6) : l'appelant
+ * mémorise le dernier pas accepté et refuse tout pas inférieur ou égal.
  */
-export function verifyTotpCode(
+export function verifyTotpStep(
   secretBase32: string,
   token: string,
   window = 1,
   timestampMs = Date.now(),
   stepSeconds = 30,
-): boolean {
+): number | null {
   if (!secretBase32 || !token || token.length !== 6) {
-    return false;
+    return null;
   }
 
   const cleanToken = token.trim();
@@ -118,11 +120,25 @@ export function verifyTotpCode(
         Buffer.from(expected) as unknown as NodeJS.ArrayBufferView,
       )
     ) {
-      return true;
+      return Math.floor(testTime / 1000 / stepSeconds);
     }
   }
 
-  return false;
+  return null;
+}
+
+/**
+ * Vérifie un code TOTP avec tolérance d'horloge (fenêtre de ±1 step = ±30s).
+ * Sans anti-rejeu : utiliser `verifyTotpStep` pour les contrôles d'authentification.
+ */
+export function verifyTotpCode(
+  secretBase32: string,
+  token: string,
+  window = 1,
+  timestampMs = Date.now(),
+  stepSeconds = 30,
+): boolean {
+  return verifyTotpStep(secretBase32, token, window, timestampMs, stepSeconds) !== null;
 }
 
 /**

@@ -7,6 +7,14 @@
 export const LOCAL_ENVIRONMENTS = ['development', 'test'];
 export const LOCAL_DEFAULT_DATABASE_URL = 'mysql://root:root_password@localhost:3306/planner_pro';
 
+/**
+ * Seul le développement retombe sur le DSN root local (A7) : en test, un repli viserait la base de
+ * développement de la machine. Les tests fixent `DATABASE_URL` (tests/support/jest-env.ts).
+ */
+export function allowsLocalDsnFallback(env: NodeJS.ProcessEnv): boolean {
+  return env.NODE_ENV === 'development';
+}
+
 export function isLocalEnvironment(env: NodeJS.ProcessEnv): boolean {
   return LOCAL_ENVIRONMENTS.includes(env.NODE_ENV ?? '');
 }
@@ -20,7 +28,7 @@ export function isLocalEnvironment(env: NodeJS.ProcessEnv): boolean {
  */
 export function resolveCliDatasourceUrl(env: NodeJS.ProcessEnv): string | undefined {
   const rawUrl =
-    env.DATABASE_URL || (isLocalEnvironment(env) ? LOCAL_DEFAULT_DATABASE_URL : undefined);
+    env.DATABASE_URL || (allowsLocalDsnFallback(env) ? LOCAL_DEFAULT_DATABASE_URL : undefined);
   if (!rawUrl || env.DATABASE_SSL !== 'true') {
     return rawUrl;
   }
