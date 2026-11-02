@@ -38,6 +38,12 @@ export class FakeRedisService {
     return this.store.delete(key) ? 1 : 0;
   }
 
+  async getAndDelete(key: string): Promise<string | null> {
+    const value = await this.get(key);
+    await this.del(key);
+    return value;
+  }
+
   async incrementWithTtl(key: string): Promise<number> {
     await this.availability();
     const next = Number(this.store.get(key) ?? '0') + 1;

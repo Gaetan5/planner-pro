@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   ConflictException,
   BadRequestException,
@@ -10,13 +11,16 @@ import {
   ScimUserResource,
   ScimListResponse,
   CreateScimUserDto,
-  ScimPatchRequest,
+  CreateScimKeyDto,
+  ScimPatchRequestDto,
 } from './scim.dto';
 import { WorkspaceRole } from '@prisma/client';
 import * as crypto from 'crypto';
 
 @Injectable()
 export class ScimService {
+  private readonly logger = new Logger('ScimAudit');
+
   constructor(private readonly prisma: PrismaService) {}
 
   /**
@@ -126,26 +130,49 @@ export class ScimService {
   }
 
   /**
-   * Liste paginée des utilisateurs du workspace pour SCIM 2.0
+   * Liste paginée des utilisateurs du workspace pour SCIM 2.0. Seul le filtre
+   * `userName eq "<adresse>"` est pris en charge (RFC 7644 §3.4.2.2) ; tout autre filtre : 400.
    */
   async listUsers(
     workspaceId: string,
     startIndex = 1,
     count = 100,
+    filter?: string,
   ): Promise<ScimListResponse<ScimUserResource>> {
-    const skip = Math.max(0, startIndex - 1);
-    const take = Math.min(100, Math.max(1, count));
+    const start = Math.max(1, startIndex);
+    const skip = start - 1;
+    const take = Math.min(100, Math.max(0, count));
+
+    let where: { workspaceId: string; userId?: string } = { workspaceId };
+    if (filter) {
+      const match = /^userName\s+eq\s+"([^"]{1,254})"$/i.exec(filter.trim());
+      if (!match) {
+        throw new BadRequestException(
+          this.scimError(
+            400,
+            'Seul le filtre userName eq "…" est pris en charge.',
+            'invalidFilter',
+          ),
+        );
+      }
+      const target = await this.prisma.user.findUnique({
+        where: { email: match[1].toLowerCase().trim() },
+        select: { id: true },
+      });
+      // Aucun utilisateur de ce nom : liste vide (jamais d'information sur un compte hors workspace)
+      where = { workspaceId, userId: target?.id ?? '' };
+    }
 
     const [memberships, total] = await Promise.all([
-      this.prisma.membership.findMany({
-        where: { workspaceId },
-        include: { user: true },
-        skip,
-        take,
-      }),
-      this.prisma.membership.count({
-        where: { workspaceId },
-      }),
+      take === 0
+        ? Promise.resolve([])
+        : this.prisma.membership.findMany({
+            where,
+            include: { user: true },
+            skip,
+            take,
+          }),
+      this.prisma.membership.count({ where }),
     ]);
 
     const resources = memberships.map((m) => this.mapToScimUser(m.user, true));
@@ -153,7 +180,7 @@ export class ScimService {
     return {
       schemas: ['urn:ietf:params:scim:api:messages:2.0:ListResponse'],
       totalResults: total,
-      startIndex,
+      startIndex: start,
       itemsPerPage: resources.length,
       Resources: resources,
     };
@@ -169,8 +196,9 @@ export class ScimService {
 
   /**
    * Provisionne un nouvel utilisateur via SCIM 2.0.
-   * Un e-mail déjà connu de la plateforme n'est jamais rattaché silencieusement (409) : la preuve
-   * de propriété du domaine arrive en Phase 2 (S10).
+   * L'adresse doit appartenir au domaine VÉRIFIÉ (DNS) du workspace (S10/S11) : un administrateur
+   * ne peut pas provisionner des comptes sur le domaine d'une autre organisation. Un e-mail déjà
+   * connu de la plateforme n'est jamais rattaché silencieusement (409).
    */
   async createUser(workspaceId: string, dto: CreateScimUserDto): Promise<ScimUserResource> {
     const email = (dto.emails?.[0]?.value || dto.userName || '').toLowerCase().trim();
@@ -178,6 +206,19 @@ export class ScimService {
     if (!email) {
       throw new BadRequestException(
         "Une adresse e-mail est obligatoire pour provisionner l'utilisateur.",
+      );
+    }
+
+    const config = await this.prisma.sSOConfiguration.findUnique({ where: { workspaceId } });
+    const domain = email.split('@')[1];
+    // Source de vérité unique : verifiedDomain, posé seulement par la preuve DNS (S10-h)
+    if (!config?.verifiedDomain || !domain || domain !== config.verifiedDomain) {
+      throw new ForbiddenException(
+        this.scimError(
+          403,
+          "L'adresse doit appartenir au domaine vérifié de l'organisation.",
+          'invalidValue',
+        ),
       );
     }
 
@@ -219,6 +260,17 @@ export class ScimService {
     }
   }
 
+  /** Adresses portées par une valeur de PATCH : chaîne, `{ value }` ou tableau de ces formes. */
+  private emailValues(input: unknown): string[] {
+    if (typeof input === 'string') return [input];
+    if (Array.isArray(input)) return input.flatMap((item) => this.emailValues(item));
+    if (input && typeof input === 'object') {
+      const value = (input as { value?: unknown }).value;
+      return typeof value === 'string' ? [value] : [];
+    }
+    return [];
+  }
+
   /**
    * Met à jour un utilisateur via SCIM (PUT).
    * Seuls le nom (comptes provisionnés par ce workspace) et l'état actif dans le workspace changent.
@@ -257,7 +309,7 @@ export class ScimService {
   async patchUser(
     workspaceId: string,
     userId: string,
-    patchRequest: ScimPatchRequest,
+    patchRequest: ScimPatchRequestDto,
   ): Promise<ScimUserResource> {
     const { user, membership, provisionedHere } = await this.resolveScimUser(workspaceId, userId);
 
@@ -273,11 +325,18 @@ export class ScimService {
       if (path === 'displayname' || op.value?.displayName) {
         nameUpdate = path === 'displayname' ? String(op.value) : String(op.value?.displayName);
       }
-      if (path === 'username' || path.startsWith('emails') || op.value?.userName) {
+      if (path === 'username' || op.value?.userName) {
         this.assertEmailUnchanged(
           user.email,
           path === 'username' ? String(op.value) : op.value?.userName,
         );
+      }
+      // emails[...] : chaîne, objet ou tableau ; toute adresse différente est refusée (S11)
+      if (path.startsWith('emails') || op.value?.emails !== undefined) {
+        const candidates = path.startsWith('emails') ? op.value : op.value?.emails;
+        for (const requested of this.emailValues(candidates)) {
+          this.assertEmailUnchanged(user.email, requested);
+        }
       }
     }
 
@@ -342,24 +401,31 @@ export class ScimService {
 
   // --- Gestion des Clés API SCIM pour les Administrateurs de Workspace ---
 
-  async createApiKey(workspaceId: string, userId: string, name: string) {
+  async createApiKey(workspaceId: string, userId: string, dto: CreateScimKeyDto) {
     await this.verifyWorkspaceAdmin(workspaceId, userId);
 
     const rawToken = `scim_live_${crypto.randomBytes(24).toString('hex')}`;
     const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+    // Expiration par défaut de 365 jours : une clé SCIM ne doit pas être éternelle (S11)
+    const expiresAt = new Date(Date.now() + (dto.expiresInDays ?? 365) * 24 * 3600 * 1000);
 
     const record = await this.prisma.sCIMApiKey.create({
       data: {
         workspaceId,
-        name: name.trim() || 'Clé SCIM Entra/Okta',
+        name: dto.name.trim(),
         tokenHash,
+        expiresAt,
       },
     });
+    this.logger.log(
+      JSON.stringify({ event: 'SCIM_KEY_CREATED', workspaceId, keyId: record.id, actorId: userId }),
+    );
 
     return {
       id: record.id,
       name: record.name,
       createdAt: record.createdAt,
+      expiresAt: record.expiresAt,
       // La clé brute n'est retournée qu'une seule fois à la création
       apiKey: rawToken,
     };
@@ -393,6 +459,9 @@ export class ScimService {
     if (result.count === 0) {
       throw new NotFoundException('Clé API SCIM introuvable dans cet espace.');
     }
+    this.logger.log(
+      JSON.stringify({ event: 'SCIM_KEY_REVOKED', workspaceId, keyId, actorId: userId }),
+    );
     return { id: keyId, revokedAt };
   }
 

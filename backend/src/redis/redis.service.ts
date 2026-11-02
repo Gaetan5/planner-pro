@@ -58,6 +58,13 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Lit puis supprime une clé en une opération atomique (jeton à usage unique : `state` SSO).
+   */
+  async getAndDelete(key: string): Promise<string | null> {
+    return this.redisClient.getdel(key);
+  }
+
+  /**
    * Incrémente atomiquement un compteur et fixe son TTL (en secondes) à la création.
    */
   async incrementWithTtl(key: string, ttlSeconds: number): Promise<number> {

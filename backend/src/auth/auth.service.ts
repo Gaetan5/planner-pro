@@ -184,18 +184,19 @@ export class AuthService {
 
   /**
    * `enforceSSO` : le domaine de l'e-mail exige le SSO. Appliqué seulement si la fonctionnalité
-   * SSO est active (P3) : tant que la propriété du domaine n'est pas prouvée (S10, Phase 2), un
+   * SSO est active (P3) ET si la propriété du domaine est prouvée par DNS (S10) : sinon, un
    * `enforceSSO` posé par un tiers permettrait de verrouiller les comptes d'une autre organisation.
    */
-  private async assertSsoNotEnforced(email: string): Promise<void> {
+  async assertSsoNotEnforced(email: string): Promise<void> {
     if (!isFeatureEnabled('SSO')) return;
     const domain = email.split('@')[1]?.toLowerCase();
     if (!domain) return;
-    const enforced = await this.prisma.sSOConfiguration.findFirst({
-      where: { domain, enabled: true, enforceSSO: true },
-      select: { id: true },
+    // Source de vérité unique : verifiedDomain (unique), posé seulement par la preuve DNS (S10-h)
+    const config = await this.prisma.sSOConfiguration.findUnique({
+      where: { verifiedDomain: domain },
+      select: { enabled: true, enforceSSO: true },
     });
-    if (enforced) {
+    if (config?.enabled && config.enforceSSO) {
       throw new ForbiddenException(
         'Votre organisation impose la connexion SSO. Utilisez « SSO Entreprise ».',
       );
@@ -237,6 +238,7 @@ export class AuthService {
           'Un compte existe déjà avec cette adresse e-mail. Connectez-vous avec votre méthode habituelle (ou « Mot de passe oublié » si vous n’avez pas finalisé votre inscription), puis liez votre compte Firebase depuis votre profil.',
         );
       } else {
+        await this.assertSsoNotEnforced(email);
         const name = identity.name || suppliedName?.trim() || email.split('@')[0];
         user = await this.prisma.$transaction(async (transaction) => {
           const createdUser = await transaction.user.create({
@@ -385,6 +387,9 @@ export class AuthService {
           'Un compte existe déjà avec cette adresse e-mail. Connectez-vous avec votre méthode habituelle (ou « Mot de passe oublié » si vous n’avez pas finalisé votre inscription), puis liez votre compte GitHub depuis votre profil.',
         );
       }
+      // Aucune création de compte pour un domaine qui impose le SSO : sinon un compte serait
+      // créé puis refusé par completeLogin (S10)
+      await this.assertSsoNotEnforced(primaryVerifiedEmail);
       user = await this.prisma.user.create({
         data: {
           email: primaryVerifiedEmail,

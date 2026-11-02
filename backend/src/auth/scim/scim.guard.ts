@@ -1,17 +1,46 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  CanActivate,
+  ExecutionContext,
+  Injectable,
+  Logger,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import * as crypto from 'crypto';
 
 @Injectable()
 export class ScimAuthGuard implements CanActivate {
+  private readonly logger = new Logger('ScimAudit');
+
   constructor(private readonly prisma: PrismaService) {}
+
+  private fail(
+    request: {
+      method?: string;
+      url?: string;
+      route?: { path?: string };
+    },
+    reason: string,
+  ): never {
+    this.logger.warn(
+      JSON.stringify({
+        event: 'SCIM_OPERATION',
+        method: request.method,
+        route: request.route?.path || request.url,
+        outcome: 'failure',
+        status: 401,
+        reason,
+      }),
+    );
+    throw new UnauthorizedException(reason);
+  }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
     const authHeader = request.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      throw new UnauthorizedException('Authentification Bearer SCIM requise.');
+      this.fail(request, 'Authentification Bearer SCIM requise.');
     }
 
     const token = authHeader.substring(7).trim();
@@ -23,15 +52,15 @@ export class ScimAuthGuard implements CanActivate {
     });
 
     if (!apiKey) {
-      throw new UnauthorizedException('Clé API SCIM invalide.');
+      this.fail(request, 'Clé API SCIM invalide.');
     }
 
     if (apiKey.revokedAt) {
-      throw new UnauthorizedException('Cette clé API SCIM a été révoquée.');
+      this.fail(request, 'Cette clé API SCIM a été révoquée.');
     }
 
     if (apiKey.expiresAt && apiKey.expiresAt < new Date()) {
-      throw new UnauthorizedException('Cette clé API SCIM a expiré.');
+      this.fail(request, 'Cette clé API SCIM a expiré.');
     }
 
     // Mise à jour de lastUsedAt en arrière-plan

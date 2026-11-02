@@ -1,4 +1,6 @@
-import { INestApplication, ModuleMetadata, ValidationPipe } from '@nestjs/common';
+import { INestApplication, ModuleMetadata } from '@nestjs/common';
+import { AppValidationPipe } from '../../src/common/app-validation.pipe';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import * as cookieParser from 'cookie-parser';
 import { originCheckMiddleware } from '../../src/auth/origin-guard';
@@ -26,11 +28,12 @@ export async function startHttpTestApp(
       'Test HTTP interdit : un vrai PrismaService est instancié. Fournir un faux Prisma (tests/http/fake-prisma.ts).',
     );
   }
-  const app = moduleRef.createNestApplication({ logger: false });
+  const app = moduleRef.createNestApplication<NestExpressApplication>({ logger: false });
+  app.useBodyParser('json', { type: ['application/json', 'application/scim+json'] });
   app.use(cookieParser());
   app.use(originCheckMiddleware());
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }));
+  app.useGlobalPipes(new AppValidationPipe());
   await app.listen(0, '127.0.0.1');
-  const address = app.getHttpServer().address();
+  const address = app.getHttpServer().address() as { port: number };
   return { app, baseUrl: `http://127.0.0.1:${address.port}` };
 }

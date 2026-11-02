@@ -47,6 +47,10 @@ export function matches(row: Row, where: Row | undefined): boolean {
     if (key === 'OR') return (expected as Row[]).some((w) => matches(row, w));
     if (key === 'AND') return (expected as Row[]).every((w) => matches(row, w));
     if (key === 'NOT') return !matches(row, expected as Row);
+    // Clé composite Prisma (ex. workspaceId_userId : { workspaceId, userId })
+    if (key.includes('_') && !(key in row) && expected !== null && typeof expected === 'object') {
+      return matches(row, expected as Row);
+    }
     return matchValue(row[key], expected);
   });
 }
@@ -100,10 +104,15 @@ export class FakeTable {
     where,
     select,
     orderBy,
+    skip,
+    take,
   }: {
     where?: Row;
     select?: Record<string, boolean>;
     orderBy?: Record<string, 'asc' | 'desc'>;
+    skip?: number;
+    take?: number;
+    include?: unknown;
   } = {}) {
     let found = this.rows.filter((r) => matches(r, where));
     if (orderBy) {
@@ -113,6 +122,9 @@ export class FakeTable {
         const bv = b[key] as number | Date;
         return (av > bv ? 1 : av < bv ? -1 : 0) * (dir === 'desc' ? -1 : 1);
       });
+    }
+    if (skip !== undefined || take !== undefined) {
+      found = found.slice(skip ?? 0, take === undefined ? undefined : (skip ?? 0) + take);
     }
     return found.map((r) => this.project(r, select));
   }
@@ -181,7 +193,7 @@ export class FakePrisma {
       emailVerifiedAt: new Date(),
       name: null,
     }),
-    ['id', 'email', 'firebaseUid', 'githubId'],
+    ['id', 'email', 'firebaseUid', 'githubId', 'ssoUid'],
   );
   refreshToken = new FakeTable(
     () => ({ revokedAt: null, rotatedAt: null, userAgent: null }),
@@ -189,12 +201,51 @@ export class FakePrisma {
   );
   authToken = new FakeTable(() => ({ usedAt: null }), ['id', 'tokenHash']);
   mfaRecoveryCode = new FakeTable(() => ({ usedAt: null }), ['id']);
-  sSOConfiguration = new FakeTable();
+  sSOConfiguration = new FakeTable(
+    () => ({
+      domainVerificationToken: null,
+      domainVerifiedAt: null,
+      verifiedDomain: null,
+      enforceSSO: false,
+      autoProvision: true,
+      enabled: false,
+      defaultRole: 'MEMBER',
+    }),
+    ['id', 'workspaceId', 'verifiedDomain'],
+  );
+  sCIMApiKey = new FakeTable(
+    () => ({ revokedAt: null, expiresAt: null, lastUsedAt: null }),
+    ['id', 'tokenHash'],
+  );
   membership = new FakeTable();
   workspace = new FakeTable();
   project = new FakeTable();
   task = new FakeTable();
   taskDependency = new FakeTable();
+
+  constructor() {
+    // Relations utilisées par les services SCIM (`include`) : jointures minimales
+    const listMemberships = this.membership.findMany.bind(this.membership);
+    this.membership.findMany = async (args: Parameters<FakeTable['findMany']>[0] = {}) => {
+      const rows = (await listMemberships(args)) as Row[];
+      return (args as { include?: { user?: boolean } }).include?.user
+        ? rows.map((r) => ({ ...r, user: this.user.rows.find((u) => u.id === r.userId) }))
+        : rows;
+    };
+    const findUser = this.user.findUnique.bind(this.user);
+    this.user.findUnique = async (args: Parameters<FakeTable['findUnique']>[0]) => {
+      const row = (await findUser(args)) as Row | null;
+      const include = (args as { include?: { memberships?: { where?: Row } } }).include;
+      return row && include?.memberships
+        ? {
+            ...row,
+            memberships: this.membership.rows.filter(
+              (m) => m.userId === row.id && matches(m, include.memberships?.where),
+            ),
+          }
+        : row;
+    };
+  }
 
   /** Les transactions partagent le même état : suffisant pour des tests sans concurrence. */
   async $transaction<T>(fn: (tx: FakePrisma) => Promise<T>): Promise<T> {

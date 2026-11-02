@@ -1,3 +1,4 @@
+import { DomainVerifier, OidcKeySource } from './sso/oidc';
 import { UnverifiedAccountPurgeService } from './unverified-account-purge.service';
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
@@ -12,6 +13,7 @@ import { SsoController } from './sso/sso.controller';
 import { ScimService } from './scim/scim.service';
 import { ScimController } from './scim/scim.controller';
 import { ScimAuthGuard } from './scim/scim.guard';
+import { ScimKeyThrottlerGuard } from '../common/app-throttler.guard';
 import { TokenModule } from './token.module';
 import { SessionModule } from './session.module';
 import { ACCESS_TOKEN_TTL_SECONDS } from './token.service';
@@ -44,8 +46,11 @@ import { RedisModule } from '../redis/redis.module';
     FirebaseIdentityService,
     JwtAuthGuard,
     SsoService,
+    OidcKeySource,
+    DomainVerifier,
     ScimService,
     ScimAuthGuard,
+    ScimKeyThrottlerGuard,
     UnverifiedAccountPurgeService,
   ],
   controllers: [AuthController, SsoController, ScimController],

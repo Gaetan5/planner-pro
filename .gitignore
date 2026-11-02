@@ -22,3 +22,6 @@ reprise-phase0/
 backend/tests/**/*.js
 backend/tests/**/*.d.ts
 backend/tests/**/*.js.map
+
+# Artefacts de compilation incrémentale TypeScript
+*.tsbuildinfo

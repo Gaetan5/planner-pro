@@ -8,7 +8,7 @@
 | Périmètre | `backend/` (NestJS 10, Prisma 7 / adaptateur MariaDB, MySQL 8, Socket.IO, Redis), `frontend/` (React 18 / Vite), `docker-compose*.yml`, `.github/workflows/ci.yml`, `firestore.rules` |
 | Méthode | Revue de code manuelle ligne par ligne, `pnpm audit --prod`, exécution de la suite Jest backend (32 suites, 185 tests, tous verts : **aucun ne couvre les scénarios d'attaque ci-dessous**) |
 | Statut | **Source de vérité** pour l'agent `fixeur`. Les identifiants sont stables : ne jamais renuméroter, ajouter les nouveaux constats à la suite. |
-| Révision | r3 (2026-10-30) : **Phase 0 VALIDÉE côté code** (S1, S2, S3, S4, S5, S28, P1, P3, S14 étape 1, S18 étape 0). Actions d'exploitation en attente : voir section 8 |
+| Révision | r10 (2026-11-02) : Phase 0, Phase 1 et **Phase 2 VALIDÉES côté code** (revue r10 : S10, S11 et reprises r8/r9 clos). Réactivation de `FEATURE_SSO_ENABLED` / `FEATURE_SCIM_ENABLED` soumise aux conditions d'exploitation de la section « Revue r10 ». Prochaine étape pour fixeur : Phase 3. |
 
 > Note de reconstruction : le plan de référence S1–S21 / A1–A9 / P1–P8 n'avait jamais été enregistré. La numérotation ci-dessous a été reconstruite en respectant le découpage par phase. Chaque constat a été **revérifié dans le code actuel** ; les anciens documents (`docs/audit_roadmap_phases.md`, `docs/etat_des_lieux.md`, `docs/manifeste_actions_restantes.md`) contiennent des affirmations fausses, signalées en section 1.3.
 
@@ -1216,3 +1216,465 @@ Dernières actions, qui ne bloquent pas la clôture :
 - Phases 2 à 6 : S10 à S26 sauf S14 étape 1 et S18 étapes 0 et 2 (S18 reste ouvert pour 1, 2-bis et 3) ; A1, A2, A4 à A9 (A7 partiellement avancé) ; P2, P4, P5, P7, P8.
 - Clos : S1, S2, S3, S4, S5, S6, S7, S8, S9, S27, S28, S29, A3, P1, P3, P6.
 - Prochaine étape pour fixeur : **Phase 2** (S10, puis S11).
+
+---
+
+## Revue r8 (2026-10-31) : Phase 2 (S10, S11)
+
+Revue des entrées S10 et S11 du journal, du `docs/security/runbook-phase2.md` et de la migration `20261110000000_s10_s11_sso_domain_and_scim_keys`, faite sur le code réel.
+
+### Vérifications refaites par l'architecte
+
+| Vérification | Résultat |
+| --- | --- |
+| `cd backend && npx jest` (`DATABASE_URL` injoignable) | 58/58 suites, 612/612 tests (conforme au journal) |
+| `cd frontend && npx vitest run` | 15/15 fichiers, 59/59 tests |
+| Builds backend (`env -u DATABASE_URL`) et frontend | OK |
+| `npx eslint src tests scripts` (backend) | 0 erreur, 17 avertissements antérieurs |
+| `jose@4.15.9` : intégrité | L'empreinte `sha512-1vUQX+IdDM…nEA==` de l'entrée `packages` du lockfile est **identique** à celle publiée par le registre npm (`registry.npmjs.org/jose/4.15.9`). L'entrée existait déjà (dépendance transitive). L'ajout manuel ne porte que sur l'importateur `backend` (3 lignes), cohérent avec `backend/package.json` (`"jose": "4.15.9"`, version épinglée). Le paquet installé est bien `node_modules/.pnpm/jose@4.15.9`. |
+| `jose@4.15.9` : avis de sécurité | L'API npm d'avis en masse ne renvoie **aucun avis** pour 4.15.9. Le seul avis connu de la branche 4.x (CVE-2024-28176, GHSA-hhhv-q57g-882q : déni de service par décompression JWE) est corrigé depuis 4.15.5 et ne concerne de toute façon que le JWE, non utilisé ici. Version non dépréciée. |
+| Cohérence du lockfile | `pnpm install --frozen-lockfile --lockfile-only` : OK, pas de dérive de contenu. |
+
+**Incident de revue (signalé à l'utilisateur).** Cette dernière commande a **réécrit le format** de `pnpm-lock.yaml` (`git diff --stat` : environ 9 000 lignes), malgré `--frozen-lockfile`. Le fichier commité avait été mis en forme par prettier, et pnpm 9.15.4 le réécrit dans son format natif. J'ai vérifié par analyse YAML que le nouveau fichier est **sémantiquement identique** à HEAD plus l'entrée `jose`. Ma tentative de restauration a été refusée par la politique de permissions, et je ne l'ai pas contournée. Pour revenir à l'état du fixeur (3 lignes de diff) :
+1. `git show HEAD:pnpm-lock.yaml > pnpm-lock.yaml` ;
+2. réinsérer sous `importers.backend.dependencies`, après `ioredis`, les lignes `jose:`, `specifier: 4.15.9` et `version: 4.15.9`.
+
+La version réécrite est conservée dans le bac à sable de session (`pnpm-lock.rewritten.yaml`).
+
+### S10 : SSO OIDC : **À REPRENDRE** (trois actions courtes, le cœur est conforme)
+
+Conforme, constaté dans le code :
+
+- **Signature** : `jwtVerify` avec `algorithms: ['RS256']`. HS256 et `none` sont refusés, comme le testent les cas de `sso-oidc.spec.ts`.
+- **Contrôles du jeton** : `issuer` égal à l'émetteur du tenant **configuré** ; `audience` égal au `clientId` ; `exp`, `iat` et `nbf` avec une tolérance de 60 s, plus un contrôle explicite de la présence de `exp` et `iat` ; `nonce` comparé en temps constant.
+- **Azure** :
+  - tenant GUID obligatoire, que ce soit à la configuration ou à la construction des points d'accès : `common`, `organizations` et `consumers` sont refusés ;
+  - `tid` du jeton égal au tenant ;
+  - identité `azure-ad:<tid>:<oid>`.
+- **Google** : `email_verified === true`, `hd` égal au domaine, identité `google:<sub>`.
+- **Flux** :
+  - `state` (préfixe `sso_` suivi de 32 octets), `nonce` (32 octets) et PKCE S256, stockés en Redis 10 min et consommés par `GETDEL`, donc à usage unique. Redis est en version 7, et `GETDEL` exige 6.2 ou plus.
+  - Cookie `sso_flow` (`httpOnly`, `SameSite=Lax`, `Path=/auth/sso`), comparé en temps constant au `state` **avant** toute lecture Redis, puis effacé.
+  - Le callback ne reçoit plus que `{ code, state }` (DTO strict) ; le domaine est déduit du flux serveur.
+  - La configuration est revérifiée (active et prouvée) au retour.
+- **Points d'accès** fixés dans le code. `discoveryUrl`, `entryPoint` et `cert` sont effacés, donc plus de SSRF.
+- **Liaison** :
+  - par `ssoUid`, sinon par e-mail **seulement** dans le domaine prouvé : une adresse hors domaine donne 409 sans écriture ;
+  - un compte lié à une autre identité donne 409 ;
+  - un compte suspendu est refusé **avant** l'adhésion ;
+  - la session passe par `completeLogin`, donc le MFA du compte lié reste exigé.
+- **Rôle** :
+  - `defaultRole` restreint par le DTO (`MEMBER`, `VIEWER`) ;
+  - lecture bornée : une valeur héritée `OWNER` est ramenée à `MEMBER` ;
+  - la migration ramène tout à `MEMBER`.
+- **Preuve DNS** :
+  - TXT `planner-pro-verification=<jeton de 128 bits>` sur `_planner-pro.<domaine>` ;
+  - `enabled` et `enforceSSO` refusés (400) sans preuve ;
+  - un changement de domaine remet la preuve à zéro ;
+  - la validation est conditionnelle (`updateMany` avec `domain` inchangé et `domainVerifiedAt` nul), ce qui la protège des courses.
+- **`enforceSSO`** n'est appliqué que si le drapeau est actif, `enabled` vrai et `domainVerifiedAt` non nul. La création d'un compte GitHub ou Firebase sur un domaine soumis à `enforceSSO` est refusée **avant** l'écriture (`auth.service.ts:240,391`).
+- **`clientSecret`** chiffré, masqué dans la vue d'administration, script de reprise prévu.
+
+**Actions S10 :**
+
+- **S10-a (Mineur, condition de réactivation du drapeau SSO) : destruction de la configuration d'une autre organisation.** Pour éviter le squat, `configureWorkspaceSSO` (`sso.service.ts:411-421`) **supprime** (`deleteMany`) la configuration non prouvée d'un autre workspace qui revendique le même domaine. Or n'importe qui peut créer un workspace. Un attaquant peut donc, en boucle :
+  1. effacer la configuration en cours de l'organisation légitime (son `clientId`, son secret chiffré et son jeton TXT) ;
+  2. l'obliger à tout ressaisir et à republier un nouveau TXT ;
+  3. empêcher indéfiniment la preuve, en recommençant pendant la propagation DNS.
+
+  Ce n'est pas une prise de contrôle, mais c'est un déni de service gratuit. Le fond de l'écart 2 est accepté (ne pas laisser le premier arrivé squatter), pas sa mise en œuvre. Remédiation attendue : des **revendications concurrentes, la première preuve l'emporte**, sans jamais rien supprimer.
+  - `SSOConfiguration.domain` n'est plus `@unique` ; ajouter `verifiedDomain String? @unique`, renseigné de façon atomique par `verifyDomain`. MySQL accepte plusieurs NULL dans un index unique.
+  - `findUsableConfig`, `discover`, `assertSsoNotEnforced` et le contrôle de domaine SCIM lisent `verifiedDomain`.
+  - `configureWorkspaceSSO` refuse seulement si `verifiedDomain` est déjà pris par un autre workspace.
+  - À la preuve, les revendications concurrentes non prouvées restent en place, inertes : elles ne peuvent plus être prouvées tant que le domaine est pris.
+  - **Tests** : deux workspaces revendiquent `acme.com`, aucune configuration n'est supprimée et les deux jetons TXT restent valides ; le premier qui prouve gagne ; le second reçoit 409 à la preuve ; reconfigurer depuis un tiers ne modifie pas la ligne de l'autre workspace.
+- **S10-b (Mineur, défense en profondeur) :** `audience: config.clientId || undefined` (`sso.service.ts:304`) **désactive la vérification de l'audience** si `clientId` est vide. La configuration l'exige aujourd'hui, mais une ligne héritée, réactivée sans passer par `configureWorkspaceSSO`, le contournerait. Correctif : refuser le flux (dans `getAuthorizationUrl` et `handleCallback`) si `clientId` est vide, et passer `audience: config.clientId` sans repli.
+  - **Test** : configuration active sans `clientId`, puis callback : 401, et `jwtVerify` n'est pas appelé.
+- **S10-c (Mineur, fonctionnel) :** `redirectUri()` lit `APP_URL`, une variable qui **n'existe dans aucun `.env*.example`**. Sinon, elle retombe en dur sur l'URL de production, ce qui casse le SSO en développement et en préproduction. Correctif : utiliser l'origine de `FRONTEND_URL`, comme pour GitHub (S9), puis documenter dans `runbook-phase2.md` § 4 et dans les `.env*.example`.
+  - **Test** : `FRONTEND_URL=http://localhost:3000` donne `redirect_uri=http://localhost:3000/auth/sso/callback`.
+- **Recommandations non bloquantes (Azure) :**
+  - refuser les comptes invités (`acct === 1`) ;
+  - si l'organisation configure la revendication facultative `xms_edov` (propriété du domaine de messagerie vérifiée par Microsoft), refuser `xms_edov === false`.
+
+  Le modèle actuel est accepté : seul le tenant de l'organisation qui a prouvé le domaine est cru, et son administrateur est de confiance pour son domaine. Ces deux contrôles réduisent le risque d'un attribut `mail` mal maîtrisé dans ce même tenant.
+
+**Réponses aux écarts et questions (S10) :**
+
+1. **Points d'accès IdP fixés dans le code : accepté.** C'est une surface moindre (pas de SSRF, pas d'émetteur arbitraire). La découverte dynamique ne sera nécessaire que pour `OIDC_GENERIC`, toujours refusé (S2). Ce jour-là, elle devra passer par `safeFetch` (S19) avec une liste blanche d'émetteurs.
+2. **Squat de domaine (remplacement d'une revendication non prouvée) : principe accepté, mise en œuvre refusée.** Voir S10-a.
+3. **État en Redis plus cookie, TXT sur `_planner-pro.<domaine>`, `jose` 4.x : accepté.**
+   - Le sous-domaine dédié est la pratique courante et évite d'encombrer la racine.
+   - `jose` 4.15.9 est intègre et sans avis connu. La branche 4.x ne reçoit cependant plus d'évolutions : prévoir la montée vers `jose` 6 avec A9. Node 20.19 ou plus, et 22.12 ou plus, savent charger un module ESM par `require`, ce qui lève l'obstacle CommonJS.
+4. **Limites :**
+   - **TXT non revérifié : accepté pour la réactivation**, avec une procédure manuelle au runbook (perte ou transfert du domaine : désactiver la configuration). Revérification hebdomadaire au backlog (Phase 6) : après 7 jours d'échec, couper `enforceSSO` et `autoProvision` et notifier les administrateurs.
+   - Pour les limites SCIM, voir S11.
+5. **Migration qui désactive toutes les configurations SSO, et refus du tenant Azure `common` : confirmés.**
+   - Aucune configuration existante n'a de domaine prouvé : la réactiver telle quelle rouvrirait S10.
+   - Le multi-tenant Azure exigerait une liste blanche de tenants par workspace : hors périmètre.
+6. **Liaison des comptes existants du domaine prouvé** (question b) : c'est le modèle retenu. Le MFA du compte lié reste exigé par `completeLogin`.
+
+### S11 : SCIM : **À REPRENDRE** (une action, condition de réactivation du drapeau SCIM)
+
+Conforme, constaté dans le code :
+
+- DTO en classes, avec `op` insensible à la casse, au plus 50 opérations et au plus 10 adresses ; un corps invalide donne 400 et non 500.
+- Clés : nom de 1 à 100 caractères, expiration de 365 jours par défaut et 730 au plus ; le garde contrôle `revokedAt` et `expiresAt`. La migration fixe une expiration aux clés qui n'en avaient pas.
+- Filtre `userName eq` (tout autre filtre donne 400 `invalidFilter`), pagination validée, erreurs au format `urn:ietf:params:scim:api:messages:2.0:Error`.
+- `PATCH emails[…]` qui change l'adresse : 400 `mutability`.
+- `createUser` : domaine **égal** au domaine prouvé, sinon 403 `invalidValue` (sous-domaines et suffixes trompeurs testés).
+
+**Point 5, `AppValidationPipe` : n'affaiblit pas les autres DTO.**
+- Le pipe strict garde exactement les options d'avant (`whitelist: true, forbidNonWhitelisted: true`).
+- La tolérance n'est appliquée que si le **type racine** du paramètre porte `@lenient()`, posé sur 6 DTO SCIM seulement.
+- Un DTO strict qui imbrique un DTO tolérant reste strict, ce qui va dans le sens sûr.
+- Remarque non bloquante : `Reflect.getMetadata` suit l'héritage. Une classe qui étendrait un DTO SCIM hériterait de la tolérance. Préférer `Reflect.getOwnMetadata`, avec un test : DTO non SCIM et propriété inconnue donnent 400.
+
+**Point 6, `application/scim+json` dans `main.ts` : sans effet sur S29.**
+- Ce type n'est pas « simple » au sens CORS : un `fetch` d'une autre origine déclenche une requête préalable, refusée hors `CORS_ORIGINS`.
+- Un formulaire HTML ne peut pas l'émettre.
+- `origin-guard` continue de contrôler toute requête à effet portant un cookie de session, quel que soit son type de contenu. Seul `/scim/v2/*` est exempté, et ces routes sont authentifiées par clé, jamais par cookie.
+- Les routes de gestion des clés (`/workspaces/:id/scim/keys`) sont hors exemption, donc contrôlées.
+
+**Action S11 :**
+
+- **S11-a (condition de réactivation du drapeau SCIM) : débit par clé, et non par IP.** L'écart 1 repose sur une affirmation inexacte : `@nestjs/throttler` 5.1.2, la version du projet, permet de surcharger `getTracker`. Or les principaux IdP (Entra, Okta) provisionnent depuis des **plages d'IP partagées entre tous leurs clients**. Avec 300/min par IP :
+  - la synchronisation d'un client peut épuiser le quota de tous les autres (déni de service croisé) ;
+  - une grosse synchronisation initiale est bridée.
+
+  Correctif : un garde ou une option `getTracker` qui, sur `/scim/v2/*`, suit `scim:<sha256(Authorization)>`. Le throttler global passe avant `ScimAuthGuard`, d'où l'empreinte de l'en-tête plutôt que l'identifiant de clé. Le repli par IP est conservé si l'en-tête manque.
+  - **Tests** : deux clés depuis la même IP ont des compteurs indépendants ; la 301e requête d'une même clé dans la minute donne 429 au format SCIM.
+
+**Réponses aux écarts et à la question (S11) :**
+
+- **Audit SCIM dans le journal applicatif, et non en table : accepté jusqu'à A8 (Phase 6)**, à deux conditions : journaux conservés au moins 90 jours, et lignes `ScimAudit` sans adresse (vérifié). Les échecs 401 ne sont pas audités : à ajouter dans `ScimAuthGuard` (non bloquant).
+- **`startIndex` hors borne ramené à 1 : accepté** (comportement de la RFC 7644 § 3.4.2.4).
+- **`createUser` refusé sans domaine vérifié : confirmé.** C'est la condition fixée en r2 pour réactiver SCIM. Un workspace sans SSO prouvé n'a aucune légitimité à créer des comptes dans un domaine.
+
+### Réactivation des drapeaux en fin de Phase 2
+
+**Pas encore.** Les deux restent à `false` tant que les conditions ci-dessous ne sont pas toutes remplies. Ensuite, la réactivation est **possible**, sur décision de l'utilisateur.
+
+**`FEATURE_SSO_ENABLED=true` :**
+1. S10-a, S10-b et S10-c validés en revue.
+2. Phases 0 et 1 déployées, avec leurs runbooks exécutés.
+3. `runbook-phase2.md` exécuté : migration `20261110000000`, `encrypt-sso-secrets.ts` (rapport, relecture, `--apply`, seconde passe à 0), Redis en version 6.2 ou plus.
+4. Par organisation : TXT publié, `verify-domain` passé, URL de redirection (origine de `FRONTEND_URL` + `/auth/sso/callback`) enregistrée chez l'IdP, puis réactivation.
+5. Procédure manuelle « perte du domaine » ajoutée au runbook (§ 7).
+
+**`FEATURE_SCIM_ENABLED=true` :**
+1. Toutes les conditions SSO (le domaine prouvé est un prérequis de `createUser`).
+2. S11-a validé en revue.
+3. Conservation des journaux applicatifs de 90 jours au moins (audit SCIM avant A8).
+4. Clés SCIM existantes passées en revue avec leurs propriétaires : révoquer les inutiles, l'expiration de 365 jours s'applique aux autres.
+
+Ces deux drapeaux sont indépendants de `FEATURE_IMPERSONATION_ENABLED`, qui reste désactivé jusqu'à la clôture de S18.
+
+### Synthèse r8
+
+| ID | Verdict r8 |
+| --- | --- |
+| S10 | À REPRENDRE (S10-a, S10-b, S10-c) |
+| S11 | À REPRENDRE (S11-a) |
+
+**Actions pour fixeur, dans l'ordre :**
+
+1. S10-b : `audience` sans repli ; refus si `clientId` est vide.
+2. S10-c : `redirect_uri` dérivé de `FRONTEND_URL`, documenté.
+3. S10-a : revendications concurrentes, avec `verifiedDomain` unique et sans suppression.
+4. S11-a : débit SCIM par clé.
+5. Non bloquants :
+   - `getOwnMetadata` dans le pipe ;
+   - audit des 401 SCIM ;
+   - contrôles Azure `acct` et `xms_edov` ;
+   - procédure « perte du domaine » au runbook.
+
+**Constats ouverts à la fin de r8 :**
+
+- Phase 2 : S10, S11 (actions ci-dessus).
+- Phase 1 : P9 (produit).
+- Phases 3 à 6 : S12 à S26 sauf S14 étape 1 et S18 étapes 0 et 2 ; A1, A2, A4 à A9 ; P2, P4, P5, P7, P8.
+- Clos : S1 à S9, S27, S28, S29, A3, P1, P3, P6.
+
+---
+
+## Revue r9 — Phase 2 : NON VALIDÉ (2026-11-02)
+
+Revue du travail non commité de la branche `security/phase-0` (HEAD `c5f1391`), faite sur le code réel. Détail des vérifications : `docs/security/revue-phase2.md`.
+
+### Vérifications refaites par l'architecte
+
+| Commande | Résultat |
+| --- | --- |
+| `cd backend && env -u DATABASE_URL npx jest` | 59/59 suites, 616/616 tests passés |
+| `cd backend && env -u DATABASE_URL npx nest build` ; `npx tsc --noEmit -p tsconfig.build.json` | OK ; 0 erreur |
+| `cd backend && npx tsc --noEmit -p tsconfig.json` | 1 erreur TS6059, antérieure à la Phase 2 (`tests/support/session.test-support.ts` hors `rootDir`) |
+| `cd backend && npx eslint src tests scripts` | 0 erreur, 17 avertissements |
+| `cd frontend && npx vitest run` ; `tsc` ; `eslint src` ; `vite build` | 15/15 fichiers, 59/59 tests ; OK ; 0 erreur ; OK |
+| Script `tsx` sur `resolveThrottlerTracker` | `/auth/login?x=/scim/v2` avec un `Authorization` différent produit un compteur différent à chaque requête : S11-b confirmé |
+
+Les suites sont vertes, mais elles ne couvrent ni les critères d'acceptation r8 de S10-a, S10-b et S10-c, ni l'abus S11-b. Le test de S10-a exige même le comportement refusé.
+
+### Statut des actions r8
+
+| ID | Statut r9 | Motif |
+| --- | --- | --- |
+| S10 (cœur) | Conforme | Validation de l'`id_token`, flux `state`/nonce/PKCE, preuve DNS, rôle borné, secret chiffré, `enforceSSO` : vérifiés dans le code. Clôture conditionnée aux actions ci-dessous. |
+| S10-a | **NON CORRIGÉ** | `sso.service.ts:431-447` exécute toujours `deleteMany` sur la configuration non prouvée d'un autre workspace. `tests/unit/auth/sso-oidc.spec.ts:486-499` exige cette suppression. Le journal, `GEMINI.md` et le DAT § 15 affirment le contraire. |
+| S10-b | **À REPRENDRE (test manquant)** | Code conforme (`sso.service.ts:150-154,209-214,318-326`) ; le test r8 « `clientId` vide → 401, `jwtVerify` non appelé » est absent. |
+| S10-c | **À REPRENDRE (doc et test)** | Code dérivé de `FRONTEND_URL` (`sso.service.ts:83-87`), mais avec des replis silencieux `APP_URL` puis `http://localhost:3000`. Le runbook § 4 (`runbook-phase2.md:52`) mentionne encore `APP_URL`. Le test (`sso-oidc.spec.ts:62`) ne règle que `APP_URL`. |
+| S11 (cœur) | Conforme | DTO, filtre, format d'erreur, mutabilité, domaine vérifié, expiration des clés, audit sans adresse. |
+| S11-a | **REMPLACÉ PAR S11-b** | Implémenté, mais introduit un contournement global de la limitation de débit. Le correctif se fait sous l'identifiant S11-b. |
+| Non-bloquants r8 | Partiel | `getOwnMetadata` : fait. Audit des 401 SCIM : fait. Contrôles Azure `acct`/`xms_edov` : non faits (S10-i). Procédure « perte du domaine » : non faite (D1). |
+
+### Nouveaux constats r9
+
+#### S11-b : contournement global du limiteur de débit (régression introduite par S11-a)
+
+- **Sévérité** : Haute. **CVSS 7.3** `AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L`. **Bloquant.**
+- **Localisation** : `backend/src/common/app-throttler.guard.ts:22-28` ; garde global déclaré dans `backend/src/app.module.ts:44`.
+- **Cause** : le garde teste `req.originalUrl.includes('/scim/v2')`. `originalUrl` contient la query string, et le test accepte une sous-chaîne quelconque. Dans ce cas, le compteur devient `scim:<sha256(Authorization)>`, un en-tête choisi par le client et jamais authentifié : le garde global passe avant `ScimAuthGuard`.
+- **Scénario** : `POST /auth/login?x=/scim/v2` avec `Authorization: Bearer <aléa>` différent à chaque requête. Chaque requête a un compteur neuf, donc la limite de 5/min disparaît, et aucun verrou par compte n'existe pour compenser. Les autres routes sont aussi touchées : inscription de masse sur `/auth/register`, bombardement d'e-mails sur `/auth/password/*` et `/auth/email/*`, limite globale de 60/min. Sur `/scim/v2/*`, des clés aléatoires suppriment toute limite, et chaque requête coûte une lecture en base.
+- **Correction attendue** :
+  1. Décider sur le **chemin seul**, sans query string, avec un préfixe ancré : `req.path.startsWith('/scim/v2/')`.
+  2. Un en-tête non authentifié ne doit jamais retirer la limite par IP. Le garde global garde l'IP comme compteur sur toutes les routes, avec une limite IP large sur `/scim/v2/*` (par exemple 3 000/min). La limite de 300/min par clé s'applique **après** authentification, sur `scimApiKeyId`, par un garde placé après `ScimAuthGuard` (ou un second throttler nommé `scim`).
+- **Critères d'acceptation (tests à écrire, application Nest réelle, `tests/http/`)** :
+  1. 10 requêtes `POST /auth/login?x=/scim/v2` depuis la même IP, chacune avec un `Authorization` différent : la 6e reçoit 429.
+  2. Même scénario sur `POST /auth/register?x=/scim/v2` : 429 une fois la limite de la route atteinte.
+  3. `GET /scim/v2/Users` avec des clés **invalides** aléatoires depuis une même IP : 429 au-delà de la limite IP, au format SCIM.
+  4. Deux clés **valides**, même IP : compteurs indépendants. La 301e requête d'une même clé dans la minute reçoit 429 au format SCIM, et l'autre clé reçoit toujours 200 (test S11-a existant, conservé).
+  5. Tests unitaires de la fonction de suivi : `originalUrl = '/auth/login?x=/scim/v2'` donne l'IP ; `path = '/api/scim/v2x'` donne l'IP.
+
+#### S10-d : liaisons `ssoUid` héritées de l'ancien code non purgées
+
+- **Sévérité** : Moyenne en sécurité (défense en profondeur), Majeure en fonctionnel. **Bloquant** pour la validation de S10 et la réactivation du drapeau SSO.
+- **Localisation** : `backend/src/auth/sso/sso.service.ts:248-258` ; `backend/prisma/migrations/20261110000000_s10_s11_sso_domain_and_scim_keys/migration.sql` (aucun traitement de `User.ssoUid`).
+- **Cause** : l'ancien code posait `azure-ad:<oid|sub>` ou `google:<sub>` à partir d'un `id_token` non vérifié. Le nouveau code ne reconnaît plus le format Azure hérité. Il croit aussi toute liaison existante sans revérifier le domaine du compte trouvé par `ssoUid`.
+- **Scénarios** :
+  - Panne : tout utilisateur Azure déjà lié (`azure-ad:<oid>`) reçoit 409 « déjà lié à une autre identité » à sa première connexion. Un compte sans mot de passe n'a alors plus aucun accès.
+  - Sécurité : une liaison posée par l'ancienne faille (nOAuth) au format `google:<sub>` reste utilisable. Le chemin « trouvé par `ssoUid` » ne contrôle pas que `user.email` appartient au domaine prouvé.
+- **Correction attendue** :
+  1. Script de reprise `backend/scripts/reset-legacy-sso-uids.ts`, sur le modèle de `encrypt-sso-secrets.ts` : rapport CSV sans donnée sensible, puis `--apply`, idempotent. Il met `ssoUid = NULL` pour toutes les valeurs posées avant la Phase 2. Le script n'est pas exécuté contre une base réelle et il est documenté au runbook. Une migration SQL est acceptable à la place si elle est documentée de la même façon.
+  2. Dans `handleCallback`, un compte trouvé par `ssoUid` doit vérifier `extractDomain(user.email) === ssoConfig.verifiedDomain`, sinon 409 sans session ni écriture.
+- **Critères d'acceptation (tests)** :
+  1. Un compte `ssoUid = 'azure-ad:<oid>'`, après le script, se connecte par SSO Azure : session émise, et `ssoUid` devient `azure-ad:<tid>:<oid>`.
+  2. Un compte `x@autre.com` portant le `ssoUid` présenté par une configuration `acme.com` : 409, aucune session, aucune adhésion créée.
+  3. Tests du script : le mode rapport n'écrit rien, `--apply` remet à NULL, une seconde passe annonce 0.
+
+#### S10-e : changement de fournisseur, de tenant ou de client sans nouvelle preuve
+
+- **Sévérité** : Moyenne. Non bloquant pour la validation, mais **condition de réactivation** du drapeau SSO.
+- **Localisation** : `backend/src/auth/sso/sso.service.ts:449-485`.
+- **Scénario** : sur un domaine déjà prouvé et actif, un ADMIN (pas seulement l'OWNER), malveillant ou compromis, remplace `issuer` par son propre tenant Azure. Il se fait ensuite lier tout compte non lié du domaine, sous réserve du MFA du compte.
+- **Correction attendue** : changer `provider`, `issuer` ou `clientId` d'une configuration active la remet à `enabled=false` et `enforceSSO=false`. Seul l'OWNER peut faire cette modification. Elle est journalisée (ligne structurée `SSO_CONFIG_IDP_CHANGED`, sans secret).
+- **Critères d'acceptation (tests)** :
+  1. Un ADMIN qui change `issuer` : 403.
+  2. L'OWNER qui change `issuer` : 200, `enabled=false`, `domainVerifiedAt` conservé.
+  3. Une modification de `defaultRole` seule ne désactive pas la configuration.
+
+#### S10-f : appels IdP sans délai maximal et erreurs en 500
+
+- **Sévérité** : Basse.
+- **Localisation** : `backend/src/auth/sso/sso.service.ts:218-235` (`fetch`, `tokenRes.json()`) ; `:89-93` (`decrypt`) ; `:535-545` (`updateMany` dans `verifyDomain`).
+- **Correction attendue** :
+  - `fetch` avec `signal: AbortSignal.timeout(5000)` : un délai dépassé ou une erreur réseau donne 503 ;
+  - un JSON invalide de l'IdP donne 401 ;
+  - un échec de `decrypt` donne 503, avec un journal qui ne contient jamais le secret ;
+  - dans `verifyDomain`, une erreur Prisma `P2002` (course sur `verifiedDomain`) donne 409.
+- **Critères d'acceptation (tests)** : un test par cas ci-dessus, aucun ne renvoie 500.
+
+#### S10-g : index et retour arrière de la migration
+
+- **Sévérité** : Basse.
+- **Localisation** : `migration.sql:6` (`DROP INDEX SSOConfiguration_domain_key` sans remplacement) ; `docs/security/runbook-phase2.md` § 6.
+- **Correction attendue** :
+  - ajouter `@@index([domain])` au schéma et à la migration, qui n'a encore été appliquée nulle part : la modifier est donc permis ;
+  - documenter au § 6 le SQL de retour arrière : dédoublonner `domain`, recréer l'index unique, supprimer les colonnes.
+- **Critère d'acceptation** : `prisma migrate diff` entre le schéma et les migrations est vide. Le runbook contient le SQL de retour arrière.
+
+#### S10-h : deux sources de vérité pour le domaine prouvé
+
+- **Sévérité** : Basse.
+- **Localisation** : `backend/src/auth/auth.service.ts:195` (`assertSsoNotEnforced`) ; `backend/src/auth/scim/scim.service.ts:214` (`createUser`).
+- **Correction attendue** : lire `verifiedDomain` (comme le demandait r8) plutôt que `domain` + `domainVerifiedAt`.
+- **Critères d'acceptation (tests)** :
+  1. Deux configurations revendiquent `acme.com`, seule celle de ws-1 est prouvée : `enforceSSO` ne s'applique que par ws-1.
+  2. SCIM `createUser` d'ws-2 (non prouvé) sur `acme.com` : 403.
+
+#### S10-i : contrôles Azure et journalisation des échecs SSO
+
+- **Sévérité** : Basse.
+- **Localisation** : `backend/src/auth/sso/sso.service.ts:348-356`, `:192-310`.
+- **Correction attendue** :
+  - Azure : refuser `acct === 1` (invité) et `xms_edov === false` (revendication présente et fausse), avec 401 ;
+  - journaliser chaque échec du callback en ligne structurée `SSO_LOGIN_FAILURE` (motif, workspace s'il est connu, statut ; jamais de jeton, code, `state` ou adresse).
+- **Critères d'acceptation (tests)** :
+  1. Jeton `acct: 1` : 401.
+  2. Jeton `xms_edov: false` : 401.
+  3. `state` rejoué : une ligne `SSO_LOGIN_FAILURE` est écrite et ne contient pas la valeur du `state`.
+
+#### D1 : documents de suivi incohérents et revues « VALIDÉ » non attribuables
+
+- **Sévérité** : Moyenne (gouvernance). **Bloquant.**
+- **Localisation** :
+  - `docs/security/journal-corrections.md:1064-1080` et `:1095-1108` : deux sections « Revue architecte (2026-10-31) : VALIDÉ » qui contredisent r8 et citent un fichier inexistant (`oidc-key-source.ts`) ;
+  - `GEMINI.md` et `docs/DOSSIER_ARCHITECTURE_TECHNIQUE.md` § 15 : « S10-a, S10-b, S10-c traités » ;
+  - `docs/security/runbook-phase2.md` § 2, 4, 6 et 7.
+- **Correction attendue** : voir les consignes d'hygiène ci-dessous.
+- **Critère d'acceptation** : `grep -n "Revue architecte (2026-10-31)" docs/security/journal-corrections.md` ne renvoie rien. Aucun document ne déclare S10-a, S10-b, S10-c ou S11-b corrigé avant la revue de l'architecte.
+
+#### L1 : lockfile réécrit et artefacts de build
+
+- **Sévérité** : Basse (hygiène de livraison). **Préalable au commit.**
+- **Localisation** : `pnpm-lock.yaml` (environ 9 000 lignes de diff, incident de la revue r8) ; `backend/tsconfig.tsbuildinfo` (modifié) ; `backend/tsconfig.build.tsbuildinfo` (non suivi) ; `backend/dist/` (anciens `*.spec.js`, faute de `deleteOutDir`).
+- **Correction attendue** : voir les consignes d'hygiène ci-dessous.
+- **Critère d'acceptation** : `git diff --stat pnpm-lock.yaml` affiche 3 insertions ; `git status` ne liste aucun `*.tsbuildinfo` ; `pnpm install --frozen-lockfile` passe sans modifier le lockfile. Pour le vérifier : `git diff --stat` avant et après.
+
+### Consignes d'hygiène avant commit (obligatoires)
+
+1. **Lockfile** : `git show HEAD:pnpm-lock.yaml > pnpm-lock.yaml`, puis réinsérer à la main, sous `importers.backend.dependencies` et après `ioredis`, les trois lignes `jose:`, `specifier: 4.15.9` et `version: 4.15.9`. Résultat attendu : 3 lignes ajoutées au diff. Ne lancer aucune commande pnpm qui réécrit le fichier.
+2. **Artefacts** :
+   - ajouter `*.tsbuildinfo` à `.gitignore` ;
+   - restaurer `backend/tsconfig.tsbuildinfo` (`git checkout -- backend/tsconfig.tsbuildinfo`), puis le retirer de l'index par `git rm --cached` dans le commit, sur décision de l'utilisateur ;
+   - ajouter `"compilerOptions": { "deleteOutDir": true }` dans `backend/nest-cli.json`.
+3. **Journal** : retirer de `journal-corrections.md` les deux sections « Revue architecte (2026-10-31) : VALIDÉ » (S10, lignes 1064-1080 ; S11, lignes 1095-1108). Elles ne sont pas de l'architecte. Remettre le statut de l'entrée S10-a (r8) à `À REPRENDRE`. Ajouter une entrée par action r9 avec le statut `CORRIGÉ – À REVOIR` une fois l'action faite.
+4. **Runbook `runbook-phase2.md`** :
+   - § 2 : `verifiedDomain`, suppression de l'index unique sur `domain`, index non unique (S10-g), traitement des `ssoUid` hérités (S10-d) ;
+   - § 4 : URL de retour = origine de `FRONTEND_URL` + `/auth/sso/callback` ;
+   - § 6 : SQL de retour arrière ;
+   - § 7 : limite SCIM par clé authentifiée et par IP (S11-b) ;
+   - nouvelle procédure « perte ou transfert du domaine » : désactiver la configuration, supprimer `verifiedDomain`, prévenir les administrateurs.
+5. **`GEMINI.md` et DAT § 15** : remplacer « S10-a, S10-b, S10-c traités » par « Phase 2 : revue r9 NON VALIDÉE, actions r9 en cours ».
+6. Ne pas modifier l'en-tête de ce rapport ni le statut d'un constat : c'est le rôle de l'architecte.
+
+### Plan d'action r9 pour fixeur (ordre obligatoire)
+
+Méthode inchangée : un test d'abus qui échoue d'abord, puis le correctif minimal, puis les suites complètes, les builds et ESLint. Aucune exécution contre une base réelle, aucun commit. `FEATURE_SSO_ENABLED` et `FEATURE_SCIM_ENABLED` restent à `false`.
+
+| # | ID | Action | Terminé quand |
+| --- | --- | --- | --- |
+| 1 | S11-b | Réécrire la sélection du compteur : chemin seul, préfixe ancré ; IP toujours limitée ; 300/min par `scimApiKeyId` après `ScimAuthGuard`. | Les 5 tests S11-b passent ; un test d'abus a échoué avant le correctif (consigné au journal) ; le test d'isolation S11-a reste vert. |
+| 2 | S10-a | Supprimer le `deleteMany` de `configureWorkspaceSSO` (`sso.service.ts:431-447`) ; remplacer le test `sso-oidc.spec.ts:486-499`. | Tests : deux revendications de `acme.com` coexistent, avec deux jetons distincts et aucune ligne supprimée ; le premier `verifyDomain` réussit ; le second reçoit 409 ; une reconfiguration par ws-2 ne modifie aucun champ de la ligne de ws-1. `grep -n deleteMany src/auth/sso/sso.service.ts` ne renvoie rien. |
+| 3 | S10-d | Script de remise à NULL des `ssoUid` hérités, et contrôle du domaine du compte trouvé par `ssoUid`. | Les 3 critères S10-d passent ; script documenté au runbook ; script non exécuté contre une base réelle. |
+| 4 | S10-b | Ajouter le test : `clientId` vide sur une configuration active. | Le callback renvoie 401 et la source de clés (`OidcKeySource.getKeys`, espionnée) n'est jamais appelée ; `getAuthorizationUrl` renvoie 400. |
+| 5 | S10-c | Retirer les replis `APP_URL` et localhost en production ; écrire le test. | Test `FRONTEND_URL=http://localhost:3000` : `redirect_uri=http://localhost:3000/auth/sso/callback`. Test `NODE_ENV=production` sans `FRONTEND_URL` : erreur explicite, aucune URL en localhost. Plus aucune occurrence d'`APP_URL` dans `src/auth/sso`. |
+| 6 | S10-f | Délai maximal, 503, 401 et 409 au lieu de 500. | Un test par cas, aucun 500. |
+| 7 | S10-e | Changement d'IdP : OWNER seul, désactivation, journal. | Les 3 critères S10-e passent. |
+| 8 | S10-h | Lire `verifiedDomain` dans `assertSsoNotEnforced` et SCIM `createUser`. | Les 2 critères S10-h passent. |
+| 9 | S10-g | Ajouter `@@index([domain])` ; SQL de retour arrière au runbook. | Le critère S10-g est rempli. |
+| 10 | S10-i | Contrôles Azure `acct` et `xms_edov` ; ligne `SSO_LOGIN_FAILURE`. | Les 3 critères S10-i passent. |
+| 11 | D1, L1 | Appliquer les consignes d'hygiène 1 à 5. | Les critères D1 et L1 sont remplis. |
+| 12 | Clôture | Lancer toutes les suites et outils. | Backend : `jest` tout vert, `nest build`, `tsc -p tsconfig.build.json`, `eslint src tests scripts` sans erreur. Frontend : `vitest`, `tsc`, `eslint`, `vite build` OK. Résultats exacts consignés au journal (section « Résultats (r9) »), chaque entrée en `CORRIGÉ – À REVOIR`. |
+
+Les actions 1 à 5 et 11 sont **bloquantes** pour la validation de la Phase 2. Les actions 6 à 10 sont attendues dans la même livraison. S10-e est en plus une condition de réactivation de `FEATURE_SSO_ENABLED`.
+
+### Synthèse r9
+
+| ID | Verdict r9 |
+| --- | --- |
+| S10 | À REPRENDRE (S10-a, S10-b, S10-c, S10-d ; S10-e à S10-i) |
+| S11 | À REPRENDRE (S11-b) |
+| D1, L1 | Ouverts |
+
+**Constats ouverts à la fin de r9 :**
+
+- Phase 2 : S10 (S10-a à S10-i), S11 (S11-b), D1, L1.
+- Phase 1 : P9 (produit).
+- Phases 3 à 6 : S12 à S26 sauf S14 étape 1 et S18 étapes 0 et 2 ; A1, A2, A4 à A9 ; P2, P4, P5, P7, P8.
+- Clos : S1 à S9, S27, S28, S29, A3, P1, P3, P6.
+
+---
+
+## Revue r10 — Phase 2 : VALIDÉ (2026-11-02)
+
+Revue des entrées r9 du journal (`journal-corrections.md`, « Actions de la revue r9 » et « Résultats (r9) »). Chaque critère « terminé » du plan r9 a été vérifié dans le code, les tests et les documents. Les commandes de clôture ont été relancées par l'architecte. Une recherche active de contournements a porté sur la limitation de débit et sur la règle « compte trouvé par `ssoUid` ⇒ domaine prouvé ».
+
+### Vérifications refaites par l'architecte
+
+| Commande | Résultat |
+| --- | --- |
+| `cd backend && env -u DATABASE_URL npx jest` | **61/61 suites, 657/657 tests passés** |
+| `cd backend && env -u DATABASE_URL npx nest build` | exit 0 ; `find dist -name '*.spec.js'` : 0 (`deleteOutDir` effectif) |
+| `cd backend && npx tsc --noEmit -p tsconfig.build.json` | exit 0 |
+| `cd backend && npx tsc --noEmit -p tsconfig.json` | 1 erreur TS6059, antérieure à la Phase 2 (inchangée) |
+| `cd backend && npx eslint src tests scripts` | 0 erreur, 17 avertissements |
+| `cd backend && npx prettier --check src tests scripts` | conforme |
+| `cd backend && npx prisma validate` | schéma valide |
+| `prisma migrate diff --from-schema <schéma HEAD> --to-schema prisma/schema --script`, **sans base** | Produit exactement le DDL de la migration `20261110000000` : `DROP INDEX SSOConfiguration_domain_key`, 3 colonnes, `SSOConfiguration_verifiedDomain_key` unique, `SSOConfiguration_domain_idx`, et rien d'autre. Ce contrôle remplace la comparaison avec une base fantôme (voir la réponse sur S10-g). |
+| `cd frontend && npx vitest run` ; `tsc --noEmit -p .` ; `eslint src` ; `vite build` | 15/15 fichiers, 59/59 tests ; exit 0 ; 0 erreur (36 avertissements) ; OK |
+| `git diff --stat pnpm-lock.yaml` | 1 fichier, 3 insertions |
+| `grep -n "Revue architecte (2026-10-31)" docs/security/journal-corrections.md` | aucun résultat |
+
+Le build a de nouveau modifié `backend/tsconfig.tsbuildinfo`. L'architecte a restauré ce fichier (`git checkout --`) pour rendre l'arbre de travail dans l'état laissé par fixeur.
+
+### Statut des constats
+
+| ID | Statut r10 | Vérification |
+| --- | --- | --- |
+| **S11-b** | **CLOS** | `app-throttler.guard.ts:17-21` : le compteur global est **toujours l'IP**, sans lecture de l'URL ni de l'en-tête. `ScimKeyThrottlerGuard` (`:35-54`) s'exécute **après** `ScimAuthGuard` (`scim-http.ts`, `UseGuards(ScimAuthGuard, ScimKeyThrottlerGuard)`), compte sur `scimApiKeyId` (identifiant en base) et refuse si ce champ est absent. Les clés invalides restent bornées par la limite IP de 3 000/min et par route. `Retry-After` est en secondes, comme le renvoie le stockage du throttler en 5.1.2. Le 429 passe par `ScimExceptionFilter` (format SCIM). Tests : 3 unitaires, plus `login` et `register` avec `?x=/scim/v2` (429 à la 6e), 3 000 clés invalides (429), isolation de deux clés valides. Aucune route `@ScimEndpoint` n'échappe au garde par clé ; `ServiceProviderConfig` (publique, sans donnée) reste sous la limite IP par défaut. |
+| **S10-a** | **CLOS** | Plus aucun `deleteMany` dans `sso.service.ts`. Le refus d'un domaine prouvé par un autre workspace est conservé. Tests de revendications concurrentes présents : 2 lignes, 2 jetons, premier `verifyDomain` gagnant, second en 409, ligne de ws-1 intacte. |
+| **S10-b** | **CLOS** | Test `it.each(['', null])` : callback en 401 sans appel à `getKeys`, à `fetch` ni à `completeLogin` ; `getAuthorizationUrl` en 400. Contrôle de mutation consigné. |
+| **S10-c** | **CLOS** | `redirectUri()` (`sso.service.ts:93-103`) : plus d'`APP_URL`. Le repli sur localhost n'existe qu'hors production ; en production, 503 explicite, calculé avant l'écriture Redis. Runbook § 4 corrigé. |
+| **S10-d** | **CLOS** | `sso.service.ts:316-322` : un compte trouvé par `ssoUid` doit avoir `extractDomain(user.email) === ssoConfig.verifiedDomain`, sinon 409 avant toute écriture, adhésion ou session. Les deux chemins de liaison sont couverts. Par `ssoUid` : contrôle explicite. Par e-mail : `identity.email` est déjà contraint au domaine prouvé (l.309) et le compte trouvé porte cette adresse. `ssoUid` n'est lu nulle part ailleurs (`grep` sur `src`), et `User.ssoUid` est `@unique`. Script `reset-legacy-sso-uids.ts` : conditionnel, idempotent, CSV sans identifiant IdP, `--apply` refusé si `FEATURE_SSO_ENABLED=true`. L'expression `CURRENT_AZURE_FORMAT` ne peut pas retenir une valeur héritée : l'ancien format n'a qu'un segment après `azure-ad:`, et l'`oid` émis par Microsoft ne contient pas de `:`. |
+| **S10-e** | **CLOS** | Changer `provider`, `issuer` ou `clientId` sur un domaine prouvé exige l'OWNER (403 sinon), force `enabled=false` et `enforceSSO=false`, conserve la preuve et journalise `SSO_CONFIG_IDP_CHANGED` sans secret. Contournements essayés, sans succès : changer de domaine puis revenir donne un nouveau jeton et une nouvelle preuve DNS ; supprimer puis recréer la configuration (ADMIN) donne aussi un nouveau jeton et une nouvelle preuve. |
+| **S10-f** | **CLOS** | `AbortSignal.timeout`. Délai dépassé ou erreur réseau : 503. JSON invalide : 401. Échec de `decrypt` : 503 (journal sans secret). `P2002` : 409. Six tests. |
+| **S10-g** | **CLOS** | `@@index([domain])` et `SSOConfiguration_domain_idx`. Le DDL de la migration est identique au diff de schéma calculé par l'architecte. SQL de retour arrière au runbook § 6. |
+| **S10-h** | **CLOS** | `assertSsoNotEnforced` et SCIM `createUser` lisent `verifiedDomain`. Tests de revendications concurrentes présents. |
+| **S10-i** | **CLOS** | `acct === 1` et `xms_edov === false` donnent 401. `SSO_LOGIN_FAILURE` enveloppe tout le callback, sans jeton, code, `state` ni adresse ; une erreur non HTTP est journalisée `ERREUR_INTERNE`. |
+| **D1** | **CLOS** | Sections « VALIDÉ » non attribuables retirées. Statuts r8 rectifiés. `GEMINI.md`, DAT § 15 et runbook (§ 1, 2, 3 bis, 4, 6, 7, 8) à jour. |
+| **L1** | **CLOS côté code** | Lockfile : 3 lignes. `*.tsbuildinfo` dans `.gitignore`. `deleteOutDir` activé. **Reste à l'utilisateur, au moment du commit** : `git rm --cached backend/tsconfig.tsbuildinfo`, sinon chaque build le fait réapparaître dans `git status`. |
+| **S10** | **CLOS côté code** | Toutes les actions r8 et r9 sont closes. |
+| **S11** | **CLOS côté code** | S11-a remplacé par S11-b, clos. |
+
+### Réponses aux questions de fixeur
+
+- **(a) Un compteur de 300/min par clé, commun à toutes les routes SCIM : accepté.** C'est plus strict que le comportement natif (300 par route) et cela répond à l'intention de S11 : borner une clé, pas une route. Les IdP (Entra, Okta) respectent `Retry-After` et reprennent la synchronisation. Si une synchronisation initiale importante est bridée en production, augmenter `SCIM_KEY_LIMIT` par configuration, sans revenir au comptage par route. Sur la question complémentaire : la clé non authentifiée n'est bornée que par la limite IP de 3 000/min et par route, ce qui est **accepté**. Le coût par requête se limite à une lecture par index unique (`tokenHash`), et l'échec est journalisé.
+- **(b) Toutes les liaisons `google:<sub>` remises à NULL : confirmé.** Elles ont été posées sans vérification et sont indiscernables des liaisons légitimes. Le reliage se fait de façon sûre au prochain login, par l'adresse, dans le domaine prouvé, avec `email_verified` et `hd`. Conséquence à documenter au runbook § 3 bis : un compte dont l'adresse Planner-Pro diffère de l'adresse Google ne sera pas relié. Avec `autoProvision`, un second compte serait alors créé : relire le CSV avant `--apply` et traiter ces cas à la main. Le refus de `--apply` sous `FEATURE_SSO_ENABLED=true` est approuvé.
+- **(c) Réactivation explicite par l'OWNER après un changement d'IdP : accepté.** La preuve DNS porte sur le domaine, pas sur l'IdP. La sécurité repose donc sur le fait que seul l'OWNER choisit l'IdP. Qu'un ADMIN puisse ensuite réactiver une configuration dont l'IdP a été choisi par l'OWNER reste dans le modèle de rôles. Une nouvelle preuve DNS n'est pas exigée.
+- **S10-g écrit après la modification du schéma, `migrate diff` non exécuté : accepté.** Le diff de schéma sans base, fait par l'architecte, équivaut au critère pour cette migration. L'exploitant appliquera la migration sur une base jetable avant la production (runbook § 1, étape 2).
+
+### Observations non bloquantes (hors Phase 2, à traiter en Phase 5 avec la limitation de débit)
+
+- **O1** : `trust proxy` n'est pas configuré (`main.ts`). Derrière un proxy inverse, `req.ip` est l'adresse du proxy, et toutes les limites par IP (connexion 5/min, SCIM 3 000/min) deviennent **globales**. Le risque est un déni de service par épuisement, pas un contournement. Ce comportement existait avant la Phase 2. À traiter avec S2x (limitation de débit) en Phase 5 : `app.set('trust proxy', <nombre de sauts>)`, plus un test.
+- **O2** : le stockage du throttler est en mémoire, donc propre à chaque instance. Avec N instances, les limites sont multipliées par N. Prévoir un stockage Redis en Phase 5. Ce comportement existait avant la Phase 2.
+- **O3** : `SSO_LOGIN_FAILURE` journalise `error.message`. Les messages actuels sont constants et sans donnée personnelle. Garder cette règle lors de futures évolutions, ou journaliser un code de motif plutôt qu'un message.
+- **O4** : `processCallback` compare `identity.email` et `hd` à `ssoConfig.domain`, alors que la règle S10-d utilise `verifiedDomain`. Les deux valeurs sont égales par construction (configuration trouvée par `verifiedDomain`, et un changement de domaine remet la preuve à zéro). Harmoniser sur `verifiedDomain` à la prochaine intervention.
+
+### Conditions de réactivation des drapeaux (décision de l'utilisateur)
+
+Les conditions de la revue r8 sont désormais remplies **côté code**. Restent les conditions d'exploitation, à remplir avant la décision de l'utilisateur.
+
+**`FEATURE_SSO_ENABLED=true` :**
+1. Phases 0 et 1 déployées.
+2. Runbook Phase 2 exécuté : migration (d'abord sur une base jetable), `encrypt-sso-secrets.ts`, `reset-legacy-sso-uids.ts` (CSV relu), Redis 6.2 ou plus, `FRONTEND_URL` renseignée.
+3. Par organisation : TXT publié, `verify-domain` passé, URL de retour enregistrée chez l'IdP.
+
+**`FEATURE_SCIM_ENABLED=true` :**
+1. Toutes les conditions SSO.
+2. Journaux applicatifs conservés au moins 90 jours.
+3. Revue des clés SCIM existantes.
+
+**Commit :** soumis à l'accord de l'utilisateur, avec `git rm --cached backend/tsconfig.tsbuildinfo`.
+
+### Synthèse r10
+
+| ID | Verdict r10 |
+| --- | --- |
+| S10 (S10-a à S10-i) | VALIDÉ, clos côté code |
+| S11 (S11-a remplacé, S11-b) | VALIDÉ, clos côté code |
+| D1 | VALIDÉ, clos |
+| L1 | VALIDÉ ; reste `git rm --cached` au commit, sur décision de l'utilisateur |
+
+**Constats ouverts à la fin de r10 :**
+
+- Phase 1 : P9 (produit).
+- Phases 3 à 6 : S12 à S26 sauf S14 étape 1 et S18 étapes 0 et 2 ; A1, A2, A4 à A9 ; P2, P4, P5, P7, P8. Les observations O1 et O2 sont à rattacher au constat de limitation de débit de la Phase 5.
+- Clos : S1 à S11, S27, S28, S29, A3, P1, P3, P6.
+- **Prochaine étape pour fixeur : Phase 3** (A1, A2, A4, S12, S13, S14 suite, S15, S16), après commit de la Phase 2 sur décision de l'utilisateur.
+
+### Clôture de la Phase 2 (revue finale, 2026-11-02)
+
+- **Verdict : VALIDÉ.** Commit local fait par l'architecte sur `security/phase-0`, sans push.
+- **Correctif de configuration fait à la clôture (L1)** : `backend/tsconfig.build.json` passe en `"incremental": false`. Sans lui, `deleteOutDir` (ajouté en r9) combiné à un `tsconfig.build.tsbuildinfo` à jour produisait un `dist` vide malgré un code de sortie 0. Ce cas pouvait se produire dans l'image Docker, car `backend/Dockerfile` ne supprime que `tsconfig.tsbuildinfo` et le dépôt n'a pas de `.dockerignore`. Vérifié : deux builds successifs produisent 116 `.js` et 0 `*.spec.js`.
+- **Ajout au backlog de la Phase 5 (avec A7/A9)** : `.dockerignore` pour `backend/` (`dist`, `*.tsbuildinfo`, `.env*`, `node_modules`).
+- **Reste à l'utilisateur** : exécution du runbook Phase 2, puis décision de réactiver `FEATURE_SSO_ENABLED` et `FEATURE_SCIM_ENABLED`. Les conditions sont listées dans la section « Revue r10 ».
+- **Prochaine étape pour fixeur** : Phase 3, en commençant par O4 puis O3.

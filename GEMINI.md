@@ -15,19 +15,20 @@ Sources de vérité, à lire avant toute modification touchant la sécurité, l'
 2. `docs/security/journal-corrections.md` — journal de fixeur : plan, une entrée par constat (statut, changements, tests), et sous chaque entrée la « Revue architecte » de conrado.
 3. `docs/DOSSIER_ARCHITECTURE_TECHNIQUE.md` §15 — vue d'ensemble du programme (v2.2).
 
-### État (rapport r3, 30/10/2026)
+### État (rapport r10, 02/11/2026)
 
-- **Phase 0 validée côté code** par conrado : S1, S2, S3, S4, S5, S28, P1, P3, S14 étape 1, S18 étape 0. Restent des actions d'exploitation décidées par l'utilisateur (migrations, certificats TLS MySQL, scripts de reprise S28 selon `docs/security/runbook-reprise-phase0.md`).
-- **Prochaine phase : Phase 1**, dans l'ordre A3, S7, S8, S6, S9, P6, S27 (fixeur). Consulte le journal pour l'état réel avant d'y toucher.
+- **Phase 0 validée côté code** par conrado (commit `aa66054`).
+- **Phase 1 validée côté code** par conrado (revue r7, commit `c5f1391` : A3, S7, S8, S6, S9, P6, S27).
+- **Phase 2 validée côté code** par conrado (revue r10, 02/11/2026 : S10, S11). Réactivation de SSO et SCIM soumise au runbook `docs/security/runbook-phase2.md` et à la décision de l'utilisateur.
 - Le programme compte **7 phases (0 à 6)** :
   - 0 urgences — validée ;
-  - 1 authentification et sessions (A3, S7, S8, S6, S9, P6, S27) — en cours ;
-  - 2 SSO/SCIM complets (S10, S11) ;
+  - 1 authentification et sessions — validée ;
+  - 2 SSO/SCIM complets (S10, S11) — validée ;
   - 3 autorisation centralisée, IDOR, temps réel (A1, A2, A4, S12, S13, S14 suite, S15, S16) ;
   - 4 invitations, console admin (P4, S17, S18 suite) ;
   - 5 durcissement (S19 à S26, A5, A6, A7, P5, P8) ;
   - 6 audit log, tests e2e, CI (A8, A9, P2, P7).
-- Phases 2 à 6 : pas commencées. Ne les anticipe pas. SSO et SCIM restent désactivés jusqu'à la fin de la Phase 2. La montée vers pnpm 10 est prévue en Phase 6 (A9) : d'ici là, les overrides de `package.json` et `pnpm-workspace.yaml` doivent rester identiques.
+- **Prochaine phase : Phase 3** (A1, A2, A4, S12, S13, S14 suite, S15, S16 ; première action : O4 puis O3). Phases 4 à 6 : pas commencées. Ne les anticipe pas. SSO et SCIM restent désactivés jusqu'à l'exécution du runbook Phase 2 et la décision de l'utilisateur. La montée vers pnpm 10 est prévue en Phase 6 (A9) : d'ici là, les overrides de `package.json` et `pnpm-workspace.yaml` doivent rester identiques.
 
 ### Ce qui a changé et que tu ne dois pas défaire
 

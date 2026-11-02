@@ -3,9 +3,9 @@ import {
   IsNotEmpty,
   IsString,
   IsOptional,
-  IsEnum,
   IsBoolean,
   IsIn,
+  MaxLength,
 } from 'class-validator';
 import { SSOProvider, WorkspaceRole } from '@prisma/client';
 
@@ -15,18 +15,24 @@ export class DiscoverSsoDto {
   email!: string;
 }
 
+/** Retour de l'IdP : le domaine est retrouvé par le `state` côté serveur, jamais fourni (S10). */
 export class SsoCallbackDto {
   @IsString()
   @IsNotEmpty()
+  @MaxLength(2048)
   code!: string;
 
   @IsString()
   @IsNotEmpty()
-  domain!: string;
+  @MaxLength(256)
+  state!: string;
+}
 
+export class SsoAuthorizeQueryDto {
   @IsString()
-  @IsOptional()
-  redirectUri?: string;
+  @IsNotEmpty()
+  @MaxLength(253)
+  domain!: string;
 }
 
 export class ConfigureSsoDto {
@@ -42,10 +48,12 @@ export class ConfigureSsoDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(256)
   clientId?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(1024)
   clientSecret?: string;
 
   @IsString()
@@ -64,7 +72,10 @@ export class ConfigureSsoDto {
   @IsOptional()
   issuer?: string;
 
-  @IsEnum(WorkspaceRole)
+  // Jamais OWNER ni ADMIN : un IdP ne confère pas de droits d'administration (S10)
+  @IsIn([WorkspaceRole.MEMBER, WorkspaceRole.VIEWER], {
+    message: 'Le rôle par défaut doit être MEMBER ou VIEWER.',
+  })
   @IsOptional()
   defaultRole?: WorkspaceRole;
 

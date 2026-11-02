@@ -12,12 +12,16 @@ import {
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
-import { SsoService } from './sso.service';
-import { DiscoverSsoDto, SsoCallbackDto, ConfigureSsoDto } from './sso.dto';
+import { SsoService, SSO_FLOW_TTL_SECONDS } from './sso.service';
+import { DiscoverSsoDto, SsoAuthorizeQueryDto, SsoCallbackDto, ConfigureSsoDto } from './sso.dto';
 import { JwtAuthGuard } from '../jwt.guard';
 import { Public } from '../public.decorator';
 import { respondWithLogin, userAgentOf } from '../login-response';
 import { FeatureFlagGuard, RequireFeature } from '../../config/feature-flag.guard';
+
+/** Cookie qui lie le `state` SSO au navigateur ayant démarré le flux (S10). */
+const SSO_FLOW_COOKIE = 'sso_flow';
+const SSO_FLOW_COOKIE_PATH = '/auth/sso';
 
 interface AuthenticatedUserRequest {
   user: {
@@ -44,15 +48,25 @@ export class SsoController {
   }
 
   /**
-   * Endpoint d'obtention de l'URL d'autorisation IdP
+   * Démarre le flux : renvoie l'URL de l'IdP (state, nonce et PKCE générés côté serveur) et lie
+   * le `state` au navigateur par un cookie httpOnly (anti login CSRF, S10).
    */
   @Public()
   @Get('auth/sso/authorize')
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   async getAuthorizeUrl(
-    @Query('domain') domain: string,
-    @Query('redirectUri') redirectUri?: string,
+    @Query() query: SsoAuthorizeQueryDto,
+    @Res({ passthrough: true }) res: Response,
   ) {
-    return this.ssoService.getAuthorizationUrl(domain, redirectUri);
+    const { url, state } = await this.ssoService.getAuthorizationUrl(query.domain);
+    res.cookie(SSO_FLOW_COOKIE, state, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: SSO_FLOW_COOKIE_PATH,
+      maxAge: SSO_FLOW_TTL_SECONDS * 1000,
+    });
+    return { url };
   }
 
   /**
@@ -66,10 +80,12 @@ export class SsoController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
+    const flowCookie = req.cookies?.[SSO_FLOW_COOKIE];
+    res.clearCookie(SSO_FLOW_COOKIE, { path: SSO_FLOW_COOKIE_PATH });
     const { workspaceId, ...login } = await this.ssoService.handleCallback(
       dto.code,
-      dto.domain,
-      dto.redirectUri,
+      dto.state,
+      flowCookie,
       userAgentOf(req),
     );
     return { ...respondWithLogin(res, login), workspaceId };
@@ -98,6 +114,19 @@ export class SsoController {
     @Req() req: AuthenticatedUserRequest,
   ) {
     return this.ssoService.configureWorkspaceSSO(workspaceId, req.user.id, dto);
+  }
+
+  /**
+   * Vérifie l'enregistrement DNS TXT du domaine (preuve de propriété, S10)
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('workspaces/:workspaceId/sso/verify-domain')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  async verifyDomain(
+    @Param('workspaceId') workspaceId: string,
+    @Req() req: AuthenticatedUserRequest,
+  ) {
+    return this.ssoService.verifyDomain(workspaceId, req.user.id);
   }
 
   /**

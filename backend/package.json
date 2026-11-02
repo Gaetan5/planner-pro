@@ -39,6 +39,7 @@
     "firebase-admin": "^13.5.0",
     "helmet": "^8.2.0",
     "ioredis": "5.4.1",
+    "jose": "4.15.9",
     "mariadb": "^3.5.4",
     "nodemailer": "^8.0.10",
     "redis": "4.7.1",

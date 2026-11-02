@@ -8,16 +8,22 @@ import {
   Body,
   Param,
   Query,
+  UseFilters,
   UseGuards,
   Req,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
 import { ScimService } from './scim.service';
-import { ScimAuthGuard } from './scim.guard';
+import { ScimEndpoint, ScimExceptionFilter } from './scim-http';
 import { JwtAuthGuard } from '../jwt.guard';
 import { Public } from '../public.decorator';
-import { CreateScimUserDto, ScimPatchRequest } from './scim.dto';
+import {
+  CreateScimKeyDto,
+  CreateScimUserDto,
+  ScimListQueryDto,
+  ScimPatchRequestDto,
+} from './scim.dto';
 import { FeatureFlagGuard, RequireFeature } from '../../config/feature-flag.guard';
 
 interface ScimRequest {
@@ -43,41 +49,37 @@ export class ScimController {
   // --- Endpoints Standard SCIM 2.0 (RFC 7644) ---
 
   @Public()
+  @UseFilters(ScimExceptionFilter)
   @Get('scim/v2/ServiceProviderConfig')
   getServiceProviderConfig() {
     return this.scimService.getServiceProviderConfig();
   }
 
-  @Public()
-  @UseGuards(ScimAuthGuard)
+  @ScimEndpoint()
   @Get('scim/v2/Users')
-  async listUsers(
-    @Req() req: ScimRequest,
-    @Query('startIndex') startIndex?: string,
-    @Query('count') count?: string,
-  ) {
-    const sIndex = startIndex ? parseInt(startIndex, 10) : 1;
-    const cCount = count ? parseInt(count, 10) : 100;
-    return this.scimService.listUsers(req.scimWorkspace.id, sIndex, cCount);
+  async listUsers(@Req() req: ScimRequest, @Query() query: ScimListQueryDto) {
+    return this.scimService.listUsers(
+      req.scimWorkspace.id,
+      query.startIndex ?? 1,
+      query.count ?? 100,
+      query.filter,
+    );
   }
 
-  @Public()
-  @UseGuards(ScimAuthGuard)
+  @ScimEndpoint()
   @Get('scim/v2/Users/:id')
   async getUser(@Req() req: ScimRequest, @Param('id') id: string) {
     return this.scimService.getUser(req.scimWorkspace.id, id);
   }
 
-  @Public()
-  @UseGuards(ScimAuthGuard)
+  @ScimEndpoint()
   @Post('scim/v2/Users')
   @HttpCode(HttpStatus.CREATED)
   async createUser(@Req() req: ScimRequest, @Body() dto: CreateScimUserDto) {
     return this.scimService.createUser(req.scimWorkspace.id, dto);
   }
 
-  @Public()
-  @UseGuards(ScimAuthGuard)
+  @ScimEndpoint()
   @Put('scim/v2/Users/:id')
   async updateUser(
     @Req() req: ScimRequest,
@@ -87,19 +89,17 @@ export class ScimController {
     return this.scimService.updateUser(req.scimWorkspace.id, id, dto);
   }
 
-  @Public()
-  @UseGuards(ScimAuthGuard)
+  @ScimEndpoint()
   @Patch('scim/v2/Users/:id')
   async patchUser(
     @Req() req: ScimRequest,
     @Param('id') id: string,
-    @Body() patchRequest: ScimPatchRequest,
+    @Body() patchRequest: ScimPatchRequestDto,
   ) {
     return this.scimService.patchUser(req.scimWorkspace.id, id, patchRequest);
   }
 
-  @Public()
-  @UseGuards(ScimAuthGuard)
+  @ScimEndpoint()
   @Delete('scim/v2/Users/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   async deleteUser(@Req() req: ScimRequest, @Param('id') id: string) {
@@ -121,10 +121,10 @@ export class ScimController {
   @Post('workspaces/:workspaceId/scim/keys')
   async createApiKey(
     @Param('workspaceId') workspaceId: string,
-    @Body() body: { name: string },
+    @Body() body: CreateScimKeyDto,
     @Req() req: AuthenticatedUserRequest,
   ) {
-    return this.scimService.createApiKey(workspaceId, req.user.id, body.name);
+    return this.scimService.createApiKey(workspaceId, req.user.id, body);
   }
 
   @UseGuards(JwtAuthGuard)
