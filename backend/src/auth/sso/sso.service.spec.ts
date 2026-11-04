@@ -2,6 +2,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { SsoService } from './sso.service';
 import { AuthService } from '../auth.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { RedisService } from '../../redis/redis.service';
+import { DomainVerifier, OidcKeySource } from './oidc';
 import { SSOProvider, WorkspaceRole } from '@prisma/client';
 import { NotImplementedException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
@@ -33,6 +35,13 @@ describe('SsoService', () => {
   const jwtService = {
     sign: jest.fn().mockReturnValue('jwt-sso-token'),
   };
+  // Flux d'autorisation en cours (S10) : le callback retrouve le domaine par le state
+  const redis = {
+    set: jest.fn().mockResolvedValue(undefined),
+    getAndDelete: jest
+      .fn()
+      .mockResolvedValue(JSON.stringify({ domain: 'acme.com', nonce: 'n', codeVerifier: 'v' })),
+  };
   const authService = {
     completeLogin: jest.fn().mockResolvedValue({ user: {}, session: {} }),
   };
@@ -43,6 +52,9 @@ describe('SsoService', () => {
         SsoService,
         { provide: PrismaService, useValue: prisma },
         { provide: AuthService, useValue: authService },
+        { provide: RedisService, useValue: redis },
+        { provide: OidcKeySource, useValue: { getKeys: jest.fn() } },
+        { provide: DomainVerifier, useValue: { hasVerificationToken: jest.fn() } },
       ],
     }).compile();
 
@@ -73,6 +85,7 @@ describe('SsoService', () => {
         provider: SSOProvider.OIDC_AZURE_AD,
         enforceSSO: true,
         enabled: true,
+        domainVerifiedAt: new Date(),
         workspace: { name: 'TotalEnergies Exploration' },
       });
 
@@ -93,13 +106,17 @@ describe('SsoService', () => {
         domain: 'mtn.com',
         provider: SSOProvider.OIDC_AZURE_AD,
         clientId: 'client-123',
-        issuer: 'tenant-456',
+        issuer: '33333333-3333-3333-3333-333333333333',
         enabled: true,
+        domainVerifiedAt: new Date(),
       });
 
       const res = await service.getAuthorizationUrl('mtn.com');
-      expect(res.url).toContain('login.microsoftonline.com/tenant-456/oauth2/v2.0/authorize');
+      expect(res.url).toContain(
+        'login.microsoftonline.com/33333333-3333-3333-3333-333333333333/oauth2/v2.0/authorize',
+      );
       expect(res.url).toContain('client_id=client-123');
+      expect(res.state.startsWith('sso_')).toBe(true);
     });
   });
 
@@ -112,6 +129,7 @@ describe('SsoService', () => {
           domain: 'acme.com',
           provider,
           enabled: true,
+          domainVerifiedAt: new Date(),
           autoProvision: true,
           workspaceId: 'ws-acme',
           defaultRole: WorkspaceRole.OWNER,
@@ -119,7 +137,7 @@ describe('SsoService', () => {
         });
         const fetchSpy = jest.spyOn(global, 'fetch');
 
-        await expect(service.handleCallback('x', 'acme.com')).rejects.toThrow(
+        await expect(service.handleCallback('x', 'sso_flow', 'sso_flow')).rejects.toThrow(
           NotImplementedException,
         );
 
@@ -139,6 +157,7 @@ describe('SsoService', () => {
         provider: SSOProvider.SAML2,
         entryPoint: 'https://idp.acme.com/saml',
         enabled: true,
+        domainVerifiedAt: new Date(),
       });
 
       await expect(service.getAuthorizationUrl('acme.com')).rejects.toThrow(

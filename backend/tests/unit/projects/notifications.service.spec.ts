@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotificationsService } from '../../../src/notifications/notifications.service';
 import { PrismaService } from '../../../src/prisma/prisma.service';
-import { NotificationsGateway } from '../../../src/notifications/notifications.gateway';
+import { RealtimeService } from '../../../src/realtime/realtime.service';
 import { MailService } from '../../../src/mail/mail.service';
 import { FirestoreSyncService } from '../../../src/firestore-sync/firestore-sync.service';
 import { NotFoundException } from '@nestjs/common';
@@ -30,7 +30,7 @@ describe('NotificationsService', () => {
   };
 
   const mockGateway = {
-    sendNotificationToUser: jest.fn(),
+    emitToUser: jest.fn(),
   };
 
   const mockMailService = {
@@ -52,7 +52,7 @@ describe('NotificationsService', () => {
       providers: [
         NotificationsService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: NotificationsGateway, useValue: mockGateway },
+        { provide: RealtimeService, useValue: mockGateway },
         { provide: MailService, useValue: mockMailService },
         { provide: FirestoreSyncService, useValue: mockFirestoreSync },
       ],
@@ -101,7 +101,7 @@ describe('NotificationsService', () => {
           operation: 'upsert',
         }),
       );
-      expect(mockGateway.sendNotificationToUser).toHaveBeenCalledWith(
+      expect(mockGateway.emitToUser).toHaveBeenCalledWith(
         'user-1',
         'new-notification',
         createdNotif,

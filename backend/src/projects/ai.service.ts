@@ -1,4 +1,12 @@
-import { Injectable, Inject, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Inject,
+  NotFoundException,
+  BadRequestException,
+  ForbiddenException,
+  Logger,
+} from '@nestjs/common';
+import { PolicyService } from '../authz/policy.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiProvider, ParsedAiAction } from '../projects/interfaces/ai-provider.interface';
 import { CreateTaskDto } from './dto/create-task.dto';
@@ -17,6 +25,56 @@ export interface ResolvedAiAction extends ParsedAiAction {
   warning?: string;
 }
 
+/** Champs texte d'une `ResolvedAiAction` renvoyés au client (liste fermée, alignée sur le DTO). */
+const RESOLVED_ACTION_TEXT_FIELDS = [
+  'id',
+  'description',
+  'taskId',
+  'assigneeId',
+  'dependsOnTaskId',
+  'resolvedProjectName',
+  'resolvedProjectId',
+  'warning',
+  'taskTitle',
+  'taskDescription',
+  'priority',
+  'dueDate',
+  'assigneeName',
+  'dependsOnTaskTitle',
+  'dependencyType',
+  'timeBlockStart',
+  'timeBlockEnd',
+  'status',
+] as const;
+
+/** Champs à valeurs énumérées (alignés sur `ExecuteAiActionsDto`) : toute autre valeur est retirée. */
+const RESOLVED_ACTION_ENUM_FIELDS: Record<string, readonly string[]> = {
+  priority: ['LOW', 'MEDIUM', 'HIGH'],
+  status: ['TODO', 'IN_PROGRESS', 'DONE'],
+  dependencyType: ['FINISH_TO_START', 'START_TO_START', 'FINISH_TO_FINISH'],
+};
+
+/**
+ * Normalise une action avant de la renvoyer au client, qui la renverra telle quelle à
+ * `POST /projects/ai/execute` (DTO strict, décision 4) : seuls les champs connus, les valeurs
+ * `null` retirées, `estimatedMinutes` arrondi à un entier borné. Un champ ou un type inattendu
+ * renvoyé par le fournisseur d'IA ne peut ainsi jamais faire échouer l'exécution.
+ */
+export function normalizeResolvedAction(action: ResolvedAiAction): ResolvedAiAction {
+  const source = action as unknown as Record<string, unknown>;
+  const out: Record<string, unknown> = { type: action.type, resolved: action.resolved === true };
+  for (const key of RESOLVED_ACTION_TEXT_FIELDS) {
+    if (typeof source[key] !== 'string') continue;
+    const allowed = RESOLVED_ACTION_ENUM_FIELDS[key];
+    if (!allowed || allowed.includes(source[key] as string)) out[key] = source[key];
+  }
+  const minutes = source.estimatedMinutes;
+  if (typeof minutes === 'number' && Number.isFinite(minutes)) {
+    out.estimatedMinutes = Math.min(Math.max(Math.round(minutes), 0), 100000);
+  }
+  return out as unknown as ResolvedAiAction;
+}
+
 @Injectable()
 export class AiService {
   private readonly logger = new Logger(AiService.name);
@@ -26,7 +84,24 @@ export class AiService {
     @Inject('AI_PROVIDER')
     private readonly geminiService: AiProvider,
     private readonly projectsService: ProjectsService,
+    private readonly policy: PolicyService,
   ) {}
+
+  /**
+   * Contrôle d'accès commun à toutes les entrées IA (S15) : l'appelant doit pouvoir utiliser l'IA
+   * dans ce workspace, et si un projet est visé, y écrire ET le projet doit appartenir au workspace.
+   * Appelé AVANT toute lecture de membres ou de tâches et avant tout appel à Gemini.
+   */
+  private async authorize(userId: string, workspaceId: string, projectId: string | null) {
+    await this.policy.assertWorkspace(workspaceId, userId, 'ai.use');
+    if (projectId) {
+      const project = await this.policy.assertProject(projectId, userId, 'task.write');
+      if (project.workspaceId !== workspaceId) {
+        throw new ForbiddenException('Le projet n’appartient pas à ce workspace.');
+      }
+    }
+  }
+
   /**
    * Analyse une commande textuelle et résout les entités en base de données.
    */
@@ -34,6 +109,16 @@ export class AiService {
     userId: string,
     workspaceId: string,
     projectId: string | null,
+    commandText: string,
+  ): Promise<ResolvedAiAction[]> {
+    await this.authorize(userId, workspaceId, projectId);
+    return this.analyzeText(userId, workspaceId, commandText);
+  }
+
+  /** Analyse d'un texte pour un appelant DÉJÀ autorisé (voir `authorize`). */
+  private async analyzeText(
+    userId: string,
+    workspaceId: string,
     commandText: string,
   ): Promise<ResolvedAiAction[]> {
     this.logger.log(
@@ -86,7 +171,7 @@ export class AiService {
       parsedActions = await this.geminiService.parseCommand(commandText, new Date());
     }
 
-    const resolved = await this.resolveActions(workspaceId, parsedActions);
+    const resolved = await this.resolveActions(userId, workspaceId, parsedActions);
 
     // Archiver la requête dans l'historique
     await this.prisma.aiCommandHistory.create({
@@ -113,6 +198,7 @@ export class AiService {
     mimeType: string,
     isMock: boolean = false,
   ): Promise<ResolvedAiAction[]> {
+    await this.authorize(userId, workspaceId, projectId);
     this.logger.log(`Analyse d'image de projet demandée par l'utilisateur ${userId}`);
 
     let parsedActions: ParsedAiAction[];
@@ -135,7 +221,7 @@ export class AiService {
       parsedActions = await this.geminiService.analyzeImage(imageBuffer, mimeType);
     }
 
-    const resolved = await this.resolveActions(workspaceId, parsedActions);
+    const resolved = await this.resolveActions(userId, workspaceId, parsedActions);
 
     // Archiver l'analyse d'image dans l'historique
     await this.prisma.aiCommandHistory.create({
@@ -154,9 +240,15 @@ export class AiService {
    * Résout les entités (membres d'équipe, tâches) en base de données pour un lot d'actions.
    */
   private async resolveActions(
+    userId: string,
     workspaceId: string,
     parsedActions: ParsedAiAction[],
   ): Promise<ResolvedAiAction[]> {
+    // Les tâches résolues se limitent aux projets où l'appelant peut écrire (S12, S15)
+    const writableProjectIds = await this.policy.listAccessibleProjectIds(userId, {
+      workspaceId,
+      action: 'task.write',
+    });
     // Charger tous les membres et les tâches pour la résolution d'entités
     const workspaceMembers = await this.prisma.membership.findMany({
       where: { workspaceId },
@@ -167,6 +259,7 @@ export class AiService {
       where: {
         deletedAt: null,
         project: { workspaceId },
+        projectId: { in: writableProjectIds },
       },
     });
 
@@ -353,7 +446,7 @@ export class AiService {
         resolvedAction.description = `Action invalide [${action.type}]`;
       }
 
-      resolvedActions.push(resolvedAction);
+      resolvedActions.push(normalizeResolvedAction(resolvedAction));
     }
 
     return resolvedActions;
@@ -370,6 +463,8 @@ export class AiService {
     mimeType: string,
     isMock: boolean = false,
   ): Promise<{ transcription: string; actions: ResolvedAiAction[] }> {
+    // Avant toute transcription : le quota Gemini ne sert que les membres habilités (S15)
+    await this.authorize(userId, workspaceId, projectId);
     this.logger.log(`Transcription et analyse vocale demandées par l'utilisateur ${userId}`);
 
     let transcription: string;
@@ -384,7 +479,7 @@ export class AiService {
       transcription = await this.geminiService.transcribeAudio(audioBuffer, mimeType);
     }
 
-    const actions = await this.analyzeCommand(userId, workspaceId, projectId, transcription);
+    const actions = await this.analyzeText(userId, workspaceId, transcription);
 
     return {
       transcription,
@@ -400,12 +495,15 @@ export class AiService {
     workspaceId: string,
     projectId: string | null,
     actions: ResolvedAiAction[],
-  ): Promise<{ success: boolean; executedCount: number }> {
+  ): Promise<{ success: boolean; executedCount: number; changedTaskIds: string[] }> {
+    await this.authorize(userId, workspaceId, projectId);
     this.logger.log(
       `Exécution de ${actions.length} actions automatisées par l'utilisateur ${userId}`,
     );
 
     let executedCount = 0;
+    // Tâches réellement modifiées (et autorisées par les services) : seules à être diffusées
+    const changedTaskIds = new Set<string>();
 
     // Transaction Prisma ou exécution séquentielle robuste
     for (const action of actions) {
@@ -414,16 +512,17 @@ export class AiService {
           let targetProjectId = projectId;
 
           if (!targetProjectId) {
-            // Chercher le premier projet actif du workspace
-            const activeProject = await this.prisma.project.findFirst({
-              where: { workspaceId, deletedAt: null },
+            // Premier projet du workspace où l'appelant peut écrire (S15)
+            const [firstWritable] = await this.policy.listAccessibleProjectIds(userId, {
+              workspaceId,
+              action: 'task.write',
             });
-            if (!activeProject) {
+            if (!firstWritable) {
               throw new NotFoundException(
                 'Aucun projet actif trouvé dans le workspace pour y ajouter la tâche.',
               );
             }
-            targetProjectId = activeProject.id;
+            targetProjectId = firstWritable;
           }
 
           const options: Partial<CreateTaskDto> = {};
@@ -437,7 +536,7 @@ export class AiService {
             options.assigneeIds = [action.assigneeId];
           }
 
-          await this.projectsService.createTask(
+          const created = await this.projectsService.createTask(
             targetProjectId,
             userId,
             action.taskTitle || 'Tâche sans titre',
@@ -445,6 +544,7 @@ export class AiService {
             (action.priority as TaskPriority) || TaskPriority.MEDIUM,
             options,
           );
+          if (created?.id) changedTaskIds.add(created.id);
           executedCount++;
           break;
         }
@@ -459,6 +559,7 @@ export class AiService {
           await this.projectsService.updateTask(action.taskId, userId, {
             assigneeIds: [action.assigneeId],
           });
+          changedTaskIds.add(action.taskId);
           executedCount++;
           break;
         }
@@ -476,6 +577,7 @@ export class AiService {
             action.dependsOnTaskId,
             (action.dependencyType as DependencyType) || DependencyType.FINISH_TO_START,
           );
+          changedTaskIds.add(action.taskId);
           executedCount++;
           break;
         }
@@ -491,6 +593,7 @@ export class AiService {
             new Date(action.timeBlockStart),
             new Date(action.timeBlockEnd),
           );
+          changedTaskIds.add(action.taskId);
           executedCount++;
           break;
         }
@@ -503,6 +606,7 @@ export class AiService {
           await this.projectsService.updateTask(action.taskId, userId, {
             status: action.status as TaskStatus,
           });
+          changedTaskIds.add(action.taskId);
           executedCount++;
           break;
         }
@@ -512,6 +616,7 @@ export class AiService {
     return {
       success: true,
       executedCount,
+      changedTaskIds: [...changedTaskIds],
     };
   }
 

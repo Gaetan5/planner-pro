@@ -133,10 +133,102 @@ describe('S8 : politique de connexion uniforme', () => {
   });
 
   describe('enforceSSO du domaine', () => {
-    const enforce = () =>
+    const enforce = (domainVerifiedAt: Date | null = new Date()) =>
       prisma.sSOConfiguration.create({
-        data: { domain: 'acme.com', enabled: true, enforceSSO: true, provider: 'OIDC_AZURE_AD' },
+        data: {
+          domain: 'acme.com',
+          enabled: true,
+          enforceSSO: true,
+          provider: 'OIDC_AZURE_AD',
+          domainVerifiedAt,
+          verifiedDomain: domainVerifiedAt ? 'acme.com' : null,
+        },
       });
+
+    it.each(['password', 'firebase', 'github'] as const)(
+      'S10 : enforceSSO sur un domaine NON PROUVÉ est ignoré (%s autorisé)',
+      async (method) => {
+        process.env.FEATURE_SSO_ENABLED = 'true';
+        await seedUser();
+        await enforce(null);
+        const result = (await attempt(method)) as unknown as { session?: unknown };
+        expect(result.session).toBeDefined();
+      },
+    );
+
+    it.each(['password', 'firebase', 'github'] as const)(
+      'S10-h : deux configurations revendiquent acme.com, seule celle de ws-1 est prouvée : enforceSSO de ws-2 ignoré (%s autorisé)',
+      async (method) => {
+        process.env.FEATURE_SSO_ENABLED = 'true';
+        await seedUser();
+        await prisma.sSOConfiguration.create({
+          data: {
+            workspaceId: 'ws-1',
+            domain: 'acme.com',
+            verifiedDomain: 'acme.com',
+            enabled: true,
+            enforceSSO: false,
+            provider: 'OIDC_AZURE_AD',
+            domainVerifiedAt: new Date(),
+          },
+        });
+        await prisma.sSOConfiguration.create({
+          data: {
+            workspaceId: 'ws-2',
+            domain: 'acme.com',
+            verifiedDomain: null,
+            enabled: true,
+            enforceSSO: true,
+            provider: 'OIDC_AZURE_AD',
+            domainVerifiedAt: new Date(),
+          },
+        });
+        const result = (await attempt(method)) as unknown as { session?: unknown };
+        expect(result.session).toBeDefined();
+      },
+    );
+
+    it('S10-h : enforceSSO de la configuration prouvée (ws-1) s’applique malgré une revendication concurrente', async () => {
+      process.env.FEATURE_SSO_ENABLED = 'true';
+      await seedUser();
+      await prisma.sSOConfiguration.create({
+        data: {
+          workspaceId: 'ws-1',
+          domain: 'acme.com',
+          verifiedDomain: 'acme.com',
+          enabled: true,
+          enforceSSO: true,
+          provider: 'OIDC_AZURE_AD',
+          domainVerifiedAt: new Date(),
+        },
+      });
+      await prisma.sSOConfiguration.create({
+        data: { workspaceId: 'ws-2', domain: 'acme.com', enabled: true, enforceSSO: false },
+      });
+      await expect(attempt('password')).rejects.toThrow(ForbiddenException);
+    });
+
+    it('S10 : GitHub, nouveau compte sur un domaine qui impose le SSO : 403, AUCUN compte créé', async () => {
+      process.env.FEATURE_SSO_ENABLED = 'true';
+      await enforce();
+      mockGitHub();
+      await expect(service.loginWithGitHub('code', oauthState())).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(prisma.user.rows).toHaveLength(0);
+    });
+
+    it('S10 : Firebase, nouveau compte sur un domaine qui impose le SSO : 403, AUCUN compte créé', async () => {
+      process.env.FEATURE_SSO_ENABLED = 'true';
+      await enforce();
+      firebase.verifyIdToken.mockResolvedValue({
+        uid: 'fb-new',
+        email: 'nouvelle@acme.com',
+        email_verified: true,
+      });
+      await expect(service.loginWithFirebase('id-token')).rejects.toThrow(ForbiddenException);
+      expect(prisma.user.rows).toHaveLength(0);
+    });
 
     it.each(['password', 'firebase', 'github'] as const)(
       'fonctionnalité SSO active : %s refusé (403), aucune session',
@@ -170,7 +262,14 @@ describe('S8 : politique de connexion uniforme', () => {
       process.env.FEATURE_SSO_ENABLED = 'true';
       await seedUser({ mfaEnabled: true, mfaSecret: 'JBSWY3DPEHPK3PXP' });
       await prisma.sSOConfiguration.create({
-        data: { domain: 'acme.com', enabled: true, enforceSSO: true, provider: 'OIDC_AZURE_AD' },
+        data: {
+          domain: 'acme.com',
+          enabled: true,
+          enforceSSO: true,
+          provider: 'OIDC_AZURE_AD',
+          domainVerifiedAt: new Date(),
+          verifiedDomain: 'acme.com',
+        },
       });
       const user = await prisma.user.findUnique({ where: { id: 'user-1' } });
       const result = (await service.completeLogin(

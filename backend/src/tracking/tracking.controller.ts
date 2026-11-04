@@ -1,9 +1,7 @@
-import { Controller, Get, Post, Param, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Post, Param, Req } from '@nestjs/common';
 import { TrackingService } from './tracking.service';
-import { JwtAuthGuard } from '../auth/jwt.guard';
 
 @Controller('tracking')
-@UseGuards(JwtAuthGuard)
 export class TrackingController {
   constructor(private readonly trackingService: TrackingService) {}
 

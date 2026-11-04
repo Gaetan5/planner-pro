@@ -1,6 +1,7 @@
-import { Injectable, Logger, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { GeminiService } from '../notes/gemini.service';
+import { PolicyService } from '../authz/policy.service';
 
 export interface PredictiveAlert {
   id: string;
@@ -20,6 +21,7 @@ export class CopilotService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly geminiService: GeminiService,
+    private readonly policy: PolicyService,
   ) {}
 
   /**
@@ -30,19 +32,22 @@ export class CopilotService {
     userId?: string,
   ): Promise<PredictiveAlert[]> {
     this.logger.log(`Calcul des alertes prédictives pour le workspace ${workspaceId}`);
+    // Appel utilisateur : membre du workspace, et projets accessibles uniquement (S12). Sans
+    // utilisateur (tâches planifiées internes), tout le workspace est analysé.
+    let projectIds: string[] | undefined;
     if (userId) {
-      const membership = await this.prisma.membership.findFirst({
-        where: { workspaceId, userId, workspace: { deletedAt: null } },
-      });
-      if (!membership) {
-        throw new ForbiddenException('Accès non autorisé au workspace');
-      }
+      await this.policy.assertWorkspace(workspaceId, userId, 'workspace.read');
+      projectIds = await this.policy.listAccessibleProjectIds(userId, { workspaceId });
     }
     const alerts: PredictiveAlert[] = [];
 
     // 1. Récupérer tous les projets et tâches actives (non terminées)
     const projects = await this.prisma.project.findMany({
-      where: { workspaceId, deletedAt: null },
+      where: {
+        workspaceId,
+        deletedAt: null,
+        ...(projectIds ? { id: { in: projectIds } } : {}),
+      },
       include: {
         tasks: {
           where: { deletedAt: null, status: { not: 'DONE' } },
@@ -201,6 +206,12 @@ export class CopilotService {
   ): Promise<{ briefing: string; source: 'ai' | 'rules' }> {
     this.logger.log(`Génération du briefing matinal pour l'utilisateur ${userId}`);
 
+    // Membre du workspace et projets accessibles uniquement (S12, S15)
+    await this.policy.assertWorkspace(workspaceId, userId, 'workspace.read');
+    const accessibleProjectIds = await this.policy.listAccessibleProjectIds(userId, {
+      workspaceId,
+    });
+
     // 1. Récupérer les données de l'utilisateur et de sa charge
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -213,7 +224,7 @@ export class CopilotService {
       where: {
         deletedAt: null,
         status: { not: 'DONE' },
-        project: { workspaceId },
+        project: { workspaceId, id: { in: accessibleProjectIds } },
         assignees: {
           some: { userId },
         },
@@ -229,7 +240,7 @@ export class CopilotService {
     nextWeek.setDate(nextWeek.getDate() + 7);
 
     const projectsInWorkspace = await this.prisma.project.findMany({
-      where: { workspaceId, deletedAt: null },
+      where: { workspaceId, deletedAt: null, id: { in: accessibleProjectIds } },
       select: { id: true },
     });
 

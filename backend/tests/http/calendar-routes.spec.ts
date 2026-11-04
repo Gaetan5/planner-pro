@@ -3,10 +3,11 @@ import { JwtService } from '@nestjs/jwt';
 import { ProjectsController } from '../../src/projects/projects.controller';
 import { ProjectsService } from '../../src/projects/projects.service';
 import { SprintService } from '../../src/projects/sprint.service';
-import { TrackingGateway } from '../../src/tracking/tracking.gateway';
+import { RealtimeService } from '../../src/realtime/realtime.service';
 import { IntegrationService } from '../../src/projects/integration.service';
 import { CalendarSyncService } from '../../src/projects/calendar-sync.service';
 import { ProjectPermissionsService } from '../../src/projects/project-permissions.service';
+import { PolicyService } from '../../src/authz/policy.service';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { ProactiveSchedulerService } from '../../src/projects/proactive-scheduler.service';
 import { JwtAuthGuard } from '../../src/auth/jwt.guard';
@@ -31,12 +32,11 @@ describe('S5 : routes calendrier (HTTP)', () => {
     syncCalendarEvents: jest.fn().mockResolvedValue({ importedCount: 0, skipped: [] }),
     exportToCalendar: jest.fn().mockResolvedValue({ success: true, exportedCount: 0 }),
   };
-  // Prisma simulé : la membership n'est trouvée que si le rôle courant est autorisé
+  // Prisma simulé : la membership porte le rôle courant
   const prisma = {
     membership: {
-      findFirst: jest.fn(async ({ where }) =>
-        where.role.in.includes(role) ? { workspaceId: where.workspaceId, role } : null,
-      ),
+      // La politique centrale charge la membership puis contrôle le rôle (A2)
+      findFirst: jest.fn(async ({ where }) => ({ workspaceId: where.workspaceId, role })),
     },
   };
 
@@ -48,13 +48,14 @@ describe('S5 : routes calendrier (HTTP)', () => {
       providers: [
         { provide: ProjectsService, useValue: projectsService },
         { provide: SprintService, useValue: {} },
-        { provide: TrackingGateway, useValue: {} },
+        { provide: RealtimeService, useValue: { refreshUserRooms: jest.fn(), isReady: false } },
         { provide: IntegrationService, useValue: {} },
         { provide: CalendarSyncService, useValue: calendarSync },
         { provide: PrismaService, useValue: prisma },
         { provide: ProactiveSchedulerService, useValue: {} },
         { provide: JwtService, useValue: jwtService },
         ProjectPermissionsService,
+        PolicyService,
         TokenService,
         {
           provide: SessionService,

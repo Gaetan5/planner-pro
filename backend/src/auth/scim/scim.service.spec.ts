@@ -1,7 +1,13 @@
+import { RealtimeService } from '../../realtime/realtime.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ScimService } from './scim.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 
 describe('ScimService', () => {
   let service: ScimService;
@@ -20,6 +26,9 @@ describe('ScimService', () => {
       update: jest.fn(),
       updateMany: jest.fn(),
     },
+    sSOConfiguration: {
+      findUnique: jest.fn(),
+    },
     sCIMApiKey: {
       create: jest.fn(),
       findMany: jest.fn(),
@@ -28,9 +37,15 @@ describe('ScimService', () => {
     },
   };
 
+  const realtime = { refreshUserRooms: jest.fn() };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [ScimService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        ScimService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: RealtimeService, useValue: realtime },
+      ],
     }).compile();
 
     service = module.get<ScimService>(ScimService);
@@ -84,11 +99,19 @@ describe('ScimService', () => {
       ...overrides,
     });
 
+    // S11 : le domaine de l'e-mail doit être celui, vérifié, du workspace
+    const verifiedDomain = (domain: string) =>
+      prisma.sSOConfiguration.findUnique.mockResolvedValue({
+        domain,
+        verifiedDomain: domain,
+        domainVerifiedAt: new Date(),
+      });
     const writesTo = (field: string) =>
       prisma.user.update.mock.calls.some(([args]) => args?.data && field in args.data) ||
       prisma.user.updateMany.mock.calls.some(([args]) => args?.data && field in args.data);
 
     it('POST avec l’e-mail d’un utilisateur existant : 409, aucune membership créée', async () => {
+      verifiedDomain('corp.com');
       prisma.user.findUnique.mockResolvedValue(victim({ memberships: [] }));
 
       await expect(
@@ -100,7 +123,22 @@ describe('ScimService', () => {
       expect(prisma.user.create).not.toHaveBeenCalled();
     });
 
+    it('S10-h : workspace dont la revendication du domaine n’est pas prouvée (verifiedDomain absent) : 403, aucun compte', async () => {
+      prisma.sSOConfiguration.findUnique.mockResolvedValue({
+        domain: 'corp.com',
+        verifiedDomain: null,
+        domainVerifiedAt: new Date(),
+      });
+      prisma.user.findUnique.mockResolvedValue(null);
+
+      await expect(service.createUser('ws-2', { userName: 'nouveau@corp.com' })).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(prisma.user.create).not.toHaveBeenCalled();
+    });
+
     it('POST d’un nouvel utilisateur : rattaché au workspace provisionneur, jamais suspendu globalement', async () => {
+      verifiedDomain('corp.com');
       prisma.user.findUnique.mockResolvedValue(null);
       prisma.user.create.mockImplementation(async ({ data }) => ({
         id: 'u-new',
@@ -183,6 +221,8 @@ describe('ScimService', () => {
         where: { workspaceId_userId: { workspaceId: 'ws-attaquant', userId: 'u-victim' } },
       });
       expect(res.active).toBe(false);
+      // Flux temps réel coupé pour la personne retirée (S16)
+      expect(realtime.refreshUserRooms).toHaveBeenCalledWith('u-victim');
     });
 
     it('PATCH active=true : réactive un utilisateur provisionné par ce workspace (membership recréée)', async () => {

@@ -2,6 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { SsoController } from '../../src/auth/sso/sso.controller';
 import { SsoService } from '../../src/auth/sso/sso.service';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { ScimController } from '../../src/auth/scim/scim.controller';
 import { ScimService } from '../../src/auth/scim/scim.service';
 import { ScimAuthGuard } from '../../src/auth/scim/scim.guard';
@@ -39,6 +40,7 @@ describe('P3 : drapeaux de fonctionnalités SSO / SCIM (HTTP)', () => {
   beforeAll(async () => {
     process.env.JWT_SECRET = 'test-secret-for-feature-flags-0123456789';
     ({ app, baseUrl } = await startHttpTestApp({
+      imports: [ThrottlerModule.forRoot([{ ttl: 60000, limit: 60 }])],
       controllers: [SsoController, ScimController, AppController],
       providers: [
         AppService,

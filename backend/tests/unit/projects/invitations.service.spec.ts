@@ -1,3 +1,5 @@
+import { RealtimeService } from '../../../src/realtime/realtime.service';
+import { PolicyService } from '../../../src/authz/policy.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { InvitationsService } from '../../../src/projects/invitations.service';
 import { PrismaService } from '../../../src/prisma/prisma.service';
@@ -35,8 +37,13 @@ describe('InvitationsService', () => {
     user: {
       findUnique: jest.fn().mockResolvedValue({ name: 'Admin User', email: 'admin@test.com' }),
     },
+    projectMembership: {
+      upsert: jest.fn(),
+    },
     $transaction: jest.fn(),
   };
+
+  const mockRealtime = { refreshUserRooms: jest.fn() };
 
   const mockFirestoreSync = {
     enqueue: jest.fn().mockResolvedValue(undefined),
@@ -51,7 +58,9 @@ describe('InvitationsService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        PolicyService,
         InvitationsService,
+        { provide: RealtimeService, useValue: mockRealtime },
         { provide: PrismaService, useValue: mockPrisma },
         { provide: MailService, useValue: mockMailService },
         { provide: FirestoreSyncService, useValue: mockFirestoreSync },
@@ -71,7 +80,7 @@ describe('InvitationsService', () => {
 
       await expect(
         service.createInvitation(workspaceId, invitedById, 'test@test.com', WorkspaceRole.MEMBER),
-      ).rejects.toThrow(/Vous n'êtes pas membre/);
+      ).rejects.toThrow(/Workspace not found or unauthorized/);
     });
 
     it("devrait rejeter si l'invitant a un rôle inférieur à ADMIN (ex: MEMBER)", async () => {
@@ -81,7 +90,7 @@ describe('InvitationsService', () => {
 
       await expect(
         service.createInvitation(workspaceId, invitedById, 'test@test.com', WorkspaceRole.MEMBER),
-      ).rejects.toThrow(/Droits insuffisants/);
+      ).rejects.toThrow(/insufficient workspace permissions/);
     });
 
     it('devrait créer une invitation avec succès et retourner le token en clair', async () => {
@@ -291,6 +300,44 @@ describe('InvitationsService', () => {
           operation: 'upsert',
         }),
       );
+    });
+
+    it('membre existant invité sur un projet : rôle de projet attribué et salons recalculés (S16-b)', async () => {
+      const futureDate = new Date();
+      futureDate.setDate(futureDate.getDate() + 5);
+      mockPrisma.invitation.findUnique.mockResolvedValue({
+        id: 'invite-id',
+        workspaceId: 'workspace-123',
+        projectId: 'project-9',
+        role: WorkspaceRole.MEMBER,
+        invitedById: 'user-admin',
+        status: InvitationStatus.PENDING,
+        expiresAt: futureDate,
+      });
+      mockPrisma.membership.findFirst.mockResolvedValue({
+        id: 'membership-1',
+        workspaceId: 'workspace-123',
+        userId: loggedUser.id,
+        role: WorkspaceRole.MEMBER,
+      });
+      mockPrisma.invitation.update.mockResolvedValue({
+        id: 'invite-id',
+        workspaceId: 'workspace-123',
+        status: InvitationStatus.ACCEPTED,
+        role: WorkspaceRole.MEMBER,
+        invitedById: 'user-admin',
+        projectId: 'project-9',
+        email: 'guest@guest.com',
+        expiresAt: futureDate,
+        acceptedAt: new Date(),
+        createdAt: new Date(),
+      });
+
+      const result = await service.validateAndAcceptInvitation(rawToken, loggedUser);
+
+      expect(result.projectId).toBe('project-9');
+      expect(mockPrisma.projectMembership.upsert).toHaveBeenCalled();
+      expect(mockRealtime.refreshUserRooms).toHaveBeenCalledWith(loggedUser.id);
     });
   });
 });

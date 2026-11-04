@@ -243,7 +243,7 @@ interface AppContextType {
   }>;
   classicRegister: (email: string, passwordRaw: string, name: string) => Promise<string>;
   firebaseLogin: (idToken: string, name?: string) => Promise<MfaChallenge | void>;
-  ssoLogin: (code: string, domain: string) => Promise<MfaChallenge | void>;
+  ssoLogin: (code: string, state: string) => Promise<MfaChallenge | void>;
   logout: () => void;
   mockLogin: (name: string) => Promise<void>;
   setActiveTab: (
@@ -937,12 +937,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const ssoLogin = async (code: string, domain: string) => {
+  const ssoLogin = async (code: string, state: string) => {
     try {
       const res = await fetch(`${BACKEND_URL}/auth/sso/callback`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, domain }),
+        body: JSON.stringify({ code, state }),
       });
       if (!res.ok) {
         const errData = await res.json();

@@ -35,6 +35,7 @@ import {
   Wallet,
 } from 'lucide-react';
 import { AccountLinkPage } from './components/AccountLinkPage';
+import { isSsoState } from './sso-oauth';
 import { fetchGitHubPurpose, linkGitHub } from './github-oauth';
 import { readAccountLink, type AccountLink } from './account-api';
 import logo from './logo.png';
@@ -88,17 +89,8 @@ function AppWithSession() {
     if (!code && !providerError) return;
 
     const rawState = url.searchParams.get('state');
-    let ssoDomain: string | null = null;
-    if (rawState) {
-      try {
-        const parsed = JSON.parse(atob(rawState.replace(/-/g, '+').replace(/_/g, '/')));
-        if (parsed?.domain) {
-          ssoDomain = parsed.domain;
-        }
-      } catch {
-        // Ignorer si le state n'est pas du JSON SSO
-      }
-    }
+    // Retour SSO : le state est opaque et préfixé (le domaine est retrouvé côté serveur, S10)
+    const isSso = isSsoState(rawState);
 
     url.searchParams.delete('code');
     url.searchParams.delete('state');
@@ -122,7 +114,7 @@ function AppWithSession() {
       setOauthNotice('Compte GitHub associé.');
       return undefined;
     };
-    const authPromise = ssoDomain ? ssoLogin(code!, ssoDomain) : githubCallback();
+    const authPromise = isSso ? ssoLogin(code!, rawState) : githubCallback();
 
     authPromise
       .then((challenge) => {

@@ -93,7 +93,11 @@ model SSOConfiguration {
   workspaceId    String        @unique
   workspace      Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   provider       SSOProvider   @default(OIDC_AZURE_AD)
-  domain         String        @unique // e.g., 'sonatrach.dz', 'mtn.com'
+  domain         String        // e.g., 'sonatrach.dz', 'mtn.com' (revendications concurrentes autorisées, S10-a)
+  verifiedDomain String?       @unique // Domaine prouvé par TXT DNS (S10-a)
+  // Preuve de propriété du domaine par TXT DNS `planner-pro-verification=<jeton>` sur `_planner-pro.<domaine>` (S10)
+  domainVerificationToken String?
+  domainVerifiedAt        DateTime?
   clientId       String?
   clientSecret   String?
   discoveryUrl   String?
@@ -106,6 +110,8 @@ model SSOConfiguration {
   enabled        Boolean       @default(true)
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
+
+  @@index([domain])
 }
 
 model SCIMApiKey {

@@ -1,3 +1,4 @@
+import { PolicyService } from '../../../src/authz/policy.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ResourcesService } from '../../../src/projects/resources.service';
 import { PrismaService } from '../../../src/prisma/prisma.service';
@@ -55,6 +56,7 @@ describe('ResourcesService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        PolicyService,
         ResourcesService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: FirestoreSyncService, useValue: mockFirestoreSync },

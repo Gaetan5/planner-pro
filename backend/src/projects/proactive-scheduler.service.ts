@@ -1,10 +1,11 @@
-import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { CopilotService } from './copilot.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CalendarSyncService } from './calendar-sync.service';
-import { TrackingGateway } from '../tracking/tracking.gateway';
+import { PolicyService } from '../authz/policy.service';
+import { RealtimeService } from '../realtime/realtime.service';
 
 @Injectable()
 export class ProactiveSchedulerService {
@@ -15,8 +16,8 @@ export class ProactiveSchedulerService {
     private readonly copilotService: CopilotService,
     private readonly notificationsService: NotificationsService,
     private readonly calendarSyncService: CalendarSyncService,
-    @Inject(forwardRef(() => TrackingGateway))
-    private readonly trackingGateway: TrackingGateway,
+    private readonly policy: PolicyService,
+    private readonly realtime: RealtimeService,
   ) {}
 
   /**
@@ -199,13 +200,27 @@ export class ProactiveSchedulerService {
   /**
    * Planification automatique de créneaux TimeBlocks libres de conflits pour toutes les tâches du workspace.
    */
-  async autoScheduleWorkspace(workspaceId: string) {
+  async autoScheduleWorkspace(workspaceId: string, userId?: string) {
     this.logger.log(`[Auto-Schedule] Planification automatique pour le workspace ${workspaceId}`);
+
+    // Appel utilisateur : seuls les projets où il peut écrire sont replanifiés (S12)
+    let projectIds: string[] | undefined;
+    if (userId) {
+      await this.policy.assertWorkspace(workspaceId, userId, 'schedule.run');
+      projectIds = await this.policy.listAccessibleProjectIds(userId, {
+        workspaceId,
+        action: 'task.write',
+      });
+    }
 
     // 1. Récupérer toutes les tâches actives, non terminées du workspace
     const tasks = await this.prisma.task.findMany({
       where: {
-        project: { workspaceId, deletedAt: null },
+        project: {
+          workspaceId,
+          deletedAt: null,
+          ...(projectIds ? { id: { in: projectIds } } : {}),
+        },
         status: { in: ['TODO', 'IN_PROGRESS'] },
         deletedAt: null,
       },
@@ -229,7 +244,10 @@ export class ProactiveSchedulerService {
     }
 
     // 2. Charger les conflits d'agendas externes détectés
-    const existingConflicts = await this.calendarSyncService.detectCalendarConflicts(workspaceId);
+    const existingConflicts = await this.calendarSyncService.detectCalendarConflicts(
+      workspaceId,
+      projectIds,
+    );
 
     // Charger aussi tous les TimeBlocks déjà alloués du workspace
     const existingTimeBlocks = await this.prisma.timeBlock.findMany({
@@ -315,10 +333,8 @@ export class ProactiveSchedulerService {
       }
     }
 
-    if (scheduledCount > 0 && this.trackingGateway?.server) {
-      this.trackingGateway.server
-        .to(`workspace:${workspaceId}`)
-        .emit('project-data-updated', { workspaceId });
+    if (scheduledCount > 0) {
+      this.realtime.emitSignalToWorkspace(workspaceId, 'project-data-updated', { workspaceId });
     }
 
     return { success: true, scheduledCount };

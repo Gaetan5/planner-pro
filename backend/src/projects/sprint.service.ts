@@ -9,31 +9,18 @@ import { SprintStatus, Sprint, Prisma } from '@prisma/client';
 import { CreateSprintDto } from './dto/create-sprint.dto';
 import { UpdateSprintDto } from './dto/update-sprint.dto';
 import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
+import { PolicyService } from '../authz/policy.service';
 
 @Injectable()
 export class SprintService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly firestoreSync: FirestoreSyncService,
+    private readonly policy: PolicyService,
   ) {}
 
-  private async assertWorkspaceMember(workspaceId: string, userId: string) {
-    const membership = await this.prisma.membership.findFirst({
-      where: {
-        workspaceId,
-        userId,
-        workspace: { deletedAt: null },
-      },
-    });
-
-    if (!membership) {
-      throw new ForbiddenException('Workspace not found or unauthorized');
-    }
-    return membership;
-  }
-
   async createSprint(workspaceId: string, userId: string, data: CreateSprintDto): Promise<Sprint> {
-    await this.assertWorkspaceMember(workspaceId, userId);
+    await this.policy.assertWorkspace(workspaceId, userId, 'sprint.manage');
 
     const start = new Date(data.startDate);
     const end = new Date(data.endDate);
@@ -74,7 +61,7 @@ export class SprintService {
       throw new NotFoundException('Sprint introuvable.');
     }
 
-    await this.assertWorkspaceMember(sprint.workspaceId, userId);
+    await this.policy.assertWorkspace(sprint.workspaceId, userId, 'sprint.manage');
 
     const updateData: Prisma.SprintUpdateInput = {};
     if (data.name !== undefined) updateData.name = data.name;
@@ -137,7 +124,7 @@ export class SprintService {
       throw new NotFoundException('Sprint introuvable.');
     }
 
-    await this.assertWorkspaceMember(sprint.workspaceId, userId);
+    await this.policy.assertWorkspace(sprint.workspaceId, userId, 'sprint.manage');
 
     return this.prisma.$transaction(async (tx) => {
       // Mettre à null le sprintId des tâches liées avant de supprimer
@@ -167,13 +154,15 @@ export class SprintService {
   }
 
   async listSprints(workspaceId: string, userId: string) {
-    await this.assertWorkspaceMember(workspaceId, userId);
+    await this.policy.assertWorkspace(workspaceId, userId, 'sprint.read');
+    // Les tâches d'un sprint ne sont visibles que dans les projets accessibles (S12)
+    const projectIds = await this.policy.listAccessibleProjectIds(userId, { workspaceId });
 
     const sprints = await this.prisma.sprint.findMany({
       where: { workspaceId },
       include: {
         tasks: {
-          where: { deletedAt: null },
+          where: { deletedAt: null, projectId: { in: projectIds } },
           select: {
             id: true,
             storyPoints: true,
@@ -198,36 +187,47 @@ export class SprintService {
     });
   }
 
+  /**
+   * Associe des tâches à un sprint (ou les remet au backlog si `sprintId` est null).
+   * Toutes les tâches sont chargées et vérifiées AVANT la moindre écriture (S13) : elles doivent
+   * exister, appartenir au même workspace (celui du sprint le cas échéant) et l'appelant doit
+   * avoir `task.write` sur chacun de leurs projets. Sinon 403, sans aucune écriture.
+   * Renvoie les tâches effectivement modifiées, pour une diffusion bornée à leurs projets.
+   */
   async associateTasksToSprint(
     sprintId: string | null,
     taskIds: string[],
     userId: string,
-  ): Promise<void> {
-    if (sprintId) {
-      const sprint = await this.prisma.sprint.findUnique({
-        where: { id: sprintId },
-      });
-      if (!sprint) {
-        throw new NotFoundException('Sprint introuvable.');
-      }
-      await this.assertWorkspaceMember(sprint.workspaceId, userId);
-    }
+  ): Promise<{ id: string; projectId: string; workspaceId: string }[]> {
+    const uniqueIds = [...new Set(taskIds)];
+    if (uniqueIds.length === 0) return [];
 
-    // Si pas de sprintId (remise au backlog), on valide l'accès par rapport aux tâches
-    if (taskIds.length > 0) {
-      const sampleTask = await this.prisma.task.findUnique({
-        where: { id: taskIds[0] },
-        include: { project: true },
-      });
-      if (sampleTask?.project?.workspaceId) {
-        await this.assertWorkspaceMember(sampleTask.project.workspaceId, userId);
-      }
+    const tasks = await this.prisma.task.findMany({
+      where: { id: { in: uniqueIds }, deletedAt: null },
+      include: { project: true },
+    });
+    // Aucune distinction entre « inexistante » et « interdite » : pas d'oracle d'existence
+    const denied = () => new ForbiddenException('Accès refusé à au moins une tâche.');
+    if (tasks.length !== uniqueIds.length) throw denied();
+
+    const workspaceIds = new Set(tasks.map((t) => t.project.workspaceId));
+    const [workspaceId] = [...workspaceIds];
+    if (workspaceIds.size !== 1 || !workspaceId) throw denied();
+
+    if (sprintId) {
+      const sprint = await this.prisma.sprint.findUnique({ where: { id: sprintId } });
+      // Sprint absent ou d'un autre workspace : même 403 que pour une tâche interdite (A2-b)
+      if (!sprint || sprint.workspaceId !== workspaceId) throw denied();
+    }
+    await this.policy.assertWorkspace(workspaceId, userId, 'sprint.manage');
+    for (const projectId of new Set(tasks.map((t) => t.projectId))) {
+      await this.policy.assertProject(projectId, userId, 'task.write');
     }
 
     await this.prisma.$transaction(async (tx) => {
       await tx.task.updateMany({
         where: {
-          id: { in: taskIds },
+          id: { in: tasks.map((t) => t.id) },
           deletedAt: null,
         },
         data: {
@@ -235,29 +235,23 @@ export class SprintService {
         },
       });
 
-      if (taskIds.length > 0) {
-        const tasks =
-          (await tx.task.findMany({
-            where: { id: { in: taskIds }, deletedAt: null },
-            include: { project: { select: { workspaceId: true, userId: true } } },
-          })) ?? [];
-        for (const t of tasks) {
-          const wId = t.project?.workspaceId ?? `personal-${t.project?.userId}`;
-          await this.firestoreSync.enqueue(tx, {
-            entityType: 'task',
-            entityId: t.id,
-            workspaceId: wId,
-            operation: 'upsert',
-            payload: {
-              id: t.id,
-              projectId: t.projectId,
-              sprintId: t.sprintId,
-              updatedAt: new Date().toISOString(),
-            },
-          });
-        }
+      for (const t of tasks) {
+        await this.firestoreSync.enqueue(tx, {
+          entityType: 'task',
+          entityId: t.id,
+          workspaceId,
+          operation: 'upsert',
+          payload: {
+            id: t.id,
+            projectId: t.projectId,
+            sprintId,
+            updatedAt: new Date().toISOString(),
+          },
+        });
       }
     });
+
+    return tasks.map((t) => ({ id: t.id, projectId: t.projectId, workspaceId }));
   }
 
   private sprintSyncPayload(sprint: {
@@ -287,7 +281,8 @@ export class SprintService {
   }
 
   async getAverageVelocity(workspaceId: string, userId: string): Promise<number> {
-    await this.assertWorkspaceMember(workspaceId, userId);
+    await this.policy.assertWorkspace(workspaceId, userId, 'sprint.read');
+    const projectIds = await this.policy.listAccessibleProjectIds(userId, { workspaceId });
 
     const completedSprints = await this.prisma.sprint.findMany({
       where: {
@@ -299,6 +294,7 @@ export class SprintService {
           where: {
             deletedAt: null,
             status: 'DONE',
+            projectId: { in: projectIds },
           },
           select: {
             storyPoints: true,
@@ -331,12 +327,16 @@ export class SprintService {
       throw new NotFoundException('Sprint introuvable.');
     }
 
-    await this.assertWorkspaceMember(sprint.workspaceId, userId);
+    await this.policy.assertWorkspace(sprint.workspaceId, userId, 'sprint.read');
+    const projectIds = await this.policy.listAccessibleProjectIds(userId, {
+      workspaceId: sprint.workspaceId,
+    });
 
     const tasks = await this.prisma.task.findMany({
       where: {
         sprintId,
         deletedAt: null,
+        projectId: { in: projectIds },
       },
       select: {
         id: true,

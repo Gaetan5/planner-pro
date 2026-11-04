@@ -98,18 +98,11 @@ describe('S18.2 : routes interdites en session d’impersonation', () => {
         .map((r) => ({ ...r, full: `/${base}/${r.path}`.replace(/\/+/g, '/').replace(/\/$/, '') }));
     };
 
-    // Une route sans JwtAuthGuard ne lit jamais la session (ex. /auth/mfa/challenge, authentifiée
-    // par un ticket) : le décorateur n'aurait aucun effet, elle est hors du balayage.
-    const usesSession = (r: { handler: () => void; controller: object }) =>
-      [
-        Reflect.getMetadata(GUARDS_METADATA, r.handler),
-        Reflect.getMetadata(GUARDS_METADATA, r.controller),
-      ]
-        .flat()
-        .includes(JwtAuthGuard);
+    // Depuis A1, toute route non @Public() lit la session (garde global). Une route publique
+    // (ex. /auth/mfa/challenge, authentifiée par un ticket) ne la lit jamais : hors du balayage.
     const isPublic = (r: { handler: () => void; controller: object }) =>
-      reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [r.handler, r.controller as never]) ||
-      !usesSession(r);
+      reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [r.handler, r.controller as never]) ===
+      true;
     const isMarked = (r: { handler: () => void; controller: object }) =>
       reflector.getAllAndOverride<boolean>(IS_FORBIDDEN_IN_IMPERSONATION, [
         r.handler,

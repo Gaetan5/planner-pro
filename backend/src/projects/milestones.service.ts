@@ -1,6 +1,7 @@
-import { Injectable, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { WorkspaceRole, DeliverableStatus, DeliveryStatus, ProjectStatus } from '@prisma/client';
+import { PolicyService } from '../authz/policy.service';
+import { DeliverableStatus, DeliveryStatus, ProjectStatus } from '@prisma/client';
 import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
 
 @Injectable()
@@ -8,42 +9,8 @@ export class MilestonesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly firestoreSync: FirestoreSyncService,
+    private readonly policy: PolicyService,
   ) {}
-
-  private async assertWorkspaceRole(
-    workspaceId: string,
-    userId: string,
-    allowedRoles: WorkspaceRole[],
-  ) {
-    const membership = await this.prisma.membership.findFirst({
-      where: {
-        workspaceId,
-        userId,
-        workspace: { deletedAt: null },
-      },
-    });
-    if (!membership) {
-      throw new ForbiddenException('Workspace not found or unauthorized');
-    }
-    if (!allowedRoles.includes(membership.role)) {
-      throw new ForbiddenException('Unauthorized: insufficient workspace permissions');
-    }
-    return membership;
-  }
-
-  private async assertProjectAccess(projectId: string, userId: string) {
-    const project = await this.prisma.project.findFirst({
-      where: {
-        id: projectId,
-        deletedAt: null,
-        OR: [{ userId }, { workspace: { memberships: { some: { userId } } } }],
-      },
-    });
-    if (!project) {
-      throw new BadRequestException('Project not found or unauthorized');
-    }
-    return project;
-  }
 
   // ─── Milestones ───────────────────────────────────────────────────
 
@@ -54,14 +21,11 @@ export class MilestonesService {
     description?: string,
     dueDate?: string,
   ) {
-    const project = await this.assertProjectAccess(projectId, userId);
+    // Rôle de projet MANAGER (OWNER/ADMIN du workspace inclus) exigé (S12-b)
+    const project = await this.policy.assertProject(projectId, userId, 'project.manage');
     if (!project.workspaceId) {
       throw new BadRequestException('Workspace not found for this project');
     }
-    await this.assertWorkspaceRole(project.workspaceId, userId, [
-      WorkspaceRole.OWNER,
-      WorkspaceRole.ADMIN,
-    ]);
 
     return this.prisma.$transaction(async (tx) => {
       const created = await tx.milestone.create({
@@ -94,10 +58,7 @@ export class MilestonesService {
     if (!milestone || !milestone.project || !milestone.project.workspaceId) {
       throw new BadRequestException('Milestone or workspace not found');
     }
-    await this.assertWorkspaceRole(milestone.project.workspaceId, userId, [
-      WorkspaceRole.OWNER,
-      WorkspaceRole.ADMIN,
-    ]);
+    await this.policy.assertProject(milestone.project.id, userId, 'project.manage');
 
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.milestone.update({
@@ -125,14 +86,11 @@ export class MilestonesService {
     status: DeliverableStatus = DeliverableStatus.DRAFT,
     dueDate?: string,
   ) {
-    const project = await this.assertProjectAccess(projectId, userId);
+    // Rôle de projet MANAGER (OWNER/ADMIN du workspace inclus) exigé (S12-b)
+    const project = await this.policy.assertProject(projectId, userId, 'project.manage');
     if (!project.workspaceId) {
       throw new BadRequestException('Workspace not found for this project');
     }
-    await this.assertWorkspaceRole(project.workspaceId, userId, [
-      WorkspaceRole.OWNER,
-      WorkspaceRole.ADMIN,
-    ]);
 
     return this.prisma.$transaction(async (tx) => {
       const created = await tx.deliverable.create({
@@ -166,10 +124,7 @@ export class MilestonesService {
     if (!deliverable || !deliverable.project || !deliverable.project.workspaceId) {
       throw new BadRequestException('Deliverable or workspace not found');
     }
-    await this.assertWorkspaceRole(deliverable.project.workspaceId, userId, [
-      WorkspaceRole.OWNER,
-      WorkspaceRole.ADMIN,
-    ]);
+    await this.policy.assertProject(deliverable.project.id, userId, 'project.manage');
 
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.deliverable.update({
@@ -198,14 +153,11 @@ export class MilestonesService {
     summary?: string,
     checklist: string[] = [],
   ) {
-    const project = await this.assertProjectAccess(projectId, userId);
+    // Rôle de projet MANAGER (OWNER/ADMIN du workspace inclus) exigé (S12-b)
+    const project = await this.policy.assertProject(projectId, userId, 'project.manage');
     if (!project.workspaceId) {
       throw new BadRequestException('Workspace not found for this project');
     }
-    await this.assertWorkspaceRole(project.workspaceId, userId, [
-      WorkspaceRole.OWNER,
-      WorkspaceRole.ADMIN,
-    ]);
 
     return this.prisma.$transaction(async (tx) => {
       const created = await tx.deliveryRecord.create({
@@ -249,10 +201,7 @@ export class MilestonesService {
     if (!delivery || !delivery.project || !delivery.project.workspaceId) {
       throw new BadRequestException('Delivery or workspace not found');
     }
-    await this.assertWorkspaceRole(delivery.project.workspaceId, userId, [
-      WorkspaceRole.OWNER,
-      WorkspaceRole.ADMIN,
-    ]);
+    await this.policy.assertProject(delivery.project.id, userId, 'project.manage');
 
     const now = new Date();
     return this.prisma.$transaction(async (tx) => {
@@ -298,11 +247,7 @@ export class MilestonesService {
     if (!item || !item.delivery || !item.delivery.project || !item.delivery.project.workspaceId) {
       throw new BadRequestException('Checklist item or workspace not found');
     }
-    await this.assertWorkspaceRole(item.delivery.project.workspaceId, userId, [
-      WorkspaceRole.OWNER,
-      WorkspaceRole.ADMIN,
-      WorkspaceRole.MEMBER,
-    ]);
+    await this.policy.assertProject(item.delivery.project.id, userId, 'project.write');
 
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.deliveryChecklistItem.update({
@@ -411,12 +356,10 @@ export class MilestonesService {
   // ─── Delivery Report ──────────────────────────────────────────────
 
   async getDeliveryReport(projectId: string, userId: string) {
+    // Lecture réservée aux détenteurs d'un rôle sur CE projet ; 404 si absent, 403 sinon (S12-b)
+    await this.policy.assertProject(projectId, userId, 'project.read');
     const project = await this.prisma.project.findFirst({
-      where: {
-        id: projectId,
-        deletedAt: null,
-        OR: [{ userId }, { workspace: { memberships: { some: { userId } } } }],
-      },
+      where: { id: projectId, deletedAt: null },
       include: {
         tasks: { where: { deletedAt: null }, include: { timeLogs: true } },
         milestones: true,
@@ -425,7 +368,7 @@ export class MilestonesService {
       },
     });
     if (!project) {
-      throw new Error('Project not found or unauthorized');
+      throw new NotFoundException('Projet introuvable');
     }
 
     const totalTasks = project.tasks.length;

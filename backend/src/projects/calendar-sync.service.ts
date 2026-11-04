@@ -180,8 +180,13 @@ export class CalendarSyncService {
    * Analyse et détecte les conflits entre les TimeBlocks locaux et les événements externes (Google/Outlook).
    * Supporte les flux iCal/ICS et JSON configurés sur les intégrations et l'API OAuth des fournisseurs.
    * Une intégration sans source réelle est ignorée (aucun événement simulé, S5).
+   * `projectIds` borne l'analyse aux projets accessibles à l'appelant (S12) ; sans lui, tout le
+   * workspace (usage interne).
    */
-  async detectCalendarConflicts(workspaceId: string): Promise<CalendarConflict[]> {
+  async detectCalendarConflicts(
+    workspaceId: string,
+    projectIds?: string[],
+  ): Promise<CalendarConflict[]> {
     this.logger.log(`Détection de conflits de calendrier pour le workspace ${workspaceId}`);
     const conflicts: CalendarConflict[] = [];
 
@@ -203,7 +208,7 @@ export class CalendarSyncService {
     const timeBlocks = await this.prisma.timeBlock.findMany({
       where: {
         task: {
-          project: { workspaceId },
+          project: { workspaceId, ...(projectIds ? { id: { in: projectIds } } : {}) },
           deletedAt: null,
         },
       },

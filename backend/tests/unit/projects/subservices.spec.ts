@@ -1,3 +1,4 @@
+import { PolicyService } from '../../../src/authz/policy.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { FinancesService } from '../../../src/projects/finances.service';
 import { MilestonesService } from '../../../src/projects/milestones.service';
@@ -44,6 +45,7 @@ describe('Projects Modular Subservices', () => {
     timeBlock: {
       create: jest.fn(),
       findFirst: jest.fn(),
+      findUnique: jest.fn(),
       findMany: jest.fn(),
       findUniqueOrThrow: jest.fn(),
       update: jest.fn(),
@@ -63,6 +65,18 @@ describe('Projects Modular Subservices', () => {
     },
   };
   const mockFirestoreSync = { enqueue: jest.fn() };
+  // Politique centrale : rôles de workspace réels, accès aux tâches accordé (testé dans tests/unit/authz)
+  const mockPolicy = {
+    assertWorkspaceRoles: jest.fn(async (...args: unknown[]) =>
+      new PolicyService(mockPrisma as never).assertWorkspaceRoles(
+        ...(args as [string, string, never]),
+      ),
+    ),
+    assertWorkspaceMember: jest.fn(),
+    assertProject: jest.fn(async () => mockPrisma.project.findFirst()),
+    assertTaskOrBadRequest: jest.fn(async () => mockPrisma.task.findFirst()),
+    listAccessibleProjectIds: jest.fn().mockResolvedValue([]),
+  };
 
   beforeEach(async () => {
     mockPrisma.$transaction.mockImplementation((callback: (tx: typeof mockPrisma) => unknown) =>
@@ -70,6 +84,7 @@ describe('Projects Modular Subservices', () => {
     );
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        { provide: PolicyService, useValue: mockPolicy },
         FinancesService,
         MilestonesService,
         DependenciesService,
@@ -274,7 +289,7 @@ describe('Projects Modular Subservices', () => {
     });
 
     it('devrait synchroniser les mises à jour et suppressions de blocs horaires', async () => {
-      mockPrisma.timeBlock.findFirst.mockResolvedValue({ id: 'tb-1' });
+      mockPrisma.timeBlock.findUnique.mockResolvedValue({ id: 'tb-1', taskId: 'task-1' });
       mockPrisma.timeBlock.update.mockResolvedValue({
         id: 'tb-1',
         taskId: 'task-1',

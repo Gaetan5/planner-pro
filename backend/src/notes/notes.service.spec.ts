@@ -5,6 +5,8 @@ import { NotesService } from './notes.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
+import { PolicyService } from '../authz/policy.service';
+import { RealtimeService } from '../realtime/realtime.service';
 
 import { GeminiService } from './gemini.service';
 
@@ -56,6 +58,14 @@ describe('NotesService', () => {
     enqueue: jest.fn().mockResolvedValue(undefined),
   };
 
+  // Politique d'autorisation simulée : tout est autorisé (le contrôle réel est testé dans
+  // tests/unit/authz/notes-access.spec.ts)
+  const mockPolicy = {
+    listAccessibleProjectIds: jest.fn().mockResolvedValue(['project-inbox', 'project-road-map']),
+    filterUsersWithProjectAction: jest.fn(async (_projectId: string, ids: string[]) => ids),
+  };
+  const mockRealtime = { evictTaskRoom: jest.fn() };
+
   beforeEach(async () => {
     mockPrisma.$transaction.mockImplementation((callback: (tx: typeof mockPrisma) => unknown) =>
       callback(mockPrisma),
@@ -68,6 +78,8 @@ describe('NotesService', () => {
         { provide: RedisService, useValue: mockRedis },
         { provide: GeminiService, useValue: mockGemini },
         { provide: FirestoreSyncService, useValue: mockFirestoreSync },
+        { provide: PolicyService, useValue: mockPolicy },
+        { provide: RealtimeService, useValue: mockRealtime },
       ],
     }).compile();
 
@@ -202,9 +214,9 @@ describe('NotesService', () => {
           }),
         }),
       );
-      expect(mockPrisma.task.findFirst).toHaveBeenCalledWith({
-        where: { id: taskId, userId, noteId },
-      });
+      expect(mockPrisma.task.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: taskId, userId, noteId } }),
+      );
     });
 
     it("ne réutilise pas l'identifiant d'une tâche étrangère à la note", async () => {
@@ -224,9 +236,9 @@ describe('NotesService', () => {
 
       const createdNote = await service.createNote(userId, 'Ma Note', noteContent);
 
-      expect(mockPrisma.task.findFirst).toHaveBeenCalledWith({
-        where: { id: foreignTaskId, userId, noteId },
-      });
+      expect(mockPrisma.task.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: foreignTaskId, userId, noteId } }),
+      );
       expect(mockPrisma.task.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({

@@ -1,10 +1,7 @@
-import {
-  Injectable,
-  BadRequestException,
-  ForbiddenException,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { PolicyService } from '../authz/policy.service';
+import { RealtimeService } from '../realtime/realtime.service';
 import { WorkspaceRole, InvitationStatus, ProjectRole } from '@prisma/client';
 import * as crypto from 'crypto';
 import { maskEmail } from './mask-email';
@@ -17,32 +14,12 @@ export class InvitationsService {
     private readonly prisma: PrismaService,
     private readonly mailService: MailService,
     private readonly firestoreSync: FirestoreSyncService,
+    private readonly policy: PolicyService,
+    private readonly realtime: RealtimeService,
   ) {}
 
   private hashToken(token: string): string {
     return crypto.createHash('sha256').update(token).digest('hex');
-  }
-
-  private async assertWorkspaceRole(
-    workspaceId: string,
-    userId: string,
-    allowedRoles: WorkspaceRole[],
-  ) {
-    const membership = await this.prisma.membership.findFirst({
-      where: {
-        workspaceId,
-        userId,
-        workspace: { deletedAt: null },
-      },
-    });
-
-    if (!membership) {
-      throw new ForbiddenException("Vous n'êtes pas membre de cet espace de travail.");
-    }
-
-    if (!allowedRoles.includes(membership.role)) {
-      throw new ForbiddenException('Droits insuffisants dans cet espace de travail.');
-    }
   }
 
   async createInvitation(
@@ -53,7 +30,7 @@ export class InvitationsService {
     projectId?: string,
     durationDays = 7,
   ) {
-    await this.assertWorkspaceRole(workspaceId, invitedById, ['OWNER', 'ADMIN']);
+    await this.policy.assertWorkspaceRoles(workspaceId, invitedById, ['OWNER', 'ADMIN']);
 
     if (projectId) {
       const project = await this.prisma.project.findFirst({
@@ -128,7 +105,7 @@ export class InvitationsService {
   }
 
   async listInvitations(workspaceId: string, userId: string) {
-    await this.assertWorkspaceRole(workspaceId, userId, ['OWNER', 'ADMIN']);
+    await this.policy.assertWorkspaceRoles(workspaceId, userId, ['OWNER', 'ADMIN']);
 
     return this.prisma.invitation.findMany({
       where: {
@@ -153,7 +130,7 @@ export class InvitationsService {
       throw new NotFoundException('Invitation introuvable.');
     }
 
-    await this.assertWorkspaceRole(invitation.workspaceId, userId, ['OWNER', 'ADMIN']);
+    await this.policy.assertWorkspaceRoles(invitation.workspaceId, userId, ['OWNER', 'ADMIN']);
 
     if (invitation.status !== InvitationStatus.PENDING) {
       throw new BadRequestException("Cette invitation n'est plus active.");
@@ -283,6 +260,8 @@ export class InvitationsService {
           payload: this.invitationSyncPayload(accepted),
         });
       });
+      // Nouveau rôle de projet : les sockets déjà ouvertes rejoignent le salon du projet (S16-b)
+      await this.realtime.refreshUserRooms(loggedUser.id);
       return {
         workspaceId: invitation.workspaceId,
         projectId: invitation.projectId || undefined,
@@ -354,6 +333,9 @@ export class InvitationsService {
         payload: this.invitationSyncPayload(accepted),
       });
     });
+
+    // Nouveaux droits : les sockets déjà ouvertes rejoignent les bons salons (S16)
+    await this.realtime.refreshUserRooms(loggedUser.id);
 
     return {
       workspaceId: invitation.workspaceId,

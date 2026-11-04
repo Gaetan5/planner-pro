@@ -35,7 +35,7 @@ export class IntegrationService {
    */
   async createIntegration(workspaceId: string, dto: IntegrationDto) {
     this.logger.log(`Création d'une intégration ${dto.type} pour le workspace ${workspaceId}`);
-    return this.prisma.integration.create({
+    const created = await this.prisma.integration.create({
       data: {
         workspaceId,
         type: dto.type,
@@ -46,6 +46,7 @@ export class IntegrationService {
       },
       select: INTEGRATION_PUBLIC_SELECT,
     });
+    return this.withMaskedUrl(created);
   }
 
   /**
@@ -60,41 +61,55 @@ export class IntegrationService {
     });
 
     // Masquer les URL sensibles (webhooks, flux privés)
-    return integrations.map((integration) => {
-      if (integration.url) {
-        integration.url = this.maskSensitiveUrl(integration.url);
-      }
-      return integration;
+    return integrations.map((integration) => this.withMaskedUrl(integration));
+  }
+
+  private withMaskedUrl<T extends { url: string | null }>(integration: T): T {
+    return integration.url
+      ? { ...integration, url: this.maskSensitiveUrl(integration.url) }
+      : integration;
+  }
+
+  /** Workspace propriétaire d'une intégration (pour contrôler les droits), ou null. */
+  async getWorkspaceIdOf(integrationId: string): Promise<string | null> {
+    const integration = await this.prisma.integration.findUnique({
+      where: { id: integrationId },
+      select: { workspaceId: true },
     });
+    return integration?.workspaceId ?? null;
   }
 
   /**
-   * Active ou désactive une intégration.
+   * Charge une intégration DU workspace : `where: { id, workspaceId }`, 404 sinon (S14).
    */
-  async toggleIntegration(integrationId: string) {
-    const integration = await this.prisma.integration.findUnique({
-      where: { id: integrationId },
+  private async findOwned(workspaceId: string, integrationId: string) {
+    const integration = await this.prisma.integration.findFirst({
+      where: { id: integrationId, workspaceId },
     });
     if (!integration) {
       throw new NotFoundException('Intégration introuvable.');
     }
-    return this.prisma.integration.update({
+    return integration;
+  }
+
+  /**
+   * Active ou désactive une intégration du workspace.
+   */
+  async toggleIntegration(workspaceId: string, integrationId: string) {
+    const integration = await this.findOwned(workspaceId, integrationId);
+    const updated = await this.prisma.integration.update({
       where: { id: integrationId },
       data: { active: !integration.active },
       select: INTEGRATION_PUBLIC_SELECT,
     });
+    return this.withMaskedUrl(updated);
   }
 
   /**
-   * Supprime une intégration.
+   * Supprime une intégration du workspace.
    */
-  async deleteIntegration(integrationId: string) {
-    const integration = await this.prisma.integration.findUnique({
-      where: { id: integrationId },
-    });
-    if (!integration) {
-      throw new NotFoundException('Intégration introuvable.');
-    }
+  async deleteIntegration(workspaceId: string, integrationId: string) {
+    await this.findOwned(workspaceId, integrationId);
     await this.prisma.integration.delete({
       where: { id: integrationId },
     });

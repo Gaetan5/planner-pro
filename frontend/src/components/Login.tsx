@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { isFirebaseAuthConfigured } from '../firebase-config';
 import { startGitHubAuthorization } from '../github-oauth';
+import { startSsoAuthorization } from '../sso-oauth';
 import { requestPasswordReset, resendVerification } from '../account-api';
 import logo from '../logo.png';
 import './Login.css';
@@ -167,8 +168,8 @@ export const Login: React.FC<{
         setSsoResult(null);
       } else {
         setSsoResult(result);
-        if (result.authUrl) {
-          window.location.href = result.authUrl;
+        if (result.domain) {
+          await startSsoAuthorization(result.domain);
         }
       }
     } catch (err: unknown) {

@@ -3,6 +3,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
 import { randomUUID } from 'crypto';
+import { PolicyService } from '../authz/policy.service';
+import { RealtimeService } from '../realtime/realtime.service';
 
 import { GeminiService } from './gemini.service';
 import type { ExtractedTask } from '../projects/interfaces/ai-provider.interface';
@@ -14,6 +16,8 @@ export class NotesService {
     private readonly redis: RedisService,
     private readonly gemini: GeminiService,
     private readonly firestoreSync: FirestoreSyncService,
+    private readonly policy: PolicyService,
+    private readonly realtime: RealtimeService,
   ) {}
 
   private getCacheKey(userId: string): string {
@@ -161,13 +165,16 @@ export class NotesService {
     });
 
     if (note) {
+      // S12-j : la note est toujours supprimée, mais seules les tâches des projets où l'auteur
+      // a encore `task.write` (dont ses projets personnels) le sont avec elle.
+      const writable = await this.policy.listAccessibleProjectIds(userId, { action: 'task.write' });
       await this.prisma.$transaction(async (tx) => {
         await tx.note.update({
           where: { id: noteId },
           data: { deletedAt: new Date() },
         });
         await tx.task.updateMany({
-          where: { noteId },
+          where: { noteId, projectId: { in: writable } },
           data: { deletedAt: new Date() },
         });
         await this.firestoreSync.enqueue(tx, {
@@ -220,6 +227,14 @@ export class NotesService {
 
     if (!task || !task.noteId || !task.note || task.note.deletedAt) return;
 
+    // S12-g : la note d'un auteur qui n'a plus `task.read` sur le projet n'est plus synchronisée
+    const readers = await this.policy.filterUsersWithProjectAction(
+      task.projectId,
+      [task.note.userId],
+      'task.read',
+    );
+    if (!readers.includes(task.note.userId)) return;
+
     const note = task.note;
     let content = note.content;
     const taskTitle = task.title;
@@ -270,6 +285,42 @@ export class NotesService {
   }
 
   /**
+   * Résout le nom d'un assigné parmi les seules personnes ayant `task.read` sur le projet (S12-f) :
+   * les membres du workspace du projet, ou l'auteur seul pour un projet personnel.
+   */
+  private async resolveAssignee(
+    authorId: string,
+    project: { id: string; workspaceId: string | null },
+    assigneeName: string,
+  ): Promise<string | null> {
+    const wanted = assigneeName.trim().toLowerCase();
+    if (!wanted) return null;
+    const matches = (u: { name?: string | null; githubUsername?: string | null }) =>
+      u.name?.toLowerCase() === wanted || u.githubUsername?.toLowerCase() === wanted;
+
+    let candidates: string[];
+    if (project.workspaceId) {
+      const members = await this.prisma.membership.findMany({
+        where: { workspaceId: project.workspaceId },
+        select: { userId: true, user: { select: { name: true, githubUsername: true } } },
+      });
+      candidates = members.filter((m) => matches(m.user)).map((m) => m.userId);
+    } else {
+      const author = await this.prisma.user.findUnique({
+        where: { id: authorId },
+        select: { name: true, githubUsername: true },
+      });
+      candidates = author && matches(author) ? [authorId] : [];
+    }
+    const allowed = await this.policy.filterUsersWithProjectAction(
+      project.id,
+      candidates,
+      'task.read',
+    );
+    return allowed[0] ?? null;
+  }
+
+  /**
    * Analyse le contenu Markdown d'une note pour extraire les lignes de type "- [ ] Tâche"
    * et les transformer automatiquement en tâches réelles en base de données.
    */
@@ -299,6 +350,7 @@ export class NotesService {
       }
     }
 
+    let writableIds: string[] | null = null;
     let inCodeBlock = false;
     for (const line of lines) {
       if (line.trim().startsWith('```')) {
@@ -338,22 +390,6 @@ export class NotesService {
 
         // Déterminer la date limite (dueDate) et l'assigné si trouvés par l'IA
         const dueDate = this.normalizeDueDate(aiTask?.dueDate);
-        let assigneeId: string | null = null;
-
-        if (aiTask && aiTask.assigneeName) {
-          const user = await this.prisma.user.findFirst({
-            where: {
-              OR: [
-                { name: { equals: aiTask.assigneeName } },
-                { githubUsername: { equals: aiTask.assigneeName } },
-              ],
-            },
-          });
-          if (user) {
-            assigneeId = user.id;
-          }
-        }
-
         // Extraire un tag de projet (ex: #ProjetA ou #Startup-Pro)
         const hasProjectTag = /#[^\s#]+/u.test(taskText);
         let targetProjectName = 'Inbox';
@@ -363,10 +399,16 @@ export class NotesService {
           taskText = projectTagMatch.taskText;
         }
 
-        // 1. Récupérer ou créer le projet cible actif
+        // 1. Projet cible : un projet de l'auteur où il peut écrire des tâches (politique, S12-f),
+        // sinon un projet personnel du même nom, créé au besoin. Jamais d'erreur ni d'oracle.
+        // Calculé une fois par analyse (O6) ; les projets personnels créés en cours de route y sont ajoutés.
+        writableIds ??= await this.policy.listAccessibleProjectIds(userId, {
+          action: 'task.write',
+        });
         let project = await this.prisma.project.findFirst({
           where: {
-            name: { equals: targetProjectName },
+            id: { in: writableIds },
+            name: targetProjectName,
             userId,
             deletedAt: null,
           },
@@ -383,7 +425,15 @@ export class NotesService {
               userId,
             },
           });
+          writableIds.push(project.id);
         }
+
+        // Assigné proposé par l'IA : uniquement une personne qui peut lire le projet où se trouvera
+        // la tâche (S12-f, S12-i). Résolu dans chaque branche, après la décision de déplacement.
+        const resolveFor = (target: { id: string; workspaceId: string | null }) =>
+          aiTask?.assigneeName
+            ? this.resolveAssignee(userId, target, aiTask.assigneeName)
+            : Promise.resolve(null);
 
         const taskStatus = isDone ? 'DONE' : 'TODO';
 
@@ -391,9 +441,23 @@ export class NotesService {
           // Vérifier que l'identifiant appartient bien à cette note et à cet utilisateur.
           const existingTask = await this.prisma.task.findFirst({
             where: { id: taskId, userId, noteId },
+            include: { project: { select: { workspaceId: true } } },
           });
 
-          if (existingTask) {
+          // L'auteur doit encore pouvoir écrire dans le projet actuel de la tâche (S12-f)
+          const canWriteExisting =
+            !!existingTask &&
+            (
+              await this.policy.filterUsersWithProjectAction(
+                existingTask.projectId,
+                [userId],
+                'task.write',
+              )
+            ).length > 0;
+
+          if (existingTask && !canWriteExisting) {
+            updatedLines.push(line);
+          } else if (existingTask) {
             // Mettre à jour si le statut, le titre, la date limite ou le projet a changé dans la note
             const statusChanged =
               existingTask.status === 'DONE' && !isDone
@@ -402,7 +466,11 @@ export class NotesService {
                   ? 'DONE'
                   : null;
             const titleChanged = existingTask.title !== taskText;
-            const projectChanged = existingTask.projectId !== project.id;
+            // S12-h : une note ne déplace une tâche que dans le même workspace (ou entre projets
+            // personnels) ; sinon le projet reste inchangé, sans erreur, les autres champs sont appliqués.
+            const sameWorkspace =
+              (existingTask.project?.workspaceId ?? null) === (project.workspaceId ?? null);
+            const projectChanged = existingTask.projectId !== project.id && sameWorkspace;
             const dateChanged = dueDate
               ? existingTask.dueDate
                 ? existingTask.dueDate.toISOString().split('T')[0] !==
@@ -422,14 +490,27 @@ export class NotesService {
                 data: {
                   title: taskText,
                   status: statusChanged ?? existingTask.status,
-                  projectId: project.id,
+                  projectId: projectChanged ? project.id : existingTask.projectId,
                   dueDate: dueDate || undefined,
                   deletedAt: null,
                 },
               });
+              if (projectChanged) {
+                // Les abonnés de l'ancien projet quittent le salon de la tâche (S16-c)
+                this.realtime.evictTaskRoom(taskId);
+              }
               console.log(`Tâche "${taskId}" mise à jour depuis la note.`);
             }
 
+            // Projet effectif : le projet d'origine si le déplacement est refusé (S12-i)
+            const assigneeId = await resolveFor(
+              projectChanged
+                ? project
+                : {
+                    id: existingTask.projectId,
+                    workspaceId: existingTask.project?.workspaceId ?? null,
+                  },
+            );
             if (assigneeId) {
               const existingAssignee = await this.prisma.taskAssignee.findUnique({
                 where: { taskId_userId: { taskId, userId: assigneeId } },
@@ -446,6 +527,7 @@ export class NotesService {
           } else {
             // Ne pas réutiliser l'identifiant d'un marqueur périmé ou étranger.
             const newTaskId = randomUUID();
+            const assigneeId = await resolveFor(project);
             await this.prisma.task.create({
               data: {
                 id: newTaskId,
@@ -470,6 +552,7 @@ export class NotesService {
         } else {
           // Aucun identifiant présent : création d'une nouvelle tâche et injection du tag dans la note
           const newTaskId = randomUUID();
+          const assigneeId = await resolveFor(project);
 
           await this.prisma.task.create({
             data: {

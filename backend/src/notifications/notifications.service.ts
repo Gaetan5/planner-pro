@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { NotificationsGateway } from './notifications.gateway';
+import { RealtimeService } from '../realtime/realtime.service';
 import { MailService } from '../mail/mail.service';
 import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
 import { Notification, Prisma } from '@prisma/client';
@@ -9,7 +9,7 @@ import { Notification, Prisma } from '@prisma/client';
 export class NotificationsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly gateway: NotificationsGateway,
+    private readonly realtime: RealtimeService,
     private readonly mailService: MailService,
     private readonly firestoreSync: FirestoreSyncService,
   ) {}
@@ -53,7 +53,7 @@ export class NotificationsService {
     });
 
     // Émettre l'événement temps réel
-    this.gateway.sendNotificationToUser(data.userId, 'new-notification', notification);
+    this.realtime.emitToUser(data.userId, 'new-notification', notification);
 
     // Envoi d'email asynchrone si c'est une mention
     if (data.type === 'MENTION') {
