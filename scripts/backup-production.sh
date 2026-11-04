@@ -58,8 +58,12 @@ if [[ -e "$backup_file" ]]; then
   exit 1
 fi
 
+# Compte applicatif (droits complets sur la seule base de l'application) plutôt que root :
+# moindre privilège, et MYSQL_ROOT_PASSWORD n'est lu par MySQL qu'à l'initialisation du volume,
+# si bien qu'une rotation de cette variable rendait root inutilisable (échecs du 1er au 4 nov. 2026).
+# --no-tablespaces : le privilège PROCESS n'est pas requis. Le schéma Prisma ne définit aucune routine.
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T db \
-  sh -ec 'export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; exec mysqldump --user=root --single-transaction --routines --triggers --events --hex-blob --databases "$MYSQL_DATABASE"' |
+  sh -ec 'export MYSQL_PWD="$MYSQL_PASSWORD"; exec mysqldump --user="$MYSQL_USER" --single-transaction --no-tablespaces --triggers --events --hex-blob --databases "$MYSQL_DATABASE"' </dev/null |
   gzip -c |
   gpg --homedir "$GNUPGHOME" --batch --yes --pinentry-mode loopback \
     --passphrase-file "$PASSPHRASE_FILE" \
