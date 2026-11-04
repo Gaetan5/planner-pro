@@ -8,6 +8,11 @@ const prettierConfig = require('eslint-config-prettier');
 const compat = new FlatCompat();
 
 module.exports = [
+  {
+    // Artefacts générés (build) : ne jamais les analyser (bundle minifié bloquant en CI).
+    // vite.config.ts : hors des tsconfig (parserOptions.project), config de build uniquement.
+    ignores: ['**/dist/**', '**/node_modules/**', '**/coverage/**', 'frontend/vite.config.ts'],
+  },
   js.configs.recommended,
   ...compat.extends('plugin:@typescript-eslint/recommended', 'plugin:prettier/recommended'),
   {
