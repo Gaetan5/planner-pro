@@ -239,6 +239,41 @@ describe('A3/S7 : cycle de vie des sessions (HTTP)', () => {
     expect((await refresh(jar)).status).toBe(401);
   });
 
+  describe('S18.3 : plafond de 12 h pour les comptes de plateforme', () => {
+    const ageSession = (hours: number) =>
+      prisma.refreshToken.rows.forEach((r) => {
+        r.authenticatedAt = new Date(Date.now() - hours * 3600 * 1000);
+      });
+
+    it('un compte platformRole ne rafraîchit plus sa session après 12 h', async () => {
+      const { jar } = await login();
+      await prisma.user.update({
+        where: { id: 'user-1' },
+        data: { platformRole: 'PLATFORM_ADMIN' },
+      });
+      ageSession(13);
+      expect((await refresh(jar)).status).toBe(401);
+    });
+
+    it('le même compte avant 12 h : session rafraîchie, et le refresh émis ne dépasse pas le plafond', async () => {
+      const { jar } = await login();
+      await prisma.user.update({ where: { id: 'user-1' }, data: { platformRole: 'SUPER_ADMIN' } });
+      ageSession(11);
+      const res = await refresh(jar);
+      expect(res.status).toBe(201);
+      const newest = prisma.refreshToken.rows[prisma.refreshToken.rows.length - 1];
+      expect((newest.expiresAt as Date).getTime() - Date.now()).toBeLessThanOrEqual(
+        3600 * 1000 + 5000,
+      );
+    });
+
+    it('un compte ordinaire à 13 h : toujours rafraîchi (plafond de 30 jours)', async () => {
+      const { jar } = await login();
+      ageSession(13);
+      expect((await refresh(jar)).status).toBe(201);
+    });
+  });
+
   it('refresh sans cookie : 401', async () => {
     expect((await refresh({})).status).toBe(401);
   });

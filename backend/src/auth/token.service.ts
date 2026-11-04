@@ -17,6 +17,8 @@ export interface AccessTokenClaims {
   /** Identifiant de session (famille de jetons de rafraîchissement) : obligatoire (S7). */
   sid: string;
   impersonatedBy?: string;
+  /** Acteur réel d'une impersonation (RFC 8693) : `act.sub` = identifiant de l'administrateur. */
+  act?: { sub: string };
 }
 
 export interface VerifiedAccessToken extends AccessTokenClaims {
@@ -61,7 +63,11 @@ export class TokenService {
    */
   signAccessToken(claims: AccessTokenClaims): string {
     return this.jwtService.sign(
-      { ...claims, typ: ACCESS_TOKEN_TYPE },
+      {
+        ...claims,
+        ...(claims.impersonatedBy ? { act: { sub: claims.impersonatedBy } } : {}),
+        typ: ACCESS_TOKEN_TYPE,
+      },
       { expiresIn: ACCESS_TOKEN_TTL_SECONDS, jwtid: randomUUID() },
     );
   }
@@ -90,6 +96,12 @@ export class TokenService {
       !payload.sid
     ) {
       throw new UnauthorizedException("Token d'authentification invalide ou expiré.");
+    }
+
+    // `act` fait foi : un jeton qui le porte est une impersonation, quel que soit `impersonatedBy`
+    const act = payload.act as { sub?: unknown } | undefined;
+    if (typeof act?.sub === 'string' && act.sub) {
+      payload.impersonatedBy = act.sub;
     }
 
     return payload as unknown as VerifiedAccessToken;

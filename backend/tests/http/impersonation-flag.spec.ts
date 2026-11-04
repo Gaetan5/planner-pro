@@ -30,7 +30,9 @@ describe('S18 étape 0 : drapeau FEATURE_IMPERSONATION_ENABLED (HTTP)', () => {
     getOverview: jest.fn().mockResolvedValue({ totals: {} }),
   };
   const prisma = {
-    user: { findUnique: jest.fn().mockResolvedValue({ platformRole: 'SUPER_ADMIN' }) },
+    user: {
+      findUnique: jest.fn().mockResolvedValue({ platformRole: 'SUPER_ADMIN', mfaEnabled: true }),
+    },
   };
 
   beforeAll(async () => {
@@ -69,7 +71,11 @@ describe('S18 étape 0 : drapeau FEATURE_IMPERSONATION_ENABLED (HTTP)', () => {
   const impersonate = (token?: string) =>
     fetch(`${baseUrl}/admin/users/u-2/impersonate`, {
       method: 'POST',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ reason: 'Ticket support 4521, reproduction' }),
     });
 
   it('drapeau absent : 404 pour un SUPER_ADMIN, aucun jeton émis', async () => {
@@ -89,7 +95,12 @@ describe('S18 étape 0 : drapeau FEATURE_IMPERSONATION_ENABLED (HTTP)', () => {
     expect((await impersonate()).status).toBe(401);
     const res = await impersonate(adminToken);
     expect(res.status).toBe(201);
-    expect(adminService.impersonateUser).toHaveBeenCalledWith('admin-1', 'u-2');
+    expect(adminService.impersonateUser).toHaveBeenCalledWith(
+      'admin-1',
+      'u-2',
+      'Ticket support 4521, reproduction',
+      STUB_SID,
+    );
   });
 
   it('les autres routes admin ne dépendent pas du drapeau', async () => {

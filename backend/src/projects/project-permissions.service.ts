@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ProjectRole } from '@prisma/client';
 import { PolicyService } from '../authz/policy.service';
@@ -27,8 +27,33 @@ export class ProjectPermissionsService {
   }
 
   /**
+   * Seul un OWNER/ADMIN du workspace modifie ou retire un MANAGER effectif du projet (P12). Un
+   * MANAGER peut se rétrograder ou se retirer lui-même, sauf le créateur du projet, dont le rôle ne
+   * dépend pas de la `ProjectMembership`. Refus avant toute écriture.
+   */
+  private async assertMayChangeTarget(
+    project: { id: string; userId: string; workspaceId: string | null },
+    targetUserId: string,
+    actorUserId: string,
+  ) {
+    if (!project.workspaceId) return;
+    const targetRole = await this.policy.effectiveProjectRole(project, targetUserId);
+    if (targetRole !== 'MANAGER') return;
+    const actor = await this.prisma.membership.findFirst({
+      where: { workspaceId: project.workspaceId, userId: actorUserId },
+    });
+    if (actor?.role === 'OWNER' || actor?.role === 'ADMIN') return;
+    if (targetUserId === actorUserId && project.userId !== actorUserId) return;
+    throw new ForbiddenException(
+      "Seul un propriétaire ou un administrateur de l'espace peut modifier ou retirer un manager du projet.",
+    );
+  }
+
+  /**
    * Assigne ou met à jour le rôle d'un utilisateur sur un projet.
-   * L'appelant doit être OWNER/ADMIN du workspace parent ou MANAGER du projet.
+   * L'appelant doit être OWNER/ADMIN du workspace parent ou MANAGER du projet. La cible doit être
+   * membre du workspace du projet (S17 : sinon la ligne serait orpheline, S12-a) et seul un
+   * OWNER/ADMIN du workspace peut attribuer le rôle MANAGER.
    */
   async assignProjectRole(
     projectId: string,
@@ -46,6 +71,23 @@ export class ProjectPermissionsService {
 
     // Valider les permissions de l'acteur (OWNER/ADMIN du workspace ou MANAGER du projet)
     await this.assertProjectRole(projectId, actorUserId, ['MANAGER']);
+
+    if (!project.workspaceId) {
+      throw new ForbiddenException("Un projet personnel n'a pas de membres.");
+    }
+    const target = await this.prisma.membership.findFirst({
+      where: { workspaceId: project.workspaceId, userId: targetUserId },
+      select: { id: true },
+    });
+    if (!target) {
+      throw new ForbiddenException(
+        "La personne ciblée n'est pas membre de l'espace de travail de ce projet.",
+      );
+    }
+    if (role === 'MANAGER') {
+      await this.policy.assertWorkspaceRoles(project.workspaceId, actorUserId, ['OWNER', 'ADMIN']);
+    }
+    await this.assertMayChangeTarget(project, targetUserId, actorUserId);
 
     const membership = await this.prisma.projectMembership.upsert({
       where: {
@@ -77,7 +119,8 @@ export class ProjectPermissionsService {
    * Supprime l'accès d'un utilisateur à un projet.
    */
   async removeProjectRole(projectId: string, targetUserId: string, actorUserId: string) {
-    await this.assertProjectRole(projectId, actorUserId, ['MANAGER']);
+    const project = await this.policy.assertProjectRoles(projectId, actorUserId, ['MANAGER']);
+    await this.assertMayChangeTarget(project, targetUserId, actorUserId);
 
     const membership = await this.prisma.projectMembership.findUnique({
       where: {

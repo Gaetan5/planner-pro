@@ -8,16 +8,17 @@ type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-exp
 export const W = 'ws-1';
 export const OTHER_W = 'ws-2';
 
+// Identifiants au format UUID v4 : les DTO (ex. `AssignProjectRoleDto`) exigent un UUID (S17)
 export const USERS = {
-  owner: 'u-owner',
-  admin: 'u-admin',
-  member: 'u-member', // MEMBER sans ProjectMembership
-  contributor: 'u-contributor', // MEMBER + CONTRIBUTOR sur P1
-  commenter: 'u-commenter', // MEMBER + COMMENTER sur P1
-  viewer: 'u-viewer', // VIEWER sans ProjectMembership
-  client: 'u-client', // VIEWER + CLIENT sur P1
-  outsider: 'u-outsider', // membre d'un AUTRE workspace
-  deprovisioned: 'u-deprov', // ProjectMembership CONTRIBUTOR sur P1 mais plus de Membership (désactivé par SCIM)
+  owner: '00000000-0000-4000-8000-000000000001',
+  admin: '00000000-0000-4000-8000-000000000002',
+  member: '00000000-0000-4000-8000-000000000003', // MEMBER sans ProjectMembership
+  contributor: '00000000-0000-4000-8000-000000000004', // MEMBER + CONTRIBUTOR sur P1
+  commenter: '00000000-0000-4000-8000-000000000005', // MEMBER + COMMENTER sur P1
+  viewer: '00000000-0000-4000-8000-000000000006', // VIEWER sans ProjectMembership
+  client: '00000000-0000-4000-8000-000000000007', // VIEWER + CLIENT sur P1
+  outsider: '00000000-0000-4000-8000-000000000008', // membre d'un AUTRE workspace
+  deprovisioned: '00000000-0000-4000-8000-000000000009', // ProjectMembership CONTRIBUTOR sur P1 mais plus de Membership (désactivé par SCIM)
 } as const;
 
 export type Persona = keyof typeof USERS;

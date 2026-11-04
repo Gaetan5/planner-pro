@@ -163,5 +163,42 @@ describe('AdminConsole', () => {
       await openUsersTab();
       expect(await screen.findByRole('button', { name: /Impersonate/i })).toBeInTheDocument();
     });
+
+    // S18.2 : motif obligatoire (10 à 500 caractères), transmis au serveur
+    describe('motif de l’impersonation', () => {
+      const impersonateCalls = () =>
+        vi.mocked(global.fetch).mock.calls.filter(([url]) => String(url).includes('/impersonate'));
+
+      beforeEach(() => {
+        vi.spyOn(window, 'confirm').mockReturnValue(true);
+      });
+
+      it('sans motif (invite annulée) ou motif trop court : aucune requête d’impersonation', async () => {
+        routeFetch(true);
+        await openUsersTab();
+        const button = await screen.findByRole('button', { name: /Impersonate/i });
+
+        vi.spyOn(window, 'prompt').mockReturnValue(null);
+        fireEvent.click(button);
+        vi.spyOn(window, 'prompt').mockReturnValue('court');
+        fireEvent.click(button);
+
+        await waitFor(() => expect(window.prompt).toHaveBeenCalled());
+        expect(impersonateCalls()).toHaveLength(0);
+      });
+
+      it('motif valide : transmis dans le corps de la requête', async () => {
+        routeFetch(true);
+        await openUsersTab();
+        vi.spyOn(window, 'prompt').mockReturnValue('Ticket support 4521, reproduction du bug');
+        fireEvent.click(await screen.findByRole('button', { name: /Impersonate/i }));
+
+        await waitFor(() => expect(impersonateCalls()).toHaveLength(1));
+        const [, init] = impersonateCalls()[0];
+        expect(JSON.parse(String((init as RequestInit).body))).toEqual({
+          reason: 'Ticket support 4521, reproduction du bug',
+        });
+      });
+    });
   });
 });

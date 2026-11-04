@@ -91,11 +91,12 @@ describe('PolicyService : matrice RBAC', () => {
     expect(await allowed(() => policy.assertWorkspace(W, USERS[persona], action))).toBe(expected);
   });
 
-  it('un VIEWER ne gère pas les sprints mais les lit', async () => {
+  it('un VIEWER ne gère ni ne lit les sprints (P11), un MEMBER les lit', async () => {
     expect(await allowed(() => policy.assertWorkspace(W, USERS.viewer, 'sprint.manage'))).toBe(
       false,
     );
-    expect(await allowed(() => policy.assertWorkspace(W, USERS.viewer, 'sprint.read'))).toBe(true);
+    expect(await allowed(() => policy.assertWorkspace(W, USERS.viewer, 'sprint.read'))).toBe(false);
+    expect(await allowed(() => policy.assertWorkspace(W, USERS.member, 'sprint.read'))).toBe(true);
   });
 
   it('un membre d’un autre workspace n’a aucun accès, ni projet ni workspace', async () => {

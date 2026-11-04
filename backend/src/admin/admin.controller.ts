@@ -17,7 +17,8 @@ import { setSessionCookies } from '../auth/session-cookies';
 import { User, AuthenticatedUser } from '../auth/user.decorator';
 import { AdminService } from './admin.service';
 import { PlatformAdminGuard } from './platform-admin.guard';
-import { AdminPaginationQueryDto, UpdateUserRoleDto } from './dto/admin.dto';
+import { PlatformRoles } from './platform-roles.decorator';
+import { AdminPaginationQueryDto, ImpersonateUserDto, UpdateUserRoleDto } from './dto/admin.dto';
 import { FeatureFlagGuard, RequireFeature } from '../config/feature-flag.guard';
 
 // Aucune action d'administration depuis une session d'impersonation (S18.2)
@@ -50,6 +51,7 @@ export class AdminController {
   }
 
   @Patch('users/:id/role')
+  @PlatformRoles('SUPER_ADMIN')
   updateUserRole(
     @User() actor: AuthenticatedUser,
     @Param('id') targetUserId: string,
@@ -65,12 +67,19 @@ export class AdminController {
 
   @Post('users/:id/impersonate')
   @RequireFeature('IMPERSONATION')
+  @PlatformRoles('SUPER_ADMIN')
   async impersonateUser(
     @User() actor: AuthenticatedUser,
     @Param('id') targetUserId: string,
+    @Body() dto: ImpersonateUserDto,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const { session, ...body } = await this.adminService.impersonateUser(actor.id, targetUserId);
+    const { session, ...body } = await this.adminService.impersonateUser(
+      actor.id,
+      targetUserId,
+      dto.reason,
+      actor.sid,
+    );
     // La session d'impersonation remplace les cookies du navigateur ; aucun jeton dans le corps
     setSessionCookies(res, session);
     return body;

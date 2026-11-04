@@ -9,6 +9,7 @@ import { Public } from '../../src/auth/public.decorator';
 import { ScimAuthGuard } from '../../src/auth/scim/scim.guard';
 import { ScimController } from '../../src/auth/scim/scim.controller';
 import { ScimService } from '../../src/auth/scim/scim.service';
+import { FirestoreSyncService } from '../../src/firestore-sync/firestore-sync.service';
 import { SessionService } from '../../src/auth/session.service';
 import { TokenService } from '../../src/auth/token.service';
 import { AppThrottlerGuard, resolveThrottlerTracker } from '../../src/common/app-throttler.guard';
@@ -49,6 +50,7 @@ describe('S11-a : Débit SCIM par clé et non par IP', () => {
       controllers: [ScimController],
       providers: [
         ScimService,
+        { provide: FirestoreSyncService, useValue: { enqueue: jest.fn() } },
         { provide: RealtimeService, useValue: { refreshUserRooms: jest.fn() } },
         ScimAuthGuard,
         JwtAuthGuard,
@@ -232,6 +234,7 @@ describe('S11-b : le limiteur de débit ne peut pas être contourné par l’URL
       controllers: [ScimController, StubAuthController],
       providers: [
         ScimService,
+        { provide: FirestoreSyncService, useValue: { enqueue: jest.fn() } },
         { provide: RealtimeService, useValue: { refreshUserRooms: jest.fn() } },
         ScimAuthGuard,
         JwtAuthGuard,

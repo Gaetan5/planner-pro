@@ -1,4 +1,4 @@
-import { ExecutionContext, ForbiddenException } from '@nestjs/common';
+import { ExecutionContext, ForbiddenException, RequestMethod } from '@nestjs/common';
 import { PATH_METADATA, METHOD_METADATA, GUARDS_METADATA } from '@nestjs/common/constants';
 import { Reflector } from '@nestjs/core';
 import { AdminController } from '../../../src/admin/admin.controller';
@@ -7,6 +7,9 @@ import { IS_FORBIDDEN_IN_IMPERSONATION } from '../../../src/auth/forbidden-in-im
 import { JwtAuthGuard } from '../../../src/auth/jwt.guard';
 import { IS_PUBLIC_KEY } from '../../../src/auth/public.decorator';
 import { SsoController } from '../../../src/auth/sso/sso.controller';
+import { ScimController } from '../../../src/auth/scim/scim.controller';
+import { InvitationsController } from '../../../src/projects/invitations.controller';
+import { ProjectsController } from '../../../src/projects/projects.controller';
 
 /**
  * S18.2 : une session d'impersonation (15 min) ne doit pas pouvoir créer un accès persistant au
@@ -55,6 +58,16 @@ describe('S18.2 : routes interdites en session d’impersonation', () => {
     [AuthController, 'revokeSession'],
     [AdminController, 'getOverview'],
     [AdminController, 'impersonateUser'],
+    // S18.2-bis : accès persistant aux espaces de la cible
+    [InvitationsController, 'createInvitation'],
+    [ProjectsController, 'assignProjectRole'],
+    [ProjectsController, 'removeProjectRole'],
+    [ScimController, 'createApiKey'],
+    [SsoController, 'configureWorkspaceSSO'],
+    [SsoController, 'verifyDomain'],
+    [SsoController, 'deleteWorkspaceSSO'],
+    [ProjectsController, 'createIntegration'],
+    [ProjectsController, 'handleOAuthCallback'],
   ];
 
   it.each(forbidden)(
@@ -109,11 +122,46 @@ describe('S18.2 : routes interdites en session d’impersonation', () => {
         r.controller as never,
       ]) === true;
 
-    const all = [AuthController, AdminController, SsoController].flatMap(routesOf);
+    // S18.2-bis : routes qui créent un accès durable aux données d'un espace (invitation, rôle de
+    // projet, clé SCIM, SSO, intégration sortante). Méthode explicite pour ne pas viser les lectures.
+    const PERSISTENT_ACCESS: Array<{ method: RequestMethod[]; pattern: RegExp }> = [
+      {
+        method: [RequestMethod.POST],
+        pattern: /^\/projects\/workspaces\/:workspaceId\/invitations$/,
+      },
+      { method: [RequestMethod.POST], pattern: /^\/projects\/:id\/members$/ },
+      { method: [RequestMethod.DELETE], pattern: /^\/projects\/:id\/members\/:userId$/ },
+      { method: [RequestMethod.POST], pattern: /^\/workspaces\/:workspaceId\/scim\/keys$/ },
+      {
+        method: [RequestMethod.POST, RequestMethod.DELETE],
+        pattern: /^\/workspaces\/:workspaceId\/sso(\/verify-domain)?$/,
+      },
+      {
+        method: [RequestMethod.POST],
+        pattern: /^\/projects\/workspaces\/:workspaceId\/integrations$/,
+      },
+      {
+        method: [RequestMethod.POST],
+        pattern: /^\/projects\/workspaces\/:workspaceId\/calendar\/oauth\/callback$/,
+      },
+    ];
+
+    const all = [
+      AuthController,
+      AdminController,
+      SsoController,
+      ScimController,
+      InvitationsController,
+      ProjectsController,
+    ].flatMap(routesOf);
     const sensitive = all.filter(
       (r) =>
         // Les routes publiques ne lisent jamais la session : le garde ne s'y applique pas
-        !isPublic(r) && SENSITIVE.some((pattern) => pattern.test(r.full)),
+        !isPublic(r) &&
+        (SENSITIVE.some((pattern) => pattern.test(r.full)) ||
+          PERSISTENT_ACCESS.some(
+            (p) => p.method.includes(r.method as RequestMethod) && p.pattern.test(r.full),
+          )),
     );
 
     it('le balayage trouve bien les routes attendues', () => {
@@ -128,6 +176,14 @@ describe('S18.2 : routes interdites en session d’impersonation', () => {
           '/auth/firebase/link',
           '/auth/sessions/:sid',
           '/admin/overview',
+          '/projects/workspaces/:workspaceId/invitations',
+          '/projects/:id/members',
+          '/projects/:id/members/:userId',
+          '/workspaces/:workspaceId/scim/keys',
+          '/workspaces/:workspaceId/sso',
+          '/workspaces/:workspaceId/sso/verify-domain',
+          '/projects/workspaces/:workspaceId/integrations',
+          '/projects/workspaces/:workspaceId/calendar/oauth/callback',
         ]),
       );
     });

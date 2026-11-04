@@ -118,4 +118,50 @@ describe('AppContext : session sans jeton lisible (S7)', () => {
     expect(localStorage.getItem('planner_user')).toBeNull();
     await waitFor(() => expect(ctx.user).toBeNull());
   });
+
+  describe('appel à la capacité des ressources (P11)', () => {
+    const loadAs = async (role: 'VIEWER' | 'MEMBER') => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = String(input);
+          calls.push({ url, init });
+          const body = url.endsWith('/projects/workspaces')
+            ? [{ id: 'w-1', name: 'W', memberships: [{ role, user: { id: 'u-1' } }] }]
+            : [];
+          return {
+            ok: true,
+            status: 200,
+            json: async () => body,
+            text: async () => JSON.stringify(body),
+          } as Response;
+        }),
+      );
+      localStorage.setItem(
+        'planner_user',
+        JSON.stringify({ id: 'u-1', name: 'Ada', email: 'ada@corp.com' }),
+      );
+      render(
+        <AppProvider>
+          <Probe />
+        </AppProvider>,
+      );
+      await waitFor(() => expect(ctx.getWorkspaceRole('w-1')).toBe(role));
+    };
+    const capacityCalls = () => calls.filter((c) => c.url.includes('/projects/resources/capacity'));
+
+    it('VIEWER : aucun appel à /projects/resources/capacity', async () => {
+      await loadAs('VIEWER');
+      // laisse passer la suite du chargement : un appel éventuel aurait lieu juste après
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      });
+      expect(capacityCalls()).toHaveLength(0);
+    });
+
+    it('contrôle positif : MEMBER, un appel à /projects/resources/capacity', async () => {
+      await loadAs('MEMBER');
+      await waitFor(() => expect(capacityCalls()).toHaveLength(1));
+    });
+  });
 });

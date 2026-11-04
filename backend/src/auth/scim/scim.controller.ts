@@ -17,6 +17,7 @@ import {
 import { ScimService } from './scim.service';
 import { ScimEndpoint, ScimExceptionFilter } from './scim-http';
 import { Public } from '../public.decorator';
+import { ForbiddenInImpersonation } from '../forbidden-in-impersonation.decorator';
 import {
   CreateScimKeyDto,
   CreateScimUserDto,
@@ -114,6 +115,7 @@ export class ScimController {
     return this.scimService.listApiKeys(workspaceId, req.user.id);
   }
   @Post('workspaces/:workspaceId/scim/keys')
+  @ForbiddenInImpersonation()
   async createApiKey(
     @Param('workspaceId') workspaceId: string,
     @Body() body: CreateScimKeyDto,

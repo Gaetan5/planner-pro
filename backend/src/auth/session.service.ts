@@ -7,6 +7,8 @@ import { ACCESS_TOKEN_TTL_SECONDS, TokenService, VerifiedAccessToken } from './t
 /** Jeton de rafraîchissement : 7 jours glissants, dans la limite de 30 jours depuis la connexion. */
 export const REFRESH_TOKEN_TTL_SECONDS = 7 * 24 * 3600;
 export const SESSION_ABSOLUTE_LIFETIME_SECONDS = 30 * 24 * 3600;
+/** Comptes de plateforme (`platformRole`) : reconnexion au plus tard après 12 h (S18.3). */
+export const PLATFORM_SESSION_ABSOLUTE_LIFETIME_SECONDS = 12 * 3600;
 /** Cache Redis du statut de session : 60 s au maximum (critère S7). */
 export const SESSION_CACHE_TTL_SECONDS = 60;
 /** Un jeton déjà tourné présenté dans ce délai est un rejeu bénin (deux onglets), pas un vol. */
@@ -165,7 +167,7 @@ export class SessionService {
       throw new UnauthorizedException('Session expirée. Veuillez vous reconnecter.');
     }
 
-    const absoluteLimit = new Date(
+    let absoluteLimit = new Date(
       row.authenticatedAt.getTime() + SESSION_ABSOLUTE_LIFETIME_SECONDS * 1000,
     );
     if (row.expiresAt <= now || absoluteLimit <= now) {
@@ -180,6 +182,20 @@ export class SessionService {
     if (!user || user.isSuspended) {
       await this.revoke(row.familyId);
       throw new UnauthorizedException('Session expirée. Veuillez vous reconnecter.');
+    }
+
+    // Compte de plateforme : plafond absolu réduit à 12 h (S18.3), lu sur le rôle actuel
+    if (user.platformRole) {
+      absoluteLimit = new Date(
+        Math.min(
+          absoluteLimit.getTime(),
+          row.authenticatedAt.getTime() + PLATFORM_SESSION_ABSOLUTE_LIFETIME_SECONDS * 1000,
+        ),
+      );
+      if (absoluteLimit <= now) {
+        await this.revoke(row.familyId);
+        throw new UnauthorizedException('Session expirée. Veuillez vous reconnecter.');
+      }
     }
 
     // Consommation atomique : une seule requête concurrente peut tourner ce jeton

@@ -316,12 +316,21 @@ export function AdminConsole() {
   // Action: Impersonate
   const handleImpersonate = async (targetUserId: string, email: string) => {
     if (!window.confirm(`Se connecter immédiatement sous l'identité de ${email} ?`)) return;
+    // Motif obligatoire (S18.2) : conservé dans le journal d'audit de la plateforme
+    const reason = window
+      .prompt(`Motif de l'impersonation de ${email} (10 à 500 caractères, journalisé) :`)
+      ?.trim();
+    if (!reason || reason.length < 10 || reason.length > 500) {
+      setError("Le motif de l'impersonation doit comporter entre 10 et 500 caractères.");
+      return;
+    }
     setActionLoadingId(targetUserId);
     setError(null);
     try {
       const res = await fetch(`${API_URL}/admin/users/${targetUserId}/impersonate`, {
         method: 'POST',
         headers: getHeaders(),
+        body: JSON.stringify({ reason }),
       });
       if (!res.ok) throw new Error("Échec de l'impersonation.");
       const data = await res.json();

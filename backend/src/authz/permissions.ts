@@ -6,7 +6,11 @@
  * - Rôles de projet : MANAGER > CONTRIBUTOR > COMMENTER > CLIENT. Un rôle est accepté s'il est au
  *   moins égal au plus faible des rôles listés pour l'action.
  * - OWNER et ADMIN du workspace sont MANAGER implicites de tous les projets de ce workspace.
- * - Le créateur d'un projet en est MANAGER.
+ * - Le créateur d'un projet de workspace en est MANAGER s'il est au moins MEMBER du workspace
+ *   (P10, décision du 2026-11-04) ; un projet personnel reste réservé à son créateur.
+ * - VIEWER (invité) : appartenance et nom du workspace, projets où il a une `ProjectMembership` ;
+ *   ni annuaire complet, ni sprints, ni capacité, ni intégrations (P11, décision du 2026-11-04).
+ * - Spécification complète, décisions produit et invitations : docs/security/matrice-rbac.md.
  * - Un MEMBER ou un VIEWER SANS `ProjectMembership` n'a AUCUN accès au projet (règle par défaut de
  *   S12, cohérente avec `getProject`). Décision produit P4 tranchée par l'utilisateur le
  *   2026-11-03 : règle stricte, aucun accès implicite. La reprise des accès existants est le script
@@ -21,8 +25,10 @@ const ADMIN_WORKSPACE: WorkspaceRoleName[] = ['OWNER', 'ADMIN'];
 
 export const WORKSPACE_PERMISSIONS = {
   'workspace.read': ALL_WORKSPACE,
+  // Annuaire complet, capacité des ressources, intégrations : jamais pour un VIEWER (P11)
+  'workspace.directory.read': CONTRIBUTE_WORKSPACE,
   'project.create': CONTRIBUTE_WORKSPACE,
-  'sprint.read': ALL_WORKSPACE,
+  'sprint.read': CONTRIBUTE_WORKSPACE,
   'sprint.manage': CONTRIBUTE_WORKSPACE,
   'ai.use': CONTRIBUTE_WORKSPACE,
   'schedule.run': CONTRIBUTE_WORKSPACE,

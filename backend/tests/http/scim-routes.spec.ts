@@ -7,6 +7,7 @@ import { JwtAuthGuard } from '../../src/auth/jwt.guard';
 import { ScimAuthGuard } from '../../src/auth/scim/scim.guard';
 import { ScimController } from '../../src/auth/scim/scim.controller';
 import { ScimService } from '../../src/auth/scim/scim.service';
+import { FirestoreSyncService } from '../../src/firestore-sync/firestore-sync.service';
 import { SessionService } from '../../src/auth/session.service';
 import { TokenService } from '../../src/auth/token.service';
 import { PrismaService } from '../../src/prisma/prisma.service';
@@ -40,6 +41,7 @@ describe('S11 : SCIM (HTTP)', () => {
       controllers: [ScimController],
       providers: [
         ScimService,
+        { provide: FirestoreSyncService, useValue: { enqueue: jest.fn() } },
         { provide: RealtimeService, useValue: { refreshUserRooms: jest.fn() } },
         ScimAuthGuard,
         JwtAuthGuard,

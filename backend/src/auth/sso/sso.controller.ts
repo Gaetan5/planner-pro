@@ -15,6 +15,7 @@ import { Throttle } from '@nestjs/throttler';
 import { SsoService, SSO_FLOW_TTL_SECONDS } from './sso.service';
 import { DiscoverSsoDto, SsoAuthorizeQueryDto, SsoCallbackDto, ConfigureSsoDto } from './sso.dto';
 import { Public } from '../public.decorator';
+import { ForbiddenInImpersonation } from '../forbidden-in-impersonation.decorator';
 import { respondWithLogin, userAgentOf } from '../login-response';
 import { FeatureFlagGuard, RequireFeature } from '../../config/feature-flag.guard';
 
@@ -105,6 +106,7 @@ export class SsoController {
    * Met à jour ou active la configuration SSO d'un espace de travail
    */
   @Post('workspaces/:workspaceId/sso')
+  @ForbiddenInImpersonation()
   async configureWorkspaceSSO(
     @Param('workspaceId') workspaceId: string,
     @Body() dto: ConfigureSsoDto,
@@ -117,6 +119,7 @@ export class SsoController {
    * Vérifie l'enregistrement DNS TXT du domaine (preuve de propriété, S10)
    */
   @Post('workspaces/:workspaceId/sso/verify-domain')
+  @ForbiddenInImpersonation()
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async verifyDomain(
     @Param('workspaceId') workspaceId: string,
@@ -129,6 +132,7 @@ export class SsoController {
    * Supprime la configuration SSO d'un espace de travail
    */
   @Delete('workspaces/:workspaceId/sso')
+  @ForbiddenInImpersonation()
   async deleteWorkspaceSSO(
     @Param('workspaceId') workspaceId: string,
     @Req() req: AuthenticatedUserRequest,

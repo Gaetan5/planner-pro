@@ -14,7 +14,8 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { Public } from '../auth/public.decorator';
-import { DeliverableStatus, ProjectRole } from '@prisma/client';
+import { ForbiddenInImpersonation } from '../auth/forbidden-in-impersonation.decorator';
+import { DeliverableStatus } from '@prisma/client';
 import { ProjectsService } from './projects.service';
 import { SprintService } from './sprint.service';
 import { RealtimeService } from '../realtime/realtime.service';
@@ -38,6 +39,7 @@ import { UpdateDeliveryStatusDto } from './dto/update-delivery-status.dto';
 import { CreateSprintDto } from './dto/create-sprint.dto';
 import { UpdateSprintDto } from './dto/update-sprint.dto';
 import { AssociateTasksDto } from './dto/associate-tasks.dto';
+import { AssignProjectRoleDto } from './dto/assign-project-role.dto';
 import { ProactiveSchedulerService } from './proactive-scheduler.service';
 
 @Controller('projects')
@@ -116,10 +118,11 @@ export class ProjectsController {
   }
 
   @Post(':id/members')
+  @ForbiddenInImpersonation()
   assignProjectRole(
     @Req() req: any,
     @Param('id') projectId: string,
-    @Body() body: { targetUserId: string; role: ProjectRole },
+    @Body() body: AssignProjectRoleDto,
   ) {
     return this.projectPermissionsService.assignProjectRole(
       projectId,
@@ -130,6 +133,7 @@ export class ProjectsController {
   }
 
   @Delete(':id/members/:userId')
+  @ForbiddenInImpersonation()
   removeProjectRole(
     @Req() req: any,
     @Param('id') projectId: string,
@@ -453,17 +457,19 @@ export class ProjectsController {
 
   @Get('workspaces/:workspaceId/integrations')
   async listIntegrations(@Req() req: any, @Param('workspaceId') workspaceId: string) {
-    await this.projectPermissionsService.assertWorkspaceAccess(workspaceId, req.user.id);
+    // Configuration interne : pas pour un VIEWER (P11)
+    await this.policy.assertWorkspace(workspaceId, req.user.id, 'workspace.directory.read');
     return this.integrationService.listIntegrations(workspaceId);
   }
 
   @Get('workspaces/:workspaceId/integrations/status')
   async getIntegrationsStatus(@Req() req: any, @Param('workspaceId') workspaceId: string) {
-    await this.projectPermissionsService.assertWorkspaceAccess(workspaceId, req.user.id);
+    await this.policy.assertWorkspace(workspaceId, req.user.id, 'workspace.directory.read');
     return this.integrationService.getIntegrationsStatus(workspaceId);
   }
 
   @Post('workspaces/:workspaceId/integrations')
+  @ForbiddenInImpersonation()
   async createIntegration(
     @Req() req: any,
     @Param('workspaceId') workspaceId: string,
@@ -554,6 +560,7 @@ export class ProjectsController {
   }
 
   @Post('workspaces/:workspaceId/calendar/oauth/callback')
+  @ForbiddenInImpersonation()
   async handleOAuthCallback(
     @Req() req: any,
     @Param('workspaceId') workspaceId: string,

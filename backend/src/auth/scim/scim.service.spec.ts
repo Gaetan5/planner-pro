@@ -1,6 +1,7 @@
 import { RealtimeService } from '../../realtime/realtime.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ScimService } from './scim.service';
+import { FirestoreSyncService } from '../../firestore-sync/firestore-sync.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   BadRequestException,
@@ -26,6 +27,14 @@ describe('ScimService', () => {
       update: jest.fn(),
       updateMany: jest.fn(),
     },
+    projectMembership: {
+      deleteMany: jest.fn(),
+    },
+    invitation: {
+      findMany: jest.fn(),
+      updateMany: jest.fn(),
+    },
+    $transaction: jest.fn(),
     sSOConfiguration: {
       findUnique: jest.fn(),
     },
@@ -38,6 +47,7 @@ describe('ScimService', () => {
   };
 
   const realtime = { refreshUserRooms: jest.fn() };
+  const firestoreSync = { enqueue: jest.fn() };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -45,11 +55,17 @@ describe('ScimService', () => {
         ScimService,
         { provide: PrismaService, useValue: prisma },
         { provide: RealtimeService, useValue: realtime },
+        { provide: FirestoreSyncService, useValue: firestoreSync },
       ],
     }).compile();
 
     service = module.get<ScimService>(ScimService);
     jest.resetAllMocks();
+    prisma.$transaction.mockImplementation(async (cb: (tx: typeof prisma) => Promise<unknown>) =>
+      cb(prisma),
+    );
+    prisma.invitation.findMany.mockResolvedValue([]);
+    prisma.invitation.updateMany.mockResolvedValue({ count: 1 });
   });
 
   describe('getServiceProviderConfig', () => {
@@ -87,6 +103,137 @@ describe('ScimService', () => {
   });
 
   // S1 : aucune écriture globale sur User, aucun rattachement silencieux, clés limitées au workspace
+  describe('S17 (complément) : DELETE purge les rôles de projet', () => {
+    const user = (memberships: unknown[]) => ({
+      id: 'u-1',
+      email: 'a@corp.com',
+      name: 'A',
+      isSuspended: false,
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+      provisionedByWorkspaceId: null,
+      memberships,
+    });
+
+    it('DELETE : les ProjectMembership du workspace sont supprimées (et eux seuls)', async () => {
+      prisma.user.findUnique.mockResolvedValue(
+        user([{ workspaceId: 'ws-1', userId: 'u-1', role: 'MEMBER' }]),
+      );
+
+      await service.deleteUser('ws-1', 'u-1');
+
+      expect(prisma.membership.delete).toHaveBeenCalledTimes(1);
+      expect(prisma.projectMembership.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'u-1', project: { workspaceId: 'ws-1' } },
+      });
+      expect(realtime.refreshUserRooms).toHaveBeenCalledWith('u-1');
+    });
+
+    it('DELETE après une suspension (membership déjà retirée) : les rôles de projet sont purgés aussi', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        ...user([]),
+        provisionedByWorkspaceId: 'ws-1',
+      });
+
+      await service.deleteUser('ws-1', 'u-1');
+
+      expect(prisma.projectMembership.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'u-1', project: { workspaceId: 'ws-1' } },
+      });
+    });
+
+    it('PATCH active=false (suspension) : les rôles de projet sont conservés', async () => {
+      prisma.user.findUnique.mockResolvedValue(
+        user([{ workspaceId: 'ws-1', userId: 'u-1', role: 'MEMBER' }]),
+      );
+
+      await service.patchUser('ws-1', 'u-1', {
+        schemas: ['urn:ietf:params:scim:api:messages:2.0:PatchOp'],
+        Operations: [{ op: 'replace', path: 'active', value: false }],
+      } as never);
+
+      expect(prisma.projectMembership.deleteMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('S17-a : invitations en attente révoquées au déprovisionnement', () => {
+    const member = {
+      id: 'u-1',
+      email: 'Ada@Corp.com',
+      name: 'Ada',
+      isSuspended: false,
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+      provisionedByWorkspaceId: null,
+      memberships: [{ workspaceId: 'ws-1', userId: 'u-1', role: 'MEMBER' }],
+    };
+    const pending = {
+      id: 'inv-1',
+      email: 'ada@corp.com',
+      role: 'MEMBER',
+      status: 'PENDING',
+      workspaceId: 'ws-1',
+      projectId: null,
+      invitedById: 'adm',
+      expiresAt: new Date('2026-12-01T00:00:00Z'),
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+    };
+    const expectRevoked = () => {
+      // Filtre : ce workspace, en attente, adresse en minuscules (jamais une autre organisation)
+      expect(prisma.invitation.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { workspaceId: 'ws-1', status: 'PENDING', email: 'ada@corp.com' },
+        }),
+      );
+      expect(prisma.invitation.updateMany).toHaveBeenCalledWith({
+        where: { id: 'inv-1', status: 'PENDING' },
+        data: { status: 'REVOKED' },
+      });
+      expect(firestoreSync.enqueue).toHaveBeenCalledWith(
+        prisma,
+        expect.objectContaining({
+          entityType: 'invitation',
+          entityId: 'inv-1',
+          workspaceId: 'ws-1',
+          operation: 'upsert',
+          payload: expect.objectContaining({ status: 'REVOKED' }),
+        }),
+      );
+    };
+
+    it('DELETE : l’invitation en attente de l’utilisateur est révoquée, événement Firestore émis', async () => {
+      prisma.user.findUnique.mockResolvedValue(member);
+      prisma.invitation.findMany.mockResolvedValue([pending]);
+      await service.deleteUser('ws-1', 'u-1');
+      expectRevoked();
+    });
+
+    it('PATCH active=false : même révocation', async () => {
+      prisma.user.findUnique.mockResolvedValue(member);
+      prisma.invitation.findMany.mockResolvedValue([pending]);
+      await service.patchUser('ws-1', 'u-1', {
+        schemas: ['urn:ietf:params:scim:api:messages:2.0:PatchOp'],
+        Operations: [{ op: 'replace', path: 'active', value: false }],
+      } as never);
+      expectRevoked();
+    });
+
+    it('PATCH active=true ou sans changement d’état : aucune révocation', async () => {
+      prisma.user.findUnique.mockResolvedValue(member);
+      await service.patchUser('ws-1', 'u-1', {
+        schemas: ['urn:ietf:params:scim:api:messages:2.0:PatchOp'],
+        Operations: [{ op: 'replace', path: 'displayName', value: 'Ada L.' }],
+      } as never);
+      expect(prisma.invitation.findMany).not.toHaveBeenCalled();
+      expect(prisma.invitation.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('aucune invitation en attente : aucune écriture ni événement', async () => {
+      prisma.user.findUnique.mockResolvedValue(member);
+      await service.deleteUser('ws-1', 'u-1');
+      expect(prisma.invitation.updateMany).not.toHaveBeenCalled();
+      expect(firestoreSync.enqueue).not.toHaveBeenCalled();
+    });
+  });
+
   describe('S1 : isolation inter-tenant', () => {
     const victim = (overrides: Record<string, unknown> = {}) => ({
       id: 'u-victim',

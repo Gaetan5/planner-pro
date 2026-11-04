@@ -142,7 +142,24 @@ export class AdminService {
     };
   }
 
+  /** Rôle de plateforme actuel de l'acteur (relu en base, jamais déduit du jeton), ou 403. */
+  private async assertSuperAdmin(actorId: string): Promise<void> {
+    const actor = await this.prisma.user.findUnique({
+      where: { id: actorId },
+      select: { platformRole: true },
+    });
+    if (actor?.platformRole !== PlatformRole.SUPER_ADMIN) {
+      throw new ForbiddenException('Cette action est réservée à un SUPER_ADMIN.');
+    }
+  }
+
   async updateUserRole(actorId: string, targetUserId: string, newRole: PlatformRole | null) {
+    // S18.1 : seul un SUPER_ADMIN change un rôle, jamais le sien (il en resterait toujours un)
+    await this.assertSuperAdmin(actorId);
+    if (actorId === targetUserId) {
+      throw new ForbiddenException('Vous ne pouvez pas modifier votre propre rôle de plateforme.');
+    }
+
     const targetUser = await this.prisma.user.findUnique({
       where: { id: targetUserId },
       select: { id: true, email: true, name: true, platformRole: true },
@@ -150,21 +167,6 @@ export class AdminService {
 
     if (!targetUser) {
       throw new NotFoundException('Utilisateur cible introuvable.');
-    }
-
-    if (
-      actorId === targetUserId &&
-      targetUser.platformRole === PlatformRole.SUPER_ADMIN &&
-      newRole !== PlatformRole.SUPER_ADMIN
-    ) {
-      const superAdminCount = await this.prisma.user.count({
-        where: { platformRole: PlatformRole.SUPER_ADMIN },
-      });
-      if (superAdminCount <= 1) {
-        throw new ForbiddenException(
-          'Impossible de rétrograder le dernier Super Administrateur de la plateforme.',
-        );
-      }
     }
 
     const previousRole = targetUser.platformRole;
@@ -226,7 +228,14 @@ export class AdminService {
     };
   }
 
-  async impersonateUser(actorId: string, targetUserId: string) {
+  /**
+   * Impersonation (S18) : SUPER_ADMIN seulement, motif obligatoire, jamais sur un compte de
+   * plateforme. La session de l'administrateur est révoquée (S18.3) : le navigateur reçoit celle de
+   * la cible, et l'ancienne famille de jetons de rafraîchissement ne doit pas rester active.
+   */
+  async impersonateUser(actorId: string, targetUserId: string, reason: string, actorSid?: string) {
+    await this.assertSuperAdmin(actorId);
+
     const targetUser = await this.prisma.user.findUnique({
       where: { id: targetUserId },
       select: { id: true, email: true, name: true, platformRole: true, isSuspended: true },
@@ -234,6 +243,9 @@ export class AdminService {
 
     if (!targetUser) {
       throw new NotFoundException('Utilisateur cible introuvable.');
+    }
+    if (targetUser.platformRole) {
+      throw new ForbiddenException("Impossible d'impersonner un compte de la plateforme.");
     }
 
     // Session d'impersonation émise par le point d'entrée unique (A3) : 15 min, non renouvelable
@@ -250,10 +262,17 @@ export class AdminService {
         targetId: targetUserId,
         metadata: {
           targetEmail: targetUser.email,
+          reason,
+          impersonationSessionId: login.session.sid,
           impersonatedAt: new Date().toISOString(),
         },
       },
     });
+
+    // La session de l'administrateur ne survit pas à l'impersonation
+    if (actorSid) {
+      await this.sessionService.revoke(actorSid);
+    }
 
     return {
       message: `Connexion temporaire sous l'identité de ${targetUser.email}`,

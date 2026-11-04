@@ -18,11 +18,13 @@ import { TokenModule } from './token.module';
 import { SessionModule } from './session.module';
 import { ACCESS_TOKEN_TTL_SECONDS } from './token.service';
 import { RedisModule } from '../redis/redis.module';
+import { FirestoreSyncModule } from '../firestore-sync/firestore-sync.module';
 
 @Module({
   imports: [
     PrismaModule,
     RedisModule,
+    FirestoreSyncModule,
     TokenModule,
     SessionModule,
     ConfigModule.forRoot(),

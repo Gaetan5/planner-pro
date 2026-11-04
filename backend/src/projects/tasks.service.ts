@@ -8,6 +8,7 @@ import { UpdateTaskDto } from './dto/update-task.dto';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ProjectPermissionsService } from './project-permissions.service';
+import { taskSyncPayload } from './task-sync-payload';
 import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
 
 export const TASK_INCLUDE = {
@@ -125,7 +126,7 @@ export class TasksService {
           entityId: task.id,
           workspaceId: task.project.workspaceId ?? `personal-${task.project.userId}`,
           operation: task.deletedAt ? 'delete' : 'upsert',
-          payload: this.taskSyncPayload(
+          payload: taskSyncPayload(
             task,
             task.assignees.map((assignee) => assignee.userId),
           ),
@@ -241,7 +242,7 @@ export class TasksService {
         entityId: created.id,
         workspaceId: project.workspaceId ?? `personal-${project.userId}`,
         operation: 'upsert',
-        payload: this.taskSyncPayload(created, []),
+        payload: taskSyncPayload(created, []),
       });
       return created;
     });
@@ -349,7 +350,7 @@ export class TasksService {
         entityId: updated.id,
         workspaceId,
         operation: updated.deletedAt ? 'delete' : 'upsert',
-        payload: this.taskSyncPayload(
+        payload: taskSyncPayload(
           updated,
           updated.assignees.map((assignee) => assignee.userId),
         ),
@@ -365,7 +366,7 @@ export class TasksService {
             entityId: impactedTask.id,
             workspaceId,
             operation: impactedTask.deletedAt ? 'delete' : 'upsert',
-            payload: this.taskSyncPayload(
+            payload: taskSyncPayload(
               impactedTask,
               impactedTask.assignees.map((assignee) => assignee.userId),
             ),
@@ -427,7 +428,7 @@ export class TasksService {
         entityId: saved.id,
         workspaceId: task.project.workspaceId ?? `personal-${task.project.userId}`,
         operation: 'delete',
-        payload: this.taskSyncPayload(
+        payload: taskSyncPayload(
           saved,
           saved.assignees.map((assignee) => assignee.userId),
         ),
@@ -440,50 +441,6 @@ export class TasksService {
     });
 
     return deleted;
-  }
-
-  private taskSyncPayload(
-    task: {
-      id: string;
-      projectId: string;
-      title: string;
-      description: string | null;
-      priority: string;
-      status: string;
-      startDate: Date | null;
-      dueDate: Date | null;
-      estimatedMinutes: number | null;
-      progress: number;
-      labels: string | null;
-      storyPoints: number | null;
-      sprintId: string | null;
-      userId: string;
-      createdAt: Date;
-      updatedAt: Date;
-      deletedAt: Date | null;
-    },
-    assigneeIds: string[],
-  ) {
-    return {
-      id: task.id,
-      projectId: task.projectId,
-      title: task.title,
-      description: task.description,
-      priority: task.priority,
-      status: task.status,
-      startDate: task.startDate?.toISOString() ?? null,
-      dueDate: task.dueDate?.toISOString() ?? null,
-      estimatedMinutes: task.estimatedMinutes,
-      progress: task.progress,
-      labels: task.labels,
-      storyPoints: task.storyPoints,
-      sprintId: task.sprintId,
-      userId: task.userId,
-      assigneeIds,
-      createdAt: task.createdAt.toISOString(),
-      updatedAt: task.updatedAt.toISOString(),
-      deletedAt: task.deletedAt?.toISOString() ?? null,
-    };
   }
 
   /**

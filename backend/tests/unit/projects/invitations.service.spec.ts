@@ -29,7 +29,9 @@ describe('InvitationsService', () => {
       create: jest.fn(),
       findMany: jest.fn(),
       findUnique: jest.fn(),
+      findUniqueOrThrow: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
     },
     workspace: {
       findUnique: jest.fn().mockResolvedValue({ name: 'Test Workspace' }),
@@ -38,7 +40,9 @@ describe('InvitationsService', () => {
       findUnique: jest.fn().mockResolvedValue({ name: 'Admin User', email: 'admin@test.com' }),
     },
     projectMembership: {
-      upsert: jest.fn(),
+      findUnique: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
     },
     $transaction: jest.fn(),
   };
@@ -236,28 +240,17 @@ describe('InvitationsService', () => {
       );
     });
 
+    // L'invitant est OWNER/ADMIN (contrôlé à l'acceptation) ; l'utilisateur connecté n'est pas membre
+    const membershipLookup = (existing: unknown) =>
+      mockPrisma.membership.findFirst.mockImplementation(
+        async ({ where }: { where: { userId: string } }) =>
+          where.userId === 'user-admin' ? { role: WorkspaceRole.ADMIN } : existing,
+      );
+
     it("devrait accepter l'invitation et créer un membership en BDD", async () => {
       const futureDate = new Date();
       futureDate.setDate(futureDate.getDate() + 5);
-
-      mockPrisma.invitation.findUnique.mockResolvedValue({
-        id: 'invite-id',
-        workspaceId: 'workspace-123',
-        role: WorkspaceRole.MEMBER,
-        invitedById: 'user-admin',
-        status: InvitationStatus.PENDING,
-        expiresAt: futureDate,
-      });
-
-      mockPrisma.membership.findFirst.mockResolvedValue(null);
-      mockPrisma.membership.create.mockResolvedValue({
-        id: 'membership-1',
-        workspaceId: 'workspace-123',
-        userId: loggedUser.id,
-        role: WorkspaceRole.MEMBER,
-        createdAt: new Date(),
-      });
-      mockPrisma.invitation.update.mockResolvedValue({
+      const accepted = {
         id: 'invite-id',
         workspaceId: 'workspace-123',
         status: InvitationStatus.ACCEPTED,
@@ -267,6 +260,22 @@ describe('InvitationsService', () => {
         email: 'guest@guest.com',
         expiresAt: futureDate,
         acceptedAt: new Date(),
+        createdAt: new Date(),
+      };
+
+      mockPrisma.invitation.findUnique.mockResolvedValue({
+        ...accepted,
+        status: InvitationStatus.PENDING,
+        acceptedAt: null,
+      });
+      membershipLookup(null);
+      mockPrisma.invitation.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.invitation.findUniqueOrThrow.mockResolvedValue(accepted);
+      mockPrisma.membership.create.mockResolvedValue({
+        id: 'membership-1',
+        workspaceId: 'workspace-123',
+        userId: loggedUser.id,
+        role: WorkspaceRole.MEMBER,
         createdAt: new Date(),
       });
 
@@ -280,8 +289,12 @@ describe('InvitationsService', () => {
           role: WorkspaceRole.MEMBER,
         },
       });
-      expect(mockPrisma.invitation.update).toHaveBeenCalledWith({
-        where: { id: 'invite-id' },
+      expect(mockPrisma.invitation.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'invite-id',
+          status: InvitationStatus.PENDING,
+          expiresAt: { gt: expect.any(Date) },
+        },
         data: { status: InvitationStatus.ACCEPTED, acceptedAt: expect.any(Date) },
       });
       expect(mockFirestoreSync.enqueue).toHaveBeenCalledWith(
@@ -305,38 +318,40 @@ describe('InvitationsService', () => {
     it('membre existant invité sur un projet : rôle de projet attribué et salons recalculés (S16-b)', async () => {
       const futureDate = new Date();
       futureDate.setDate(futureDate.getDate() + 5);
-      mockPrisma.invitation.findUnique.mockResolvedValue({
+      const invitation = {
         id: 'invite-id',
         workspaceId: 'workspace-123',
         projectId: 'project-9',
-        role: WorkspaceRole.MEMBER,
+        projectRole: 'CONTRIBUTOR',
+        role: WorkspaceRole.VIEWER,
         invitedById: 'user-admin',
         status: InvitationStatus.PENDING,
+        email: 'guest@guest.com',
         expiresAt: futureDate,
-      });
-      mockPrisma.membership.findFirst.mockResolvedValue({
+        createdAt: new Date(),
+      };
+      mockPrisma.invitation.findUnique.mockResolvedValue(invitation);
+      membershipLookup({
         id: 'membership-1',
         workspaceId: 'workspace-123',
         userId: loggedUser.id,
         role: WorkspaceRole.MEMBER,
       });
-      mockPrisma.invitation.update.mockResolvedValue({
-        id: 'invite-id',
-        workspaceId: 'workspace-123',
+      mockPrisma.invitation.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.invitation.findUniqueOrThrow.mockResolvedValue({
+        ...invitation,
         status: InvitationStatus.ACCEPTED,
-        role: WorkspaceRole.MEMBER,
-        invitedById: 'user-admin',
-        projectId: 'project-9',
-        email: 'guest@guest.com',
-        expiresAt: futureDate,
-        acceptedAt: new Date(),
-        createdAt: new Date(),
       });
+      mockPrisma.project.findFirst.mockResolvedValue({ id: 'project-9' });
+      mockPrisma.projectMembership.findUnique.mockResolvedValue(null);
 
       const result = await service.validateAndAcceptInvitation(rawToken, loggedUser);
 
       expect(result.projectId).toBe('project-9');
-      expect(mockPrisma.projectMembership.upsert).toHaveBeenCalled();
+      expect(mockPrisma.membership.create).not.toHaveBeenCalled();
+      expect(mockPrisma.projectMembership.create).toHaveBeenCalledWith({
+        data: { projectId: 'project-9', userId: loggedUser.id, role: 'CONTRIBUTOR' },
+      });
       expect(mockRealtime.refreshUserRooms).toHaveBeenCalledWith(loggedUser.id);
     });
   });

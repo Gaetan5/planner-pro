@@ -1,4 +1,9 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PolicyService } from '../authz/policy.service';
 import { RealtimeService } from '../realtime/realtime.service';
@@ -7,6 +12,24 @@ import * as crypto from 'crypto';
 import { maskEmail } from './mask-email';
 import { MailService } from '../mail/mail.service';
 import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
+import { invitationSyncPayload } from './invitation-sync-payload';
+
+/** Durée maximale d'une invitation (S17). */
+export const MAX_INVITATION_DURATION_DAYS = 30;
+
+const WORKSPACE_ROLE_RANK: Record<WorkspaceRole, number> = {
+  OWNER: 4,
+  ADMIN: 3,
+  MEMBER: 2,
+  VIEWER: 1,
+};
+const PROJECT_ROLE_RANK: Record<ProjectRole, number> = {
+  MANAGER: 4,
+  CONTRIBUTOR: 3,
+  COMMENTER: 2,
+  CLIENT: 1,
+};
+const INVALID_INVITATION = "Cette invitation n'est plus valide.";
 
 @Injectable()
 export class InvitationsService {
@@ -22,15 +45,65 @@ export class InvitationsService {
     return crypto.createHash('sha256').update(token).digest('hex');
   }
 
+  /**
+   * Crée une invitation (S17). Règles : OWNER jamais invitable ; rôle invité <= rôle de l'invitant ;
+   * une invitation à un projet donne le rôle VIEWER sur le workspace (aucune visibilité implicite
+   * des projets, P4) et un rôle de projet choisi explicitement (`projectRole`, CLIENT par défaut) ;
+   * un lien anonyme (sans e-mail) est réservé à un projet, sans MANAGER, à usage unique.
+   */
   async createInvitation(
     workspaceId: string,
     invitedById: string,
-    email: string | null,
-    role: WorkspaceRole,
+    emailInput: string | null,
+    requestedRole: WorkspaceRole | undefined,
     projectId?: string,
     durationDays = 7,
+    projectRoleInput?: ProjectRole,
   ) {
-    await this.policy.assertWorkspaceRoles(workspaceId, invitedById, ['OWNER', 'ADMIN']);
+    const inviter = await this.policy.assertWorkspaceRoles(workspaceId, invitedById, [
+      'OWNER',
+      'ADMIN',
+    ]);
+
+    if (
+      !Number.isInteger(durationDays) ||
+      durationDays < 1 ||
+      durationDays > MAX_INVITATION_DURATION_DAYS
+    ) {
+      throw new BadRequestException(
+        `La durée d'une invitation est comprise entre 1 et ${MAX_INVITATION_DURATION_DAYS} jours.`,
+      );
+    }
+
+    const email = emailInput ? emailInput.trim().toLowerCase() : null;
+    // Invitation à un projet : l'invité n'est que VIEWER du workspace ; le rôle demandé est ignoré
+    const role: WorkspaceRole = projectId ? WorkspaceRole.VIEWER : (requestedRole as WorkspaceRole);
+    if (!projectId && !requestedRole) {
+      throw new BadRequestException('Le rôle spécifié est invalide.');
+    }
+    if (role === WorkspaceRole.OWNER) {
+      throw new ForbiddenException(
+        'Le rôle OWNER ne peut pas être attribué par invitation (transfert de propriété dédié).',
+      );
+    }
+    if (WORKSPACE_ROLE_RANK[role] > WORKSPACE_ROLE_RANK[inviter.role]) {
+      throw new ForbiddenException('Vous ne pouvez pas inviter avec un rôle supérieur au vôtre.');
+    }
+
+    const projectRole = projectId ? (projectRoleInput ?? ProjectRole.CLIENT) : null;
+    if (!email) {
+      // Lien anonyme : n'importe quel détenteur du lien devient membre, donc le moins de droits possible
+      if (!projectId) {
+        throw new BadRequestException(
+          'Un lien sans adresse e-mail ne peut inviter que sur un projet.',
+        );
+      }
+      if (projectRole === ProjectRole.MANAGER) {
+        throw new BadRequestException(
+          'Un lien sans adresse e-mail ne peut pas donner le rôle MANAGER.',
+        );
+      }
+    }
 
     if (projectId) {
       const project = await this.prisma.project.findFirst({
@@ -50,11 +123,12 @@ export class InvitationsService {
     const invitation = await this.prisma.$transaction(async (tx) => {
       const created = await tx.invitation.create({
         data: {
-          email: email || null,
+          email,
           tokenHash,
           role,
           workspaceId,
           projectId: projectId || null,
+          projectRole,
           invitedById,
           expiresAt,
         },
@@ -64,7 +138,7 @@ export class InvitationsService {
         entityId: created.id,
         workspaceId,
         operation: 'upsert',
-        payload: this.invitationSyncPayload(created),
+        payload: invitationSyncPayload(created),
       });
       return created;
     });
@@ -146,7 +220,7 @@ export class InvitationsService {
         entityId: updated.id,
         workspaceId: invitation.workspaceId,
         operation: 'upsert',
-        payload: this.invitationSyncPayload(updated),
+        payload: invitationSyncPayload(updated),
       });
       return updated;
     });
@@ -207,131 +281,135 @@ export class InvitationsService {
           entityId: expired.id,
           workspaceId: invitation.workspaceId,
           operation: 'upsert',
-          payload: this.invitationSyncPayload(expired),
+          payload: invitationSyncPayload(expired),
         });
       });
       throw new BadRequestException("Ce lien d'invitation a expiré.");
     }
 
-    const existingMembership = await this.prisma.membership.findFirst({
-      where: {
-        workspaceId: invitation.workspaceId,
-        userId: loggedUser.id,
-      },
-    });
-
-    if (existingMembership) {
-      await this.prisma.$transaction(async (tx) => {
-        if (invitation.projectId) {
-          const projectRole =
-            invitation.role === 'VIEWER'
-              ? ProjectRole.CLIENT
-              : invitation.role === 'ADMIN' || invitation.role === 'OWNER'
-                ? ProjectRole.MANAGER
-                : ProjectRole.CONTRIBUTOR;
-
-          await tx.projectMembership.upsert({
-            where: {
-              projectId_userId: {
-                projectId: invitation.projectId,
-                userId: loggedUser.id,
-              },
-            },
-            create: {
-              projectId: invitation.projectId,
-              userId: loggedUser.id,
-              role: projectRole,
-            },
-            update: {
-              role: projectRole,
-            },
-          });
-        }
-
-        const accepted = await tx.invitation.update({
-          where: { id: invitation.id },
-          data: { status: InvitationStatus.ACCEPTED, acceptedAt: new Date() },
-        });
-        await this.firestoreSync.enqueue(tx, {
-          entityType: 'invitation',
-          entityId: accepted.id,
-          workspaceId: invitation.workspaceId,
-          operation: 'upsert',
-          payload: this.invitationSyncPayload(accepted),
-        });
-      });
-      // Nouveau rôle de projet : les sockets déjà ouvertes rejoignent le salon du projet (S16-b)
-      await this.realtime.refreshUserRooms(loggedUser.id);
-      return {
-        workspaceId: invitation.workspaceId,
-        projectId: invitation.projectId || undefined,
-        message: invitation.projectId
-          ? 'Félicitations, vous avez rejoint le projet !'
-          : 'Vous êtes déjà membre de cet espace de travail.',
-      };
+    // Invitation nominative : seul le titulaire de l'adresse peut l'accepter (S17). Un lien
+    // transféré, journalisé ou intercepté ne suffit pas.
+    if (
+      invitation.email &&
+      invitation.email.trim().toLowerCase() !== (loggedUser.email ?? '').trim().toLowerCase()
+    ) {
+      throw new ForbiddenException(
+        'Cette invitation est destinée à une autre adresse e-mail. Connectez-vous avec le compte invité.',
+      );
     }
 
-    await this.prisma.$transaction(async (tx) => {
-      const membership = await tx.membership.create({
-        data: {
-          workspaceId: invitation.workspaceId,
-          userId: loggedUser.id,
-          role: invitation.role,
+    // OWNER n'est jamais invitable (lignes antérieures comprises)
+    if (invitation.role === WorkspaceRole.OWNER) {
+      throw new ForbiddenException(INVALID_INVITATION);
+    }
+    // L'invitant doit toujours être OWNER/ADMIN du workspace, avec un rôle au moins égal à celui
+    // proposé : un administrateur déprovisionné ne laisse pas de liens actifs derrière lui.
+    const inviter = await this.prisma.membership.findFirst({
+      where: {
+        workspaceId: invitation.workspaceId,
+        userId: invitation.invitedById,
+        role: { in: [WorkspaceRole.OWNER, WorkspaceRole.ADMIN] },
+        workspace: { deletedAt: null },
+      },
+    });
+    if (!inviter || WORKSPACE_ROLE_RANK[invitation.role] > WORKSPACE_ROLE_RANK[inviter.role]) {
+      throw new BadRequestException(INVALID_INVITATION);
+    }
+
+    const outcome = await this.prisma.$transaction(async (tx) => {
+      // Acceptation atomique : une seule requête concurrente peut consommer l'invitation
+      const claimed = await tx.invitation.updateMany({
+        where: {
+          id: invitation.id,
+          status: InvitationStatus.PENDING,
+          expiresAt: { gt: new Date() },
         },
+        data: { status: InvitationStatus.ACCEPTED, acceptedAt: new Date() },
+      });
+      if (claimed.count !== 1) {
+        throw new BadRequestException(INVALID_INVITATION);
+      }
+
+      const existingMembership = await tx.membership.findFirst({
+        where: { workspaceId: invitation.workspaceId, userId: loggedUser.id },
       });
 
-      if (invitation.projectId) {
-        const projectRole =
-          invitation.role === 'VIEWER'
-            ? ProjectRole.CLIENT
-            : invitation.role === 'ADMIN' || invitation.role === 'OWNER'
-              ? ProjectRole.MANAGER
-              : ProjectRole.CONTRIBUTOR;
-
-        await tx.projectMembership.upsert({
-          where: {
-            projectId_userId: {
-              projectId: invitation.projectId,
-              userId: loggedUser.id,
-            },
-          },
-          create: {
-            projectId: invitation.projectId,
+      let createdMembership: {
+        id: string;
+        workspaceId: string;
+        userId: string;
+        role: string;
+        createdAt?: Date | null;
+      } | null = null;
+      if (!existingMembership) {
+        // Invitation à un projet : VIEWER du workspace, jamais le rôle de l'invitation (S17)
+        createdMembership = await tx.membership.create({
+          data: {
+            workspaceId: invitation.workspaceId,
             userId: loggedUser.id,
-            role: projectRole,
-          },
-          update: {
-            role: projectRole,
+            role: invitation.projectId ? WorkspaceRole.VIEWER : invitation.role,
           },
         });
       }
 
-      const accepted = await tx.invitation.update({
-        where: { id: invitation.id },
-        data: { status: InvitationStatus.ACCEPTED, acceptedAt: new Date() },
-      });
-      await this.firestoreSync.enqueue(tx, {
-        entityType: 'membership',
-        entityId: membership.id,
-        workspaceId: invitation.workspaceId,
-        operation: 'upsert',
-        payload: {
-          id: membership.id,
-          workspaceId: membership.workspaceId,
-          userId: membership.userId,
-          role: membership.role,
-          createdAt: membership.createdAt
-            ? new Date(membership.createdAt).toISOString()
-            : new Date().toISOString(),
-        },
-      });
+      if (invitation.projectId) {
+        const project = await tx.project.findFirst({
+          where: {
+            id: invitation.projectId,
+            workspaceId: invitation.workspaceId,
+            deletedAt: null,
+          },
+        });
+        if (!project) {
+          throw new BadRequestException(INVALID_INVITATION);
+        }
+        const projectRole = invitation.projectRole ?? ProjectRole.CLIENT;
+        const current = await tx.projectMembership.findUnique({
+          where: {
+            projectId_userId: { projectId: invitation.projectId, userId: loggedUser.id },
+          },
+        });
+        if (!current) {
+          await tx.projectMembership.create({
+            data: { projectId: invitation.projectId, userId: loggedUser.id, role: projectRole },
+          });
+        } else if (PROJECT_ROLE_RANK[projectRole] > PROJECT_ROLE_RANK[current.role]) {
+          // Jamais de rétrogradation par invitation
+          await tx.projectMembership.update({
+            where: {
+              projectId_userId: { projectId: invitation.projectId, userId: loggedUser.id },
+            },
+            data: { role: projectRole },
+          });
+        }
+      }
+
+      const accepted = await tx.invitation.findUniqueOrThrow({ where: { id: invitation.id } });
+      if (createdMembership) {
+        await this.firestoreSync.enqueue(tx, {
+          entityType: 'membership',
+          entityId: createdMembership.id,
+          workspaceId: invitation.workspaceId,
+          operation: 'upsert',
+          payload: {
+            id: createdMembership.id,
+            workspaceId: createdMembership.workspaceId,
+            userId: createdMembership.userId,
+            role: createdMembership.role,
+            createdAt: createdMembership.createdAt
+              ? new Date(createdMembership.createdAt).toISOString()
+              : new Date().toISOString(),
+          },
+        });
+      }
       await this.firestoreSync.enqueue(tx, {
         entityType: 'invitation',
         entityId: accepted.id,
         workspaceId: invitation.workspaceId,
         operation: 'upsert',
-        payload: this.invitationSyncPayload(accepted),
+        payload: invitationSyncPayload(accepted),
       });
+      return { alreadyMember: Boolean(existingMembership) };
     });
 
     // Nouveaux droits : les sockets déjà ouvertes rejoignent les bons salons (S16)
@@ -341,36 +419,12 @@ export class InvitationsService {
       workspaceId: invitation.workspaceId,
       projectId: invitation.projectId || undefined,
       message: invitation.projectId
-        ? 'Félicitations, vous avez rejoint le projet et son espace de travail !'
-        : "Félicitations, vous avez rejoint l'espace de travail !",
-    };
-  }
-
-  private invitationSyncPayload(invitation: {
-    id: string;
-    email: string | null;
-    role: string;
-    workspaceId: string;
-    projectId: string | null;
-    invitedById: string;
-    status: string;
-    expiresAt: Date | string;
-    acceptedAt?: Date | string | null;
-    createdAt?: Date | string | null;
-  }) {
-    return {
-      id: invitation.id,
-      email: invitation.email,
-      role: invitation.role,
-      workspaceId: invitation.workspaceId,
-      projectId: invitation.projectId,
-      invitedById: invitation.invitedById,
-      status: invitation.status,
-      expiresAt: new Date(invitation.expiresAt).toISOString(),
-      acceptedAt: invitation.acceptedAt ? new Date(invitation.acceptedAt).toISOString() : null,
-      createdAt: invitation.createdAt
-        ? new Date(invitation.createdAt).toISOString()
-        : new Date().toISOString(),
+        ? outcome.alreadyMember
+          ? 'Félicitations, vous avez rejoint le projet !'
+          : 'Félicitations, vous avez rejoint le projet et son espace de travail !'
+        : outcome.alreadyMember
+          ? 'Vous êtes déjà membre de cet espace de travail.'
+          : "Félicitations, vous avez rejoint l'espace de travail !",
     };
   }
 }

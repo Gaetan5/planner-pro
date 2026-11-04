@@ -15,7 +15,9 @@ import {
   CreateScimKeyDto,
   ScimPatchRequestDto,
 } from './scim.dto';
-import { WorkspaceRole } from '@prisma/client';
+import { InvitationStatus, WorkspaceRole } from '@prisma/client';
+import { FirestoreSyncService } from '../../firestore-sync/firestore-sync.service';
+import { invitationSyncPayload } from '../../projects/invitation-sync-payload';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -25,6 +27,7 @@ export class ScimService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeService,
+    private readonly firestoreSync: FirestoreSyncService,
   ) {}
 
   /**
@@ -94,6 +97,37 @@ export class ScimService {
     }
 
     return { user, membership, provisionedHere };
+  }
+
+  /**
+   * Révoque les invitations en attente adressées à l'utilisateur dans ce workspace (S17-a) : un
+   * compte déprovisionné ne doit pas retrouver une appartenance avec un lien reçu avant son départ.
+   */
+  private async revokePendingInvitations(workspaceId: string, email: string): Promise<void> {
+    const pending = await this.prisma.invitation.findMany({
+      where: {
+        workspaceId,
+        status: InvitationStatus.PENDING,
+        email: email.trim().toLowerCase(),
+      },
+    });
+    if (pending.length === 0) return;
+    await this.prisma.$transaction(async (tx) => {
+      for (const invitation of pending) {
+        const result = await tx.invitation.updateMany({
+          where: { id: invitation.id, status: InvitationStatus.PENDING },
+          data: { status: InvitationStatus.REVOKED },
+        });
+        if (result.count !== 1) continue;
+        await this.firestoreSync.enqueue(tx, {
+          entityType: 'invitation',
+          entityId: invitation.id,
+          workspaceId,
+          operation: 'upsert',
+          payload: invitationSyncPayload({ ...invitation, status: InvitationStatus.REVOKED }),
+        });
+      }
+    });
   }
 
   /**
@@ -360,19 +394,31 @@ export class ScimService {
         ? membership !== null
         : await this.applyActiveState(workspaceId, userId, membership, activeUpdate);
 
+    if (activeUpdate === false) {
+      await this.revokePendingInvitations(workspaceId, user.email);
+    }
+
     return this.mapToScimUser(current, active);
   }
 
   /**
-   * Déprovisionne l'utilisateur de l'espace de travail (DELETE) : retire la membership et,
-   * pour un compte créé par ce workspace, abandonne le rattachement de provisionnement.
+   * Déprovisionne l'utilisateur de l'espace de travail (DELETE) : retire la membership, supprime
+   * ses rôles de projet dans ce workspace (S17 : une reprovision ultérieure ne doit pas les
+   * rendre en silence, contrairement à une simple suspension `active=false`) et, pour un compte
+   * créé par ce workspace, abandonne le rattachement de provisionnement.
    */
   async deleteUser(workspaceId: string, userId: string): Promise<void> {
-    const { membership, provisionedHere } = await this.resolveScimUser(workspaceId, userId);
+    const { user, membership, provisionedHere } = await this.resolveScimUser(workspaceId, userId);
 
     if (membership) {
       await this.applyActiveState(workspaceId, userId, membership, false);
     }
+
+    await this.prisma.projectMembership.deleteMany({
+      where: { userId, project: { workspaceId } },
+    });
+    await this.realtime.refreshUserRooms(userId);
+    await this.revokePendingInvitations(workspaceId, user.email);
 
     if (provisionedHere) {
       await this.prisma.user.updateMany({

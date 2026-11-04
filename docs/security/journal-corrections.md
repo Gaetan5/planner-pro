@@ -2002,3 +2002,492 @@ Détail dans `rapport-audit.md`, section « Revue r16 ». Les chiffres de « Ré
 - Hors périmètre, confirmé : O7, O8, O9, P10, Q-2, complément S17, `ws`/S25 (Phases 4 à 6).
 
 **Constats encore ouverts pour `fixeur` en Phase 3 :** aucun. Le commit relève de l'utilisateur (liste et message dans le rapport, section « Revue r16 »).
+
+---
+
+## Plan de correction : Phase 4
+
+Base de départ (mesurée avant toute modification) : backend 75 suites / 2224 tests verts ; frontend 15 fichiers / 59 tests verts. Ordre du rapport : **P4, S17, S18**, puis les reports (O7, O8, O9, P10). Méthode inchangée : test d'abus qui échoue d'abord (échec consigné), correctif minimal, suites complètes. Aucune base réelle, aucun commit, aucun `git stash`, `.claude/` intact.
+
+| Ordre | ID | Contenu | Fichiers (prévision) | Migration |
+| --- | --- | --- | --- | --- |
+| 4.1 | P4 | Matrice RBAC écrite (`docs/security/matrice-rbac.md`), commentaire de `permissions.ts` mis à jour | `docs/security/matrice-rbac.md`, `authz/permissions.ts` | Aucune |
+| 4.2 | S17 | Invitation nominative liée à l'e-mail ; OWNER non invitable ; rôle invité ≤ rôle de l'invitant (revérifié à l'acceptation) ; invitation projet = membership workspace `VIEWER` + `projectRole` explicite ; `durationDays` ≤ 30 ; acceptation atomique (`updateMany` PENDING et non expirée, `count === 1`) ; lien anonyme restreint à un projet, rôle ≤ MEMBER, usage unique | `invitations.service.ts`, `invitations.controller.ts`, `dto/create-invitation.dto.ts`, `schema/workspace.prisma`, migration, frontend `ProjectMembersPanel.tsx` / `AppContext.tsx` | `Invitation.projectRole` (nullable) |
+| 4.3 | S17 (suite) | `assignProjectRole` : DTO, cible membre du workspace du projet, `MANAGER` réservé à OWNER/ADMIN ; SCIM `DELETE` purge les `ProjectMembership` du workspace | `project-permissions.service.ts`, `projects.controller.ts`, `dto/assign-project-role.dto.ts`, `scim.service.ts` | Aucune |
+| 4.4 | S18.1 | `@PlatformRoles()` ; `updateUserRole` et `impersonate` réservés à SUPER_ADMIN ; pas de modification de son propre rôle ; pas d'impersonation d'un compte `platformRole` | `admin/platform-roles.decorator.ts`, `platform-admin.guard.ts`, `admin.controller.ts`, `admin.service.ts` | Aucune |
+| 4.5 | S18.2-bis | `@ForbiddenInImpersonation()` sur invitations, membres de projet, clés SCIM, SSO, intégrations ; test méta étendu | contrôleurs concernés, `impersonation-routes.spec.ts` | Aucune |
+| 4.6 | S18.3 | MFA obligatoire pour `platformRole` ; plafond de session 12 h ; motif d'impersonation obligatoire (DTO 10..500) ; révocation de la session de l'administrateur à l'impersonation ; frontend (motif) | `platform-admin.guard.ts`, `session.service.ts`, `admin.service.ts`, `admin.controller.ts`, `dto/admin.dto.ts`, `AdminConsole.tsx` | Aucune |
+| 4.7 | O8, O7 | Helper `taskSyncPayload` partagé ; événement `delete` par tâche supprimée dans `deleteNote` ; O7 : projet personnel vide (voir entrée) | `projects/task-sync-payload.ts`, `tasks.service.ts`, `sprint.service.ts`, `notes.service.ts` | Aucune |
+| 4.8 | O9, P10 | DAT : `notifications.gateway` remplacé par `RealtimeService` ; P10 posé comme question produit | `docs/DOSSIER_ARCHITECTURE_TECHNIQUE.md` | Aucune |
+
+### Décisions produit retenues (à arbitrer, voir « Points ouverts pour l'architecte (Phase 4) »)
+
+1. **GUEST ou VIEWER** : `VIEWER` (aucune migration d'énumération). Avec la règle stricte de P4 (aucun accès implicite aux projets), un VIEWER sans `ProjectMembership` ne voit aucun projet. Un rôle `GUEST` n'ajouterait de restriction que sur la lecture du workspace lui-même.
+2. **Lien anonyme** : usage unique (le statut passe à `ACCEPTED` à la première acceptation), projet obligatoire, rôle projet ≤ CONTRIBUTOR, rôle workspace forcé à `VIEWER`. Pas de champ `maxUses` (option la plus restrictive, sans migration).
+3. **MANAGER attribuable par un MANAGER** : non (recommandation du rapport) : réservé à OWNER/ADMIN du workspace.
+4. **P10** : posé en question, comportement actuel inchangé.
+
+### Entrées par constat (Phase 4)
+
+### P4 — Matrice RBAC écrite
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Changement** : `docs/security/matrice-rbac.md` (nouveau) : rôles de workspace, de projet et de plateforme, actions × rôles (recopiées de `permissions.ts`), règles d'invitation, décisions produit retenues et en attente. `backend/src/authz/permissions.ts:10` renvoie vers elle. Aucun changement de comportement.
+- **Tests** : aucun nouveau ; la matrice est déjà exécutée par `tests/http/rbac-matrix.spec.ts` (982 cas).
+- **Écart** : la matrice est une documentation d'un état de code déjà tranché (P4 règle stricte, 2026-11-03) ; les décisions nouvelles de la Phase 4 y sont marquées « par défaut, à confirmer ».
+- **Questions** : voir « Points ouverts pour l'architecte (Phase 4) ».
+
+### S17 — Invitations
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Cause confirmée** : `invitations.service.ts` (avant) : aucune comparaison `invitation.email` / `loggedUser.email` ; rôle `OWNER` et rôle supérieur à celui de l'invitant acceptés ; invitation de projet = `Membership` workspace au rôle de l'invitation (ADMIN possible) ; `durationDays` sans maximum ; statut lu hors transaction puis `update` inconditionnel (double acceptation) ; lien anonyme possible sans projet.
+- **Changement** :
+  - `projects/invitations.service.ts` : `createInvitation` (OWNER jamais invitable, 403 ; rôle <= rôle de l'invitant, 403 ; `durationDays` 1..30, 400 ; e-mail normalisé en minuscules ; invitation de projet = rôle workspace forcé à `VIEWER` et `projectRole` explicite, `CLIENT` par défaut ; lien anonyme réservé à un projet et refusé pour `MANAGER`, 400). `validateAndAcceptInvitation` : adresse comparée sans tenir compte de la casse (403), invitation `OWNER` refusée (403), invitant relu (doit rester OWNER/ADMIN avec un rôle >= celui proposé, sinon 400), puis dans une transaction : `updateMany({ id, status: PENDING, expiresAt: { gt: now } })` avec contrôle `count === 1`, création de la `Membership` (VIEWER pour un projet), `ProjectMembership` créée ou relevée, jamais rétrogradée.
+  - `projects/dto/create-invitation.dto.ts` : `role` optionnel, `projectRole` (`IsEnum(ProjectRole)`), `durationDays` `@Max(30)`.
+  - `projects/invitations.controller.ts` : transmet `projectRole` ; `@ForbiddenInImpersonation()` sur la création.
+  - `prisma/schema/workspace.prisma` : `Invitation.projectRole ProjectRole?` ; migration `20261112000000_s17_invitation_project_role` (colonne nullable, `VIEWER` pour les invitations de projet en attente, `REVOKED` pour les invitations `OWNER` en attente).
+  - Frontend : `AppContext.tsx` et `ProjectMembersPanel.tsx` envoient `role: 'VIEWER'` et le `projectRole` choisi.
+- **Tests** : `tests/unit/projects/invitations-security.spec.ts` (18, faux Prisma en mémoire qui évalue `status` et `expiresAt`). **Avant correctif : 13 échecs sur 16** (les 3 verts sont des contrôles : casse de l'e-mail, ADMIN invite ADMIN, usage unique par statut) ; les 2 tests de DTO ont été ajoutés ensuite. Après : 18/18. `invitations.service.spec.ts` (9) : 2 tests d'acceptation réécrits pour le nouveau déroulé (le service lit désormais l'invitant et utilise `updateMany`).
+- **Écarts par rapport au rapport** :
+  1. **Ajout** : revérification de l'invitant à l'acceptation (un administrateur déprovisionné ne laisse pas de liens actifs) et refus des lignes `OWNER` héritées. Plus restrictif que le rapport, sans migration.
+  2. **GUEST ou VIEWER** : `VIEWER` retenu (aucune migration d'énumération) ; avec la règle stricte de P4, un VIEWER sans `ProjectMembership` ne voit aucun projet.
+  3. **`maxUses`** non ajouté : un lien anonyme est à usage unique (option permise par le rapport : « ou à usage unique »).
+  4. Le rôle demandé est **ignoré** (forcé à VIEWER) pour une invitation de projet, au lieu d'être refusé : le frontend historique n'échoue pas, et le résultat est le plus restrictif.
+  5. **Changement cassant** : un lien anonyme d'espace de travail (sans projet) n'est plus créable ; l'ancienne UI ne l'offrait que depuis le panneau de projet.
+- **Questions** : voir « Points ouverts pour l'architecte (Phase 4) » (1, 2, 5).
+
+### S17 (suite) — `assignProjectRole` et SCIM `DELETE`
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Cause confirmée** : `project-permissions.service.ts:33-78` (avant) : `upsert` pour n'importe quel `targetUserId` de la plateforme ; `projects.controller.ts` : corps de type littéral, donc non validé ; `scim.service.ts` `deleteUser` : ne retirait que la `Membership`.
+- **Changement** :
+  - `projects/dto/assign-project-role.dto.ts` (nouveau, `@IsUUID`, `@IsEnum(ProjectRole)`) ; `projects.controller.ts` l'utilise, et `@ForbiddenInImpersonation()` est posé sur `POST :id/members` et `DELETE :id/members/:userId`.
+  - `ProjectPermissionsService.assignProjectRole` : projet personnel refusé (403), cible membre du workspace du projet (sinon 403, rien écrit, aucun salon recalculé), rôle `MANAGER` réservé à OWNER/ADMIN du workspace (403).
+  - `ScimService.deleteUser` : `projectMembership.deleteMany({ userId, project: { workspaceId } })` puis recalcul des salons (même après une suspension antérieure). `PATCH active=false` n'y touche pas (vérifié).
+- **Tests** : `tests/unit/projects/assign-project-role.spec.ts` (7). **Avant correctif : 3 échecs** (cible d'un autre workspace, cible inexistante, MANAGER attribué par un MANAGER) ; les contrôles positifs et le DTO passent. `src/auth/scim/scim.service.spec.ts` : 3 tests ajoutés (DELETE purge, DELETE après suspension, PATCH conserve) ; **avant correctif : 3 échecs**, dont le contrôle PATCH pour une raison de fixture (`createdAt` absent, corrigée ensuite) ; les 2 tests DELETE échouaient bien faute d'appel à `deleteMany`.
+- **Effet de bord corrigé** : la matrice HTTP S12-d envoyait des identifiants non UUID (`u-member`) ; `tests/support/rbac-fixture.ts` utilise désormais des UUID v4, et `notifications-access.spec.ts` dérive les noms de la clé de `USERS`. Suites inchangées en nombre : 982 cas matrice, tous verts.
+- **Écart** : un MANAGER peut encore rétrograder un autre MANAGER (`assign` d'un rôle inférieur) ou le retirer (`remove`) ; le rapport ne demande que l'attribution de MANAGER. Voir point ouvert 3.
+
+### S18.1 — `@PlatformRoles`, auto-modification, cible de plateforme
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Cause confirmée** : `platform-admin.guard.ts` (tout `platformRole` non nul passe) ; `admin.service.ts` `updateUserRole` et `impersonateUser` sans contrôle du rôle de l'acteur ni de la cible.
+- **Changement** : `admin/platform-roles.decorator.ts` (nouveau) ; `PlatformAdminGuard` lit les rôles exigés via `Reflector` (poignée puis classe) ; `@PlatformRoles('SUPER_ADMIN')` sur `PATCH users/:id/role` et `POST users/:id/impersonate` ; `AdminService` relit le rôle de l'acteur en base (défense en profondeur), interdit de modifier son propre rôle (le contrôle « dernier super administrateur » devient sans objet : l'acteur reste toujours SUPER_ADMIN) et d'impersonner un compte de plateforme (soi-même compris).
+- **Tests** : `tests/http/admin-platform-roles.spec.ts` (11, HTTP réel) ; `src/admin/admin.service.spec.ts` (+9) ; `platform-admin.guard.spec.ts` (+3). **Avant correctif (HTTP) : 8 échecs sur 11** (rôle, impersonation, MFA, motif). Les tests unitaires du service et du garde ont été écrits avec le correctif (pas d'état « avant » mesuré), la preuve de l'échec est portée par le test HTTP.
+
+### S18.2-bis — Routes d'accès persistant interdites en impersonation
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Changement** : `@ForbiddenInImpersonation()` sur `POST workspaces/:id/invitations`, `POST|DELETE projects/:id/members`, `POST workspaces/:id/scim/keys`, `POST|DELETE workspaces/:id/sso`, `POST workspaces/:id/sso/verify-domain`, `POST workspaces/:id/integrations`. Il n'existe pas de route de suppression de workspace ni de changement de rôle de workspace (vérifié : seuls `membership.delete` de SCIM et `workspace.deleteMany` de la purge des comptes non vérifiés).
+- **Tests** : `tests/unit/auth/impersonation-routes.spec.ts` (60) : 8 gestionnaires ajoutés à la liste paramétrée et balayage méta étendu à `ScimController`, `InvitationsController` et `ProjectsController` avec filtre méthode + chemin. **Avant correctif : 10 échecs** (5 gestionnaires et 5 entrées du balayage ; invitations et membres de projet étaient déjà décorés par les étapes S17 précédentes, donc non comptés).
+- **Écart** : non décorés, car ils ne créent aucun accès : `GET` des invitations, `DELETE invitations/:id`, `DELETE scim/keys/:keyId`, `POST integrations/:id/toggle`, `DELETE integrations/:id`, `POST integrations/:id/export` (envoi vers l'URL stockée). À arbitrer (point ouvert 7).
+
+### S18.3 — MFA obligatoire, plafond de 12 h, motif et révocation de la session administrateur
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Changement** :
+  - `PlatformAdminGuard` : 403 « authentification à deux facteurs obligatoire » si `mfaEnabled` est faux, pour toute route `/admin/*`.
+  - `session.service.ts` : plafond absolu de 12 h pour un compte portant `platformRole` (lu à chaque rafraîchissement, donc dès qu'un compte est promu) ; `PLATFORM_SESSION_ABSOLUTE_LIFETIME_SECONDS`.
+  - `ImpersonateUserDto` : `reason` obligatoire, 10 à 500 caractères ; le contrôleur transmet `actor.sid` ; `AdminService.impersonateUser(actorId, targetId, reason, actorSid)` consigne le motif et l'identifiant de la session d'impersonation dans `PlatformAuditLog.metadata` et **révoque la session de l'administrateur** (`SessionService.revoke(actorSid)`).
+  - `token.service.ts` : le jeton d'impersonation porte `act: { sub: adminId }` (RFC 8693) en plus de `impersonatedBy` ; à la vérification, `act` fait foi (`impersonatedBy` reconstruit).
+  - Frontend `AdminConsole.tsx` : invite de motif (10 à 500 caractères) avant l'appel, sinon aucune requête.
+- **Tests** : HTTP (voir S18.1) ; `tests/http/session-lifecycle.spec.ts` (+3) : **avant correctif 2 échecs sur 3** (13 h refusé, 11 h accepté avec refresh plafonné ; contrôle d'un compte ordinaire à 13 h) ; `tests/unit/auth/impersonation-token.spec.ts` (3) : **avant 2 échecs sur 3** (`exp - iat <= 900`, `act.sub`, reconstruction depuis `act`) ; `AdminConsole.spec.tsx` (+2) : **avant 2 échecs**.
+- **Écarts** : (1) **audit des actions sous impersonation** : l'`AuditLog` des projets enregistre l'identité de la cible ; l'attribution à l'administrateur réel demande de propager `impersonatedBy` dans `logAction` (neuf appelants) et un champ au journal, ce qui relève de A8 (audit transactionnel unifié, Phase 6). Aujourd'hui, la preuve est le couple motif + `impersonationSessionId` du `PlatformAuditLog` et la durée de 15 min. (2) Le claim historique `impersonatedBy` est conservé (le garde et les tests l'utilisent).
+- **Condition ferme maintenue** : `FEATURE_IMPERSONATION_ENABLED` reste désactivé par défaut ; l'architecte arbitre l'ouverture (S18 est clos côté code si cette revue est positive).
+
+### O8 — Événements Firestore `delete` pour `deleteNote`
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Changement** : `projects/task-sync-payload.ts` (nouveau, fonction `taskSyncPayload` extraite de `TasksService`, qui l'importe) ; `NotesService.deleteNote` lit dans la transaction, **avant** `updateMany`, les tâches réellement supprimées (même filtre `noteId`, `projectId in writable`, plus `deletedAt: null`), puis émet un événement `task` / `delete` par tâche, avec le workspace du projet (`personal-<userId>` pour un projet personnel) et les assignés.
+- **Tests** : `notes-access.spec.ts` (+3, faux `findMany` qui évalue `noteId`, `projectId.in`, `deletedAt` et refuse toute autre clé). **Avant correctif : 2 échecs sur 3** (le troisième, « aucune tâche supprimée : aucun événement », est un contrôle). Les 3 tests S12-j existants sont inchangés (seul le faux `findMany` est ajouté).
+- **Écart** : `sprint.service.ts` n'a **pas** été migré vers le helper : sa charge `{ id, projectId, sprintId, updatedAt }` est une mise à jour partielle volontaire (`upsert`), pas une copie du format complet ; la remplacer changerait le contenu écrit dans Firestore. À confirmer.
+
+### O7 — Projet personnel vide sur un déplacement refusé
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Changement** : `NotesService.parseTasksFromContent` : la création du projet personnel est différée (`ensureProject`). Elle n'a lieu que pour une nouvelle tâche, ou pour une tâche existante d'un projet personnel (déplacement permis). Une tâche de workspace dont le tag ne trouve aucun projet, ou dont l'auteur ne peut plus écrire, ne crée rien.
+- **Tests** : `notes-access.spec.ts` (+4). **Avant correctif : 2 échecs sur 4** (2 contrôles positifs). Les suites S12-f, S12-h, S12-i et O6 restent vertes (28 tests, puis 32 avec O7 et O8).
+
+### O9 — DAT : remplacement de la passerelle de notifications
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Changement** : `docs/DOSSIER_ARCHITECTURE_TECHNIQUE.md` : schéma (ligne 81) et § 13 (renommé « Diffusion Temps Réel & Mentions », sommaire mis à jour) décrivent `RealtimeService` : salons `project:`, `workspace:`, `user:`, `task:`, éviction `evictTaskRoom`, `refreshUserRooms`, contrôle de lecture à `join-task` ; l'encadré `notificationsGateway.server…` est remplacé par `realtimeService.emitToUser(…, 'new-notification', …)`.
+- **Critère** : `grep -n "notifications.gateway" docs/DOSSIER_ARCHITECTURE_TECHNIQUE.md` ne renvoie rien (code de sortie 1, vérifié).
+
+### P10 — Créateur MANAGER malgré un rôle de workspace VIEWER
+
+- **Statut** : `À VALIDER PAR L'ARCHITECTE` (décision produit). Comportement inchangé : le créateur d'un projet reste MANAGER (`policy.service.ts`, `effectiveProjectRole`), conforme à la matrice actuelle et consigné dans `matrice-rbac.md`. Option plus restrictive (à n'activer que sur décision de l'utilisateur) : ne reconnaître le créateur MANAGER que si son rôle de workspace est au moins MEMBER.
+
+## Résultats (Phase 4)
+
+| Commande | Résultat |
+| --- | --- |
+| `cd backend && env -u DATABASE_URL npx jest` | **79/79 suites, 2313/2313 tests** (base : 75 suites, 2224 tests ; +4 suites, +89 tests) |
+| `npx jest tests/integration --detectOpenHandles` | 4/4, aucun handle ouvert |
+| `npx tsc --noEmit -p tsconfig.build.json` | exit 0 |
+| `npx tsc --noEmit -p tsconfig.json` | 1 erreur TS6059 (`tracking.gateway.spec.ts`), antérieure et inchangée |
+| `npx nest build` ; `find dist -name '*.spec.js'` | exit 0 ; 0 `*.spec.js` |
+| `npx eslint src tests scripts` | 0 erreur, 17 avertissements (identique à la base) |
+| `npx prettier --check src tests scripts` | conforme |
+| `npx prisma validate` | valide |
+| `find backend/src backend/tests -name "*.js" -o -name "*.d.ts"` | vide |
+| Frontend `npx vitest run` | 15 fichiers, **61/61** (base : 59) |
+| Frontend `tsc --noEmit -p .` ; `eslint src` ; `vite build` | exit 0 ; 0 erreur, 36 avertissements (identique) ; built in 4.73s |
+| `git stash list` | vide (0 entrée) ; `.claude/` jamais touché ; aucun commit |
+
+Mutations : non rejouées par le fixeur en Phase 4 (le protocole d'échec avant correctif est consigné par entrée).
+
+## Migrations et changements cassants (Phase 4)
+
+- Migration `20261112000000_s17_invitation_project_role` (additive ; deux `UPDATE` sur les invitations **en attente** seulement). Procédure : `docs/security/runbook-phase4.md`. Non appliquée (aucune base).
+- Cassants : liens anonymes d'espace de travail supprimés ; invitation nominative non transférable ; `POST /projects/workspaces/:id/invitations` accepte `projectRole` et ignore `role` pour un projet ; `POST /projects/:id/members` valide un UUID ; `POST /admin/users/:id/impersonate` exige `{ reason }` ; comptes `platformRole` sans MFA bloqués sur `/admin/*` ; sessions des comptes de plateforme plafonnées à 12 h.
+
+## Points ouverts pour l'architecte (Phase 4)
+
+Décisions produit prises par défaut, à faire arbitrer par l'utilisateur :
+
+1. **GUEST ou VIEWER** pour un invité de projet : `VIEWER` retenu (pas de migration d'énumération). Un `GUEST` distinct n'aurait d'intérêt que pour cacher aussi `workspace.read`/`sprint.read` (membres, sprints) à un invité externe : à trancher.
+2. **Plafond des liens anonymes** : usage unique, projet obligatoire, pas de MANAGER, pas de `maxUses`. Si l'utilisateur veut des liens réutilisables (équipes), ajouter `maxUses` et un compteur atomique.
+3. **MANAGER attribuable par un MANAGER de projet** : non (recommandation du rapport). Question liée : un MANAGER peut-il rétrograder ou retirer un autre MANAGER ? Aujourd'hui oui (non couvert par le rapport) ; option : réserver ces deux actions à OWNER/ADMIN.
+4. **P10** : le créateur reste MANAGER même rétrogradé VIEWER. Confirmer ou resserrer (voir l'entrée P10).
+5. **Invitation de projet : `role` ignoré** (forcé à VIEWER) plutôt que refusé en 400 : confirmer.
+6. **MFA des comptes de plateforme** : à activer avant le déploiement (runbook § 3), sinon l'accès `/admin/*` est coupé. Le compte d'amorçage de développement doit lui aussi avoir la MFA.
+7. **Routes non décorées en impersonation** (`GET`/`DELETE` des invitations, révocation de clé SCIM, bascule, suppression et export d'une intégration) : ajouter le décorateur par précaution ou laisser, vu qu'elles ne créent aucun accès ?
+8. **Audit des actions sous impersonation** : attribution à l'administrateur réel reportée à A8 (Phase 6).
+9. **`sprint.service.ts`** : charge partielle volontaire, non migrée vers `taskSyncPayload` (écart O8).
+10. **Ouverture de l'impersonation** : `FEATURE_IMPERSONATION_ENABLED` reste faux par défaut ; à l'architecte de déclarer S18 clos et à l'utilisateur de décider de l'activer.
+11. **Frontend** : l'écran d'acceptation n'affiche pas de message dédié au 403 « autre adresse » (le message du serveur est repris tel quel) ; la console admin ne masque pas encore le sélecteur de rôle ni le bouton d'impersonation pour un `PLATFORM_ADMIN` (le serveur refuse en 403).
+
+## Revue architecte r17 (2026-11-04) : NON VALIDÉ
+
+Détail dans `rapport-audit.md`, section « Revue r17 ». Les chiffres de « Résultats (Phase 4) » sont exacts et ont été relancés par l'architecte :
+- backend : 79/79 suites et 2313/2313 tests ; intégration 4/4 sans handle ouvert ;
+- builds : `tsc` (build) 0 ; TS6059 seule et inchangée ; `nest build` exit 0 (125 `.js`, 0 `*.spec.js`) ;
+- qualité : ESLint 0 erreur et 17 avertissements ; `prettier` et `prisma validate` OK ;
+- frontend : 15 fichiers, 61/61 ; `tsc` 0 ; ESLint 0 erreur ; build OK.
+
+Seule correction : `invitations.service.spec.ts` compte 9 tests, et non 25. 29 mutations rejouées : toutes détectées, sauf M3 (à couvrir, S17-a) et M5 (équivalente). Le diff (`1de96caa…`) et les empreintes des fichiers non suivis sont identiques avant et après.
+
+#### Revue architecte (par entrée)
+
+- **P4 (matrice) : VALIDÉ.**
+- **S17 (invitations) : VALIDÉ.** **S17 (suite : `assignProjectRole`, SCIM `DELETE`) : VALIDÉ.**
+- **S18.1 : VALIDÉ.** **S18.3 et révocation de la session administrateur : VALIDÉ.** Le report de l'attribution dans `AuditLog` à A8 est accepté. Condition : l'architecte recommande de ne pas ouvrir l'impersonation avant A8.
+- **S18.2-bis : À REPRENDRE.** `POST /projects/workspaces/:workspaceId/calendar/oauth/callback` n'est pas décoré : en impersonation, il lie l'agenda de l'administrateur au workspace de la cible (nouveau constat **S18.2-ter**).
+- **O7, O8, O9 : VALIDÉ.** L'écart `sprint.service.ts` d'O8 est accepté.
+- **P10 : question à l'utilisateur** (recommandation : resserrer).
+- Nouveaux constats :
+  - **S17-a** (Mineur, Phase 4) : invitations en attente non révoquées au déprovisionnement SCIM, plus le test de M3 ;
+  - **O10**, **O11** (Phase 5) ;
+  - **P11** (décision de l'utilisateur : annuaire visible par un invité VIEWER).
+- Les 11 points ouverts reçoivent leur réponse dans le rapport, section « Réponses aux points ouverts du fixeur (Phase 4) ».
+
+**Constats encore ouverts pour `fixeur` en Phase 4 :** S18.2-ter, S17-a ; plus la rétrogradation d'un MANAGER par un MANAGER si l'utilisateur répond « non » à la question 3. Ordre et critères : rapport, « Plan d'action r17 pour fixeur ».
+
+## Actions de la revue r17
+
+### S18.2-ter — Callback OAuth du calendrier interdit en impersonation
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Cause confirmée** : `projects.controller.ts:561` (`POST /projects/workspaces/:workspaceId/calendar/oauth/callback`) sans `@ForbiddenInImpersonation()` ; il remplace les jetons de l'intégration calendrier du workspace.
+- **Changement** : décorateur posé sur `handleOAuthCallback`.
+- **Tests** : `impersonation-routes.spec.ts` : `[ProjectsController, 'handleOAuthCallback']` ajouté à la liste paramétrée, motif `POST /projects/workspaces/:workspaceId/calendar/oauth/callback` ajouté au balayage méta et à l'attendu. **Avant correctif : 2 échecs** (cas paramétré et « porte le décorateur »). Après : 63/63.
+
+### S17-a — Invitations en attente révoquées au déprovisionnement SCIM
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Cause confirmée** : `scim.service.ts` retirait la membership (DELETE, `active=false`) sans toucher aux invitations `PENDING` adressées à l'utilisateur.
+- **Changement** : `ScimService.revokePendingInvitations` (invitations `PENDING` du workspace dont l'adresse, en minuscules, est celle de l'utilisateur : `updateMany` conditionnel sur `PENDING` en transaction, passage à `REVOKED`, événement Firestore `invitation` / `upsert`), appelé par `deleteUser` et par `patchUser` quand `active=false`. `FirestoreSyncService` est injecté (`AuthModule` importe `FirestoreSyncModule`). La charge utile Firestore est extraite en `projects/invitation-sync-payload.ts`, partagée avec `InvitationsService`.
+- **Tests** : `scim.service.spec.ts` (+4) : DELETE, `active=false`, aucune révocation sans changement d'état d'activité, aucune écriture sans invitation ; le filtre de `findMany` est vérifié (workspace, `PENDING`, adresse en minuscules), donc une invitation d'un autre workspace n'est pas visée. **Avant correctif : 2 échecs sur 4** (les 2 autres sont des contrôles). `scim-routes.spec.ts` et `scim-throttler.spec.ts` fournissent un faux `FirestoreSyncService`. `invitations-security.spec.ts` (+1, 19) : invitation de projet héritée (`role: 'ADMIN'`, `projectId`, `projectRole` nul) acceptée par un non-membre : membership `VIEWER` et `ProjectMembership` `CLIENT`.
+- **Mutation M3 rejouée** (membership créée au rôle de l'invitation ; sauvegarde hors dépôt, restauration par `/bin/cp -f`, `cmp` identique) : **1 échec** (survivante en r17, désormais détectée).
+- **Limite** : l'acceptation par un utilisateur déjà déprovisionné d'un lien anonyme de projet reste possible (usage unique, projet précis, rôle ≤ CONTRIBUTOR), car aucune adresse ne le lie à l'utilisateur.
+
+### Correction du journal
+`invitations.service.spec.ts` compte 9 tests (et non 25) ; l'entrée S17 est corrigée.
+
+### Non traités, conformément à la consigne
+Rétrogradation d'un MANAGER par un MANAGER (attend la décision de l'utilisateur), O10, O11, P11.
+
+## Résultats (r17)
+
+| Commande | Résultat |
+| --- | --- |
+| `cd backend && env -u DATABASE_URL npx jest` | **79/79 suites, 2321/2321 tests** (Phase 4 : 2313 ; +8, détail ci-dessous) |
+| `npx jest tests/integration --detectOpenHandles` | 4/4, aucun handle ouvert |
+| `npx tsc --noEmit -p tsconfig.build.json` | exit 0 |
+| `npx nest build` ; `find dist -name '*.spec.js'` | exit 0 ; 0 |
+| `npx eslint src tests scripts` | 0 erreur, 17 avertissements |
+| `npx prettier --check src tests scripts` | conforme |
+| Frontend `npx vitest run` | 15 fichiers, 61/61 (inchangé) |
+| `git stash list` | vide ; aucun commit ; `.claude/` et `ci.yml` non touchés |
+
+Détail des +8 tests : `impersonation-routes.spec.ts` +2 (63), `scim.service.spec.ts` +4 (21), `invitations-security.spec.ts` +1 (19), cas « autorisé hors impersonation » de la liste paramétrée +1.
+
+## Revue architecte r18 (2026-11-04) : NON VALIDÉ — corrections ciblées restantes
+
+Détail dans `rapport-audit.md`, section « Revue r18 ». Les chiffres de « Résultats (r17) » sont exacts et ont été relancés par l'architecte :
+- backend : 79/79 suites, 2321/2321 tests ; intégration 4/4 ;
+- builds et qualité : `tsc` et `nest build` OK ; ESLint 0 erreur et 17 avertissements ; prettier et `prisma validate` OK ;
+- frontend : 61/61.
+
+11 mutations, toutes détectées (N1 à N10, M3). Diff (`91e83832…`) et fichiers non suivis identiques avant et après.
+
+#### Revue architecte
+
+- **S18.2-ter : VALIDÉ.** S18.2-bis est fermé avec lui ; **S18 est clos côté code**. L'impersonation reste désactivée jusqu'à A8 (décision de l'utilisateur).
+- **S17-a : VALIDÉ.** La mutation M3 est désormais détectée.
+- **Limite « lien anonyme accepté par un utilisateur déprovisionné » : acceptée.** Le lien est un jeton au porteur, borné (usage unique, un projet, rôle ≤ CONTRIBUTOR, 30 jours), et les liens d'un administrateur déprovisionné meurent avec lui. Amélioration consignée comme **O12** (Phase 5) : pas de lien anonyme dans un workspace dont le SCIM est actif.
+- **Décisions de l'utilisateur du 2026-11-04** (déléguées à l'architecte) :
+  1. pas d'annuaire ni de sprints pour un invité (P11) ;
+  2. usage unique, sans `maxUses` ;
+  3. un MANAGER ne rétrograde ni ne retire un autre MANAGER (P12) ;
+  4. le créateur VIEWER ne reste pas MANAGER (P10) ;
+  5. impersonation fermée jusqu'à A8.
+
+**Constats encore ouverts pour `fixeur` en Phase 4 :** P11, P12, P10, dans cet ordre. Critères testables : rapport, « Plan d'action r18 pour fixeur ». La Phase 4 sera validée après ces trois corrections.
+
+## Actions de la revue r18
+
+Décisions de l'utilisateur du 2026-11-04 (déléguées à l'architecte) appliquées dans l'ordre P11, P12, P10. Aucun commit, aucun `git stash`, aucune base ; `.claude/`, `ci.yml` et `eslint.config.cjs` non touchés ; le commit CI `92b39bd` de `main` n'est pas traité.
+
+### P11 — VIEWER sans annuaire, sprints, capacité ni intégrations
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Cause confirmée** : `permissions.ts` : `sprint.read` ouvert à VIEWER ; `getWorkspaceMembers` et `getWorkspaces` renvoyaient tous les membres (noms, e-mails) à tout membre ; `getResourceCapacityReport` et `GET .../integrations` (+ `/status`) n'exigeaient que l'appartenance.
+- **Changement** :
+  - `authz/permissions.ts` : `sprint.read` = OWNER, ADMIN, MEMBER ; nouvelle action `workspace.directory.read` (OWNER, ADMIN, MEMBER) ; `workspace.read` reste ouverte à VIEWER.
+  - `authz/policy.service.ts` : `listVisibleWorkspaceMemberIds(workspaceId, userId)` (tous les membres avec `workspace.directory.read` ; sinon lui-même, OWNER/ADMIN, créateurs au moins MEMBER et titulaires d'une `ProjectMembership` des projets lisibles, restreints aux détenteurs d'une `Membership`).
+  - `projects.service.ts` : `getWorkspaceMembers` (`userId in visible`) et `getWorkspaces` (filtrage par workspace selon le rôle de l'appelant). `resources.service.ts` : `workspace.directory.read` sur le rapport de capacité. `projects.controller.ts` : même action sur `GET .../integrations` et `.../integrations/status`.
+  - Frontend : `AppContext.tsx` n'appelle `resources/capacity` que si le rôle du workspace par défaut n'est pas VIEWER (la requête est sortie du `Promise.all`, avec la même gestion du 401) ; `App.tsx` masque les onglets Ressources et Agile (barre et navigation mobile) et retombe sur le tableau de bord ; `GovernanceView.tsx` masque l'onglet Intégrations.
+- **Tests** : `tests/unit/authz/viewer-directory.spec.ts` (14, fixture RBAC : 7 membres de W, `client` VIEWER avec CLIENT sur P1, `member` sans accès). **Avant correctif : 12 échecs sur 14** (les 2 verts : contrôles MEMBER). Il couvre : matrice, `listVisibleWorkspaceMemberIds` (VIEWER invité : lui-même, OWNER/ADMIN, membres de P1, ni `member` ni son adresse ni le compte déprovisionné ; VIEWER sans projet ; MEMBER voit les 7 ; non-membre 403), `getWorkspaceMembers`, `getWorkspaces`, sprints (liste, vélocité, détail) et capacité refusés à `viewer` et `client`, contrôle positif MEMBER. La matrice HTTP (`rbac-matrix.spec.ts`, 982 cas) est mise à jour : sprints, vélocité, burndown, capacité et intégrations en lecture passent au niveau « contribute » ; tous les cas verts. `rbac-services.spec.ts` et `policy.service.spec.ts` adaptés (un VIEWER ne lit plus les sprints, la capacité n'est plus lue par un VIEWER). Frontend : `GovernanceView.spec.tsx` (+2) : onglet Intégrations absent pour VIEWER et présent pour MEMBER (**avant : 1 échec**).
+- **Mutations rejouées** (sauvegarde hors dépôt, restauration `/bin/cp -f`, `cmp` « restored » à chaque fois) :
+
+| Mutation | Résultat |
+| --- | --- |
+| `getWorkspaceMembers` sans filtre `userId in visible` | 1 échec |
+| `getWorkspaces` sans filtrage des `memberships` | 1 échec |
+| capacité : `workspace.directory.read` remplacée par `workspace.read` | 2 échecs |
+| `GET .../integrations` : `workspace.read` au lieu de `workspace.directory.read` | 2 échecs (matrice HTTP) |
+| Frontend : onglet Intégrations toujours affiché | 1 échec |
+
+- **Écart** : le rendu complet de `App.tsx` pour un VIEWER (onglets Ressources et Agile) n'a pas de test vitest : `App` est trop couplé à l'application entière. Le masquage tient à `currentUserRole !== 'VIEWER'`, déjà fourni par `AppContext`. À confirmer : un test d'`App` demanderait de simuler une quinzaine de composants.
+
+#### Revue architecte (r19)
+
+**À REPRENDRE.** Le correctif backend est conforme : R1b, R2, R4 et R5 sont détectées, ainsi que les mutations du fixeur. Restent trois compléments, détaillés dans le rapport (« Revue r19 », « Plan d'action r19 ») :
+- **P11-a (nouveau, Mineur)** : `GET /projects/resources/:userId/leaves` (`resources.service.ts:438`) laisse un VIEWER lire les absences, avec leur motif, de tout membre d'un workspace commun. Exiger `workspace.directory.read` lorsque la cible n'est pas l'appelant ;
+- **mutation R3 survivante** : la règle P10 de `listVisibleWorkspaceMemberIds` n'est pas testée, car dans la fixture le créateur de P1 est OWNER, donc toujours visible. Ajouter un créateur MEMBER visible et un créateur VIEWER invisible ;
+- **mutation F1 survivante** : aucun test ne vérifie que `AppContext` n'appelle pas `resources/capacity` pour un VIEWER. Test exigé avec le harnais d'`AppContext.session.spec.tsx`.
+
+Écart sur `App.tsx` : accepté pour le rendu des onglets (confort, le backend décide), refusé pour l'appel réseau (point précédent).
+
+### P12 — Un MANAGER ne rétrograde ni ne retire un autre MANAGER
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Cause confirmée** : `project-permissions.service.ts` : `assignProjectRole` et `removeProjectRole` n'exigeaient que `MANAGER` de l'acteur.
+- **Changement** : `assertMayChangeTarget` (appelé avant toute écriture par les deux méthodes) : si le rôle effectif de la cible (`PolicyService.effectiveProjectRole`, désormais public) est MANAGER et que l'acteur n'est pas OWNER/ADMIN, 403 ; exception : l'acteur est la cible, sauf s'il est le créateur du projet. `removeProjectRole` charge le projet par `assertProjectRoles`.
+- **Tests** : `assign-project-role.spec.ts` (+6, 13 au total), les 5 du rapport plus le créateur. **Avant correctif : 3 échecs sur 6** (rétrograder, retirer, créateur ; les 3 autres sont des contrôles positifs).
+- **Mutations** : contrôle retiré de `removeProjectRole` : 2 échecs ; contrôle retiré de `assignProjectRole` : 2 échecs ; exception du créateur retirée : 1 échec. Restaurations vérifiées.
+
+#### Revue architecte (r19)
+
+**VALIDÉ.** Contrôle fait avant toute écriture, sur le rôle effectif de la cible. Une promotion de soi en MANAGER reste impossible. Mutations Q1 (acteur MEMBER traité comme ADMIN : 3 échecs), Q2 (exception du créateur retirée : 1), Q3 (condition « acteur = cible » retirée : 2) et Q4 (créateur cible non protégé : 1) : toutes détectées.
+
+### P10 — Créateur MANAGER seulement s'il est au moins MEMBER
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Changement** : `policy.service.ts`, helper `creatorIsManager(rôle)` (OWNER, ADMIN, MEMBER) appliqué aux trois endroits : `effectiveProjectRole`, `filterUsersWithProjectAction`, `listAccessibleProjectIds` (branche créateur limitée aux workspaces où il n'est pas VIEWER) ; `listVisibleWorkspaceMemberIds` applique la même règle. Les projets personnels sont inchangés.
+- **Tests** : `tests/unit/authz/creator-role.spec.ts` (7, vrai `PolicyService`, fixture RBAC). **Avant correctif : 4 échecs sur 7** (créateur VIEWER sans `ProjectMembership` : `assertProject`, liste, filtre ; avec CLIENT : lecture permise, écriture refusée ; les 3 verts : MEMBER, projet personnel, OWNER).
+- **Mutations** (règle rétablie dans une seule méthode) : `effectiveProjectRole` : 2 échecs ; `filterUsersWithProjectAction` : 2 échecs ; `listAccessibleProjectIds` : 2 échecs.
+- **`grep -rn "project.userId\|userId === " backend/src/authz backend/src/realtime backend/src/projects` (hors specs)**, occurrences restantes justifiées :
+  - `policy.service.ts:114` (annuaire VIEWER) : passe par `creatorIsManager` ;
+  - `:136` : projet personnel (sans workspace), réservé à son créateur, inchangé ;
+  - `:143`, `:280` : règle P10 ;
+  - `:257` : projet personnel dans `filterUsersWithProjectAction` ;
+  - `project-permissions.service.ts:46` : exception du créateur de P12 ;
+  - `finances.service.ts:63`, `resources.service.ts:119-153, 288, 353`, `comments.service.ts:205`, `projects.service.ts:348` : comparaisons d'auteur ou de charge, sans octroi de rôle de projet ;
+  - `tasks.service.ts:127, 243, 347, 429` : identifiant du workspace de synchronisation (`personal-<userId>`), sans effet d'accès.
+- **Observation non traitée (hors périmètre, à classer)** : deux requêtes accordent encore un droit au créateur sans passer par la politique : `AuthService.syncRepositoryToProject` (`auth.service.ts:512`, `findFirst({ id, userId })` : un créateur sans `Membership`, déprovisionné ou VIEWER, peut renseigner `githubRepo`) et `ResourcesService.createResourceAllocation` (pré-filtre `OR userId`, mais suivi de `OWNER/ADMIN` obligatoire : sans effet). Proposition : **O13** (Mineur, Phase 5) : `assertProject(…, 'project.manage')` dans `syncRepositoryToProject`.
+- Il n'existe aucune route qui change un rôle de workspace : aucun recalcul de salons ajouté ; la consigne figure dans `matrice-rbac.md` pour tout futur flux.
+
+#### Revue architecte (r19)
+
+**VALIDÉ.** Même helper aux trois endroits, projets personnels inchangés. `grep` vérifié, chaque occurrence restante est justifiée. Mutations C1 (`creatorIsManager` toujours vrai : 4 échecs) et C2 (branche créateur ouverte : 2) : détectées. La règle P10 appliquée dans l'annuaire du VIEWER n'est pas couverte (R3), ce qui est rattaché à P11.
+
+**Observation O13 : acceptée en Phase 5, Mineur** (CVSS 2.7), avec une remédiation élargie : `assertProject(…, 'project.manage')`, DTO validé pour `POST /auth/github/sync`, tests. Voir le rapport.
+
+### Documentation
+
+`docs/security/matrice-rbac.md` : décisions du 2026-11-04, `workspace.directory.read`, annuaire du VIEWER, P12, P10 et consigne pour un futur changement de rôle ; `runbook-phase4.md` § 5 (requêtes de contrôle des VIEWER internes et des créateurs VIEWER) ; en-tête de `permissions.ts`.
+
+#### Revue architecte (r19)
+
+**VALIDÉ.** Suggestion facultative : dans la première requête du runbook § 5, ajouter le nombre de `ProjectMembership` du VIEWER, pour distinguer un invité d'un collaborateur interne.
+
+## Résultats (r18)
+
+| Commande | Résultat |
+| --- | --- |
+| `cd backend && env -u DATABASE_URL npx jest` | **81/81 suites, 2355/2355 tests** (r17 : 79 suites, 2321 tests) |
+| `npx jest tests/integration --detectOpenHandles` | 4/4, aucun handle ouvert |
+| `npx tsc --noEmit -p tsconfig.build.json` | exit 0 |
+| `npx tsc --noEmit -p tsconfig.json` | 1 erreur TS6059 (`tracking.gateway.spec.ts`), antérieure et inchangée |
+| `npx nest build` ; `*.spec.js` dans `dist` | exit 0 ; 0 |
+| `npx eslint src tests scripts` ; `prettier --check` ; `prisma validate` | 0 erreur, 17 avertissements ; conforme ; valide |
+| Frontend `npx vitest run` | 15 fichiers, **63/63** (r17 : 61) |
+| Frontend `tsc --noEmit -p .` ; `eslint src` ; `prettier --check src` ; `vite build` | exit 0 ; 0 erreur, 36 avertissements ; conforme ; OK |
+| `git stash list` | vide |
+
+Nouveaux fichiers de test : `viewer-directory.spec.ts` (14), `creator-role.spec.ts` (7). Le détail du delta de 34 tests (+27 dans ces deux fichiers et `assign-project-role`, −2 tests de capacité VIEWER/client retirés, le reste dans les suites adaptées) n'a pas été entièrement rapproché ligne à ligne ; les totaux ci-dessus sont ceux mesurés.
+
+## Points ouverts pour l'architecte (r18)
+
+1. Test d'`App.tsx` pour un VIEWER (voir l'écart de P11) : acceptable en l'état ?
+2. **O13** proposé (créateur sans `Membership` et `syncRepositoryToProject`).
+3. Aucune migration nouvelle ; les VIEWER internes devront être promus MEMBER avant déploiement (runbook § 5).
+
+## Revue architecte r19 (2026-11-04) : NON VALIDÉ — compléments ciblés sur P11
+
+Détail dans `rapport-audit.md`, section « Revue r19 ». Les chiffres de « Résultats (r18) » ont été relancés par l'architecte et sont exacts :
+- backend : 81/81 suites, 2355/2355 tests ; intégration 4/4 ;
+- `tsc` (build) exit 0 ; ESLint 0 erreur et 17 avertissements ; prettier conforme ;
+- frontend : 63/63 ; `tsc` exit 0.
+
+13 mutations backend et 1 frontend ont été rejouées. Deux survivent : R3 (règle P10 dans l'annuaire du VIEWER) et F1 (appel à la capacité pour un VIEWER). Le diff (`4a7b43eb…`) est identique avant et après.
+
+#### Revue architecte
+
+- **P11 : À REPRENDRE** (voir sous l'entrée) : P11-a, test R3, test F1.
+- **P12 : VALIDÉ.**
+- **P10 : VALIDÉ.**
+- **Documentation : VALIDÉ.**
+- **Réponses aux points ouverts (r18)** :
+  1. Test d'`App.tsx` : l'écart est accepté pour le rendu, mais un test de l'appel réseau dans `AppContext` est exigé (F1).
+  2. O13 : accepté en Phase 5, Mineur, avec une remédiation élargie (DTO de `POST /auth/github/sync`).
+  3. Promotion des VIEWER internes : accepté comme prérequis de déploiement, à décider par l'utilisateur. Cela ne bloque pas le code.
+- **Nouveaux constats** :
+  - **P11-a** (Mineur, Phase 4) ;
+  - **O13** (Mineur, Phase 5) ;
+  - **O14** (Amélioration, Phase 5) : le workspace « par défaut » diffère entre le frontend et le backend.
+
+**Constats encore ouverts pour `fixeur` en Phase 4, dans cet ordre :**
+1. P11-a ;
+2. le test R3 ;
+3. le test F1 ;
+4. les suites complètes et « Résultats (r19) ».
+
+Les critères sont dans le rapport, « Plan d'action r19 pour fixeur ». La Phase 4 sera validée après ces points.
+
+## Actions de la revue r19
+
+### P11-a — Absences d'un membre lisibles par un VIEWER
+
+**Statut** : CORRIGÉ – À REVOIR
+
+**Changement** : `backend/src/projects/resources.service.ts` (`getResourceLeaves`) : si l'appelant n'est pas la cible, il faut un workspace commun (non supprimé) où l'appelant a un rôle de `WORKSPACE_PERMISSIONS['workspace.directory.read']` (OWNER, ADMIN, MEMBER), sinon 403 ; aucune liste de rôles en dur. La requête se fait en deux temps (workspaces de la cible, puis `Membership` de l'appelant avec `workspaceId in` et `role in`) pour ne pas dépendre d'un filtre relationnel imbriqué. Ses propres absences restent lisibles par tous.
+
+**Tests** (écrits avant le correctif ; 3 échecs constatés : client, viewer, outsider) : `tests/unit/authz/viewer-directory.spec.ts`, bloc « P11-a » : client et viewer vers owner : 403 sans lecture de `resourceLeave` ; propres absences d'un VIEWER : 200 ; member vers owner : 200 ; outsider : 403. `tests/http/rbac-matrix.spec.ts` : `GET /projects/resources/:userId/leaves` passe de `ANY` à `ws('contribute')` (cible `member`).
+**Mutation** : suppression de la ligne `role: { in: … }` : 4 échecs (viewer-directory + matrice) ; fichier restauré (`cmp` identique).
+
+**Écart par rapport au rapport** : aucun. **Correction (r20)** : l'affirmation initiale « la fixture simulée ignore les filtres `workspace: { memberships }` » était inexacte. Le faux Prisma évalue bien `workspace: { memberships: { some } }` ; c'est `workspace: { deletedAt: null }` qu'il ignore (traité comme toujours vrai). Le cas « workspace supprimé » n'est donc couvert qu'en base, par Prisma, et sans test unitaire : rattaché à O15 (Phase 5). La requête en deux temps reste valide (équivalente à la forme relationnelle, validée en r20).
+
+**Questions pour l'architecte** : aucune.
+
+### P11-b — Test de l'annuaire pour un créateur (R3)
+
+**Statut** : CORRIGÉ – À REVOIR
+
+**Changement** : aucun code. Test dans `tests/unit/authz/viewer-directory.spec.ts` (bloc « créateur d'un projet accessible (règle P10) »), projet `PC` sur lequel `client` est CLIENT : créé par `member` (MEMBER sans `ProjectMembership`) : présent dans l'annuaire de client ; créé par `viewer` : absent.
+**Mutations** : (R3) `memberRole.has(project.userId)` à la place de `creatorIsManager` : 1 échec (cas VIEWER) ; boucle des créateurs supprimée : 1 échec (cas MEMBER). Fichier restauré (`cmp` identique).
+
+**Écart par rapport au rapport** : aucun. **Questions** : aucune.
+
+### P11-c — Test de l'appel à la capacité (F1)
+
+**Statut** : CORRIGÉ – À REVOIR
+
+**Changement** : aucun code. `frontend/src/context/AppContext.session.spec.tsx`, bloc « appel à la capacité des ressources (P11) » (même harnais, `AppProvider` réel, fetch simulé) : VIEWER sur le premier workspace : aucun appel à `/projects/resources/capacity` (après 100 ms de marge) ; MEMBER : un appel.
+**Mutation** : `if (defaultRole)` à la place de `if (defaultRole && defaultRole !== 'VIEWER')` : 1 échec (VIEWER). Fichier restauré (`cmp` identique).
+
+**Écart par rapport au rapport** : aucun. **Questions** : aucune.
+
+## Résultats (r19)
+
+- Backend : `env -u DATABASE_URL npx jest` : 81/81 suites, 2362/2362 tests ; intégration `--detectOpenHandles` : 4/4 ; `tsc --noEmit -p tsconfig.build.json` : exit 0 ; `nest build` : exit 0 ; ESLint : 0 erreur, 17 avertissements ; Prettier : conforme ; `prisma validate` : valide.
+- Frontend : vitest 15 fichiers, 65/65 ; `tsc --noEmit -p .` : exit 0 ; Prettier : conforme ; `vite build` : exit 0 ; ESLint : aucune sortie (propre).
+- Aucun commit, aucun `git stash`, aucune base ; `.claude/`, `ci.yml`, `eslint.config.cjs` non touchés.
+
+## Points ouverts pour l'architecte (r19)
+
+- Changement visible : un VIEWER ne lit plus les absences d'autrui (comportement voulu par P11-a). Un MEMBER, ADMIN ou OWNER garde l'accès s'il partage un workspace avec la cible.
+- O13 et O14 laissés en Phase 5, comme demandé.
+
+#### Revue architecte (r20) — P11-a, P11-b, P11-c
+
+**VALIDÉ (les trois).** Suites relancées par l'architecte : backend 81/81 suites, 2362/2362 ; intégration 4/4 ; frontend 65/65 ; `tsc` backend et frontend, ESLint et Prettier OK. Mutations rejouées et toutes détectées : A1 à A5 sur `getResourceLeaves` (rôle retiré, `workspace.read`, contrôle supprimé, `workspaceId in` retiré, contrôle sur soi-même), R3 et R3b sur l'annuaire, F1 et F1b sur `AppContext`. Les sondes des cas limites sont conformes (403 sans lecture dans chaque cas) : cible sans workspace, cible ou appelant déprovisionnés, `PLATFORM_ADMIN` sans `Membership`, VIEWER dans plusieurs workspaces ; un MEMBER de W2 lit une cible de W2 mais pas une cible de W seul. La requête en deux temps n'ouvre aucun écart.
+
+Une précision pour le journal : le faux Prisma évalue bien `workspace: { memberships: { some } }`, mais il ignore `workspace: { deletedAt: null }`. Le cas « workspace supprimé » n'est donc pas testé. Il est rattaché au nouveau constat **O15** (Phase 5), avec les rôles codés en dur de `createResourceLeave` et `deleteResourceLeave`.
+
+## Revue architecte r20 (2026-11-04) : VALIDÉ — Phase 4 close côté code
+
+Détail dans `rapport-audit.md`, section « Revue r20 ». Les chiffres de « Résultats (r19) » sont exacts. Le changement visible de P11-a est accepté et doit figurer dans les notes de version.
+
+**Actions restantes (aucune correction de code)** :
+1. Fixeur : clôture documentaire, à savoir `GEMINI.md`, DAT § 15.1, liste des fichiers du commit sans `.claude/`, notes de version (P11, P11-a).
+2. Utilisateur : commit de la Phase 4 ; avant le déploiement : migration `20261112000000`, MFA des comptes de plateforme, promotion en MEMBER des VIEWER internes (runbook § 5).
+
+Constats encore ouverts : P9 (Phase 1) ; S19 à S26, A5 à A9, P2, P5, P7, P8, Q-2, O10 à O15 (Phases 5 et 6).
+
+## Clôture Phase 4 (documentation, après r20)
+
+Aucun changement de code. Documents mis à jour : `GEMINI.md` (état, rappels de règles), `docs/DOSSIER_ARCHITECTURE_TECHNIQUE.md` § 15.1 (ligne Phase 4 : validée côté code ; ligne Phase 5 : ajout de O15), ce journal (correction de l'écart de P11-a). Aucun commit, aucun `git stash`, aucune base ; `.claude/`, `ci.yml` et `eslint.config.cjs` non touchés.
+
+### Fichiers du commit de Phase 4 (61 entrées de `git status`, hors `.claude/`)
+
+Modifiés (48) :
+- Schéma : `backend/prisma/schema/workspace.prisma`
+- Admin : `backend/src/admin/{admin.controller.ts, admin.service.spec.ts, admin.service.ts, dto/admin.dto.ts, platform-admin.guard.spec.ts, platform-admin.guard.ts}`
+- Auth : `backend/src/auth/{auth.module.ts, session.service.ts, token.service.ts, scim/scim.controller.ts, scim/scim.service.spec.ts, scim/scim.service.ts, sso/sso.controller.ts}`
+- Autorisation : `backend/src/authz/{permissions.ts, policy.service.ts}`
+- Notes : `backend/src/notes/notes.service.ts`
+- Projets : `backend/src/projects/{dto/create-invitation.dto.ts, invitations.controller.ts, invitations.service.ts, project-permissions.service.ts, projects.controller.ts, projects.service.ts, resources.service.ts, tasks.service.ts}`
+- Tests : `backend/tests/http/{impersonation-flag, rbac-matrix, scim-routes, scim-throttler, session-lifecycle}.spec.ts`, `backend/tests/support/rbac-fixture.ts`, `backend/tests/unit/auth/impersonation-routes.spec.ts`, `backend/tests/unit/authz/{notes-access, notifications-access, policy.service, rbac-services}.spec.ts`, `backend/tests/unit/projects/invitations.service.spec.ts`
+- Frontend : `frontend/src/App.tsx`, `frontend/src/components/{AdminConsole.spec.tsx, AdminConsole.tsx, GovernanceView.spec.tsx, GovernanceView.tsx, ProjectMembersPanel.tsx}`, `frontend/src/context/{AppContext.session.spec.tsx, AppContext.tsx}`
+- Docs : `docs/DOSSIER_ARCHITECTURE_TECHNIQUE.md`, `docs/security/{journal-corrections.md, rapport-audit.md}`, `GEMINI.md`
+
+Nouveaux (13, à ajouter avec `git add`) :
+- `backend/prisma/migrations/20261112000000_s17_invitation_project_role/`
+- `backend/src/admin/platform-roles.decorator.ts`, `backend/src/projects/{dto/assign-project-role.dto.ts, invitation-sync-payload.ts, task-sync-payload.ts}`
+- `backend/tests/http/admin-platform-roles.spec.ts`, `backend/tests/unit/auth/impersonation-token.spec.ts`, `backend/tests/unit/authz/{creator-role, viewer-directory}.spec.ts`, `backend/tests/unit/projects/{assign-project-role, invitations-security}.spec.ts`
+- `docs/security/{matrice-rbac.md, runbook-phase4.md}`
+
+`GEMINI.md` est suivi par git et fait partie du commit. Ne pas utiliser `git add -A` sans exclure `.claude/` (ajouter les chemins explicitement).
+
+### Notes de version (Phase 4)
+
+Changements visibles pour les utilisateurs :
+- **P11** : un VIEWER (rôle de workspace) ne voit plus les sprints, la capacité des ressources ni les intégrations, et l'annuaire des membres lui est restreint (permission `workspace.directory.read`, réservée à OWNER, ADMIN et MEMBER). L'interface n'appelle plus la capacité des ressources pour un VIEWER.
+- **P11-a** : un VIEWER ne lit plus les absences d'autrui. Un MEMBER, ADMIN ou OWNER les lit s'il partage un workspace (non supprimé) avec la cible. Chacun garde l'accès à ses propres absences.
+- **P12** : un MANAGER de projet ne peut ni rétrograder ni retirer un autre MANAGER (réservé aux OWNER/ADMIN du workspace) ; le créateur du projet ne peut pas se rétrograder lui-même.
+- **P10** : le créateur d'un projet n'est MANAGER que si son rôle de workspace est au moins MEMBER ; un créateur devenu VIEWER perd ce rôle.
+- **Invitations (S17)** : les liens anonymes d'espace de travail sont supprimés ; invitation nominative non transférable ; `projectRole` accepté pour les invitations de projet (`role` ignoré dans ce cas) ; `POST /projects/:id/members` valide un UUID.
+- **Console admin (S18)** : `POST /admin/users/:id/impersonate` exige `{ reason }` ; les comptes `platformRole` sans MFA sont bloqués sur `/admin/*` ; leurs sessions sont plafonnées à 12 h.
+
+Prérequis de déploiement (utilisateur, avant mise en production) :
+1. Migration `20261112000000_s17_invitation_project_role` (additive ; deux `UPDATE` sur les invitations en attente seulement), selon `docs/security/runbook-phase4.md`. Non appliquée à ce jour.
+2. Activer le MFA sur tous les comptes de plateforme (sinon blocage de `/admin/*`).
+3. Promouvoir en MEMBER les VIEWER internes qui doivent garder l'annuaire, les sprints, la capacité, les intégrations et les absences (runbook § 5).
+
+Constats encore ouverts : P9 (Phase 1) ; S19 à S26, A5 à A9, P2, P5, P7, P8, Q-2, O10 à O15 (Phases 5 et 6).
+
+### Message de commit proposé (non exécuté)
+
+```
+fix(security): phase 4 du programme de remédiation (validée par l'architecte)
+
+Invitations (S17, S17-a), console d'administration (S18.1 à S18.3), RBAC
+workspace/projet (P4, P10, P11, P11-a, P12), permission
+workspace.directory.read, reports O7, O8, O9.
+Migration 20261112000000 (non appliquée), runbook-phase4.
+
+```

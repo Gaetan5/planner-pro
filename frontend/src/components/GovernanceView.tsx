@@ -34,6 +34,7 @@ export const GovernanceView: React.FC = () => {
     createDelivery,
     updateDeliveryStatus,
     toggleDeliveryChecklistItem,
+    getWorkspaceRole,
   } = useApp();
 
   const [selectedProjId, setSelectedProjId] = useState<string>(projects[0]?.id || '');
@@ -62,6 +63,8 @@ export const GovernanceView: React.FC = () => {
   const [deliveryChecklistRaw, setDeliveryChecklistRaw] = useState('');
 
   const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId);
+  // Un VIEWER (invité) ne voit pas les intégrations du workspace (P11)
+  const canSeeIntegrations = getWorkspaceRole?.(activeWorkspaceId) !== 'VIEWER';
   const workspaceProjects = projects.filter(
     (project) => (project.workspaceId || project.workspace?.id) === activeWorkspaceId,
   );
@@ -335,32 +338,34 @@ export const GovernanceView: React.FC = () => {
               >
                 <History size={16} /> Journal d'Audit
               </button>
-              <button
-                onClick={() => setActiveSubTab('integrations')}
-                className={`gov-tab-btn ${activeSubTab === 'integrations' ? 'active' : ''}`}
-                style={{
-                  background:
-                    activeSubTab === 'integrations'
-                      ? 'linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(236, 72, 153, 0.15))'
-                      : 'transparent',
-                  border:
-                    activeSubTab === 'integrations'
-                      ? '1px solid rgba(139, 92, 246, 0.3)'
-                      : '1px solid transparent',
-                  color: activeSubTab === 'integrations' ? '#f3f4f6' : '#9ca3af',
-                  padding: '8px 16px',
-                  borderRadius: '8px',
-                  fontWeight: 600,
-                  fontSize: '0.9rem',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  transition: 'all 0.2s',
-                }}
-              >
-                <Link size={16} /> Intégrations & Sync
-              </button>
+              {canSeeIntegrations && (
+                <button
+                  onClick={() => setActiveSubTab('integrations')}
+                  className={`gov-tab-btn ${activeSubTab === 'integrations' ? 'active' : ''}`}
+                  style={{
+                    background:
+                      activeSubTab === 'integrations'
+                        ? 'linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(236, 72, 153, 0.15))'
+                        : 'transparent',
+                    border:
+                      activeSubTab === 'integrations'
+                        ? '1px solid rgba(139, 92, 246, 0.3)'
+                        : '1px solid transparent',
+                    color: activeSubTab === 'integrations' ? '#f3f4f6' : '#9ca3af',
+                    padding: '8px 16px',
+                    borderRadius: '8px',
+                    fontWeight: 600,
+                    fontSize: '0.9rem',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  <Link size={16} /> Intégrations & Sync
+                </button>
+              )}
             </div>
 
             {activeSubTab === 'project' && (
@@ -882,7 +887,7 @@ export const GovernanceView: React.FC = () => {
               <ProjectAuditLogPanel projectId={activeProject.id} projectName={activeProject.name} />
             )}
 
-            {activeSubTab === 'integrations' && activeWorkspace && (
+            {activeSubTab === 'integrations' && canSeeIntegrations && activeWorkspace && (
               <IntegrationsPanel workspaceId={activeWorkspace.id} />
             )}
           </main>

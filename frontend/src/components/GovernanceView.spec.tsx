@@ -111,4 +111,40 @@ describe('GovernanceView', () => {
     fireEvent.click(screen.getByText(/Intégrations & Sync/));
     expect(screen.getByTestId('integrations-workspace')).toHaveTextContent('workspace-2');
   });
+
+  // P11 : un VIEWER (invité) ne voit pas les intégrations et le panneau n'appelle jamais l'API
+  it.each([
+    ['VIEWER', false],
+    ['MEMBER', true],
+  ] as const)('rôle %s : onglet Intégrations visible = %s', (role, visible) => {
+    vi.mocked(useApp).mockReturnValue({
+      projects: [
+        {
+          id: 'project-1',
+          workspaceId: 'workspace-1',
+          name: 'Projet 1',
+          status: 'ACTIVE',
+          tasks: [],
+          milestones: [],
+          deliverables: [],
+          deliveries: [],
+        },
+      ],
+      workspaces: [{ id: 'workspace-1', name: 'Workspace 1', ownerId: 'owner-1' }],
+      activeWorkspaceId: 'workspace-1',
+      setActiveWorkspaceId: vi.fn(),
+      getWorkspaceMembers,
+      getWorkspaceRole: vi.fn(() => role),
+      createMilestone: vi.fn(),
+      completeMilestone: vi.fn(),
+      createDeliverable: vi.fn(),
+      updateDeliverableStatus: vi.fn(),
+      createDelivery: vi.fn(),
+      updateDeliveryStatus: vi.fn(),
+      toggleDeliveryChecklistItem: vi.fn(),
+    } as unknown as ReturnType<typeof useApp>);
+    render(<GovernanceView />);
+    expect(!!screen.queryByText(/Intégrations & Sync/)).toBe(visible);
+    expect(screen.queryByTestId('integrations-workspace')).toBeNull();
+  });
 });

@@ -23,7 +23,7 @@
 10. [Synchronisation Hybride Asynchrone : Transactional Outbox vers Cloud Firestore](#10-synchronisation-hybride-asynchrone--transactional-outbox-vers-cloud-firestore)
 11. [Moteur d'IA & Heuristique Prédictive (Copilot & Gemini)](#11-moteur-dia--heuristique-prédictive-copilot--gemini)
 12. [Gouvernance, Traçabilité & Journal d'Audit (Audit Trail)](#12-gouvernance-traçabilité--journal-daudit-audit-trail)
-13. [Passerelle de Notifications Temps Réel & Mentions](#13-passerelle-de-notifications-temps-réel--mentions)
+13. [Diffusion Temps Réel & Mentions](#13-diffusion-temps-réel--mentions)
 14. [Infrastructure de Production, Déploiement & Résilience](#14-infrastructure-de-production-déploiement--résilience)
 15. [Sécurité Applicative & Programme de Remédiation](#15-sécurité-applicative--programme-de-remédiation)
 
@@ -78,7 +78,7 @@ Le système est conteneurisé et orchestré via Docker Compose, séparant hermé
 |               |       | - Notes Service (Regex Markdown-to-Tasks)     |        |
 | Port: 8080    |       | - Tracking Gateway (Socket.io WSS)            |        |
 +---------------+       | - Copilot Service (Heuristics & Gemini LLM)   |        |
-                        | - Notifications Gateway (Pub/Sub Redis)       |        |
+                        | - RealtimeService (salons Socket.IO, Redis)   |        |
                         | - Transactional Outbox Worker                 |        |
                         +-------+--------------------+------------------+        |
                                 |                    |                           |
@@ -685,9 +685,17 @@ Chaque entrée d'audit conserve l'état avant et après modification dans le cha
 
 ---
 
-## 13. Passerelle de Notifications Temps Réel & Mentions
+## 13. Diffusion Temps Réel & Mentions
 
-La passerelle [notifications.gateway.ts](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/notifications/notifications.gateway.ts) distribue les événements d'équipe en temps réel sur les postes des collaborateurs via WebSockets et WebSocket Pub/Sub Redis.
+La diffusion temps réel passe par un point unique, [RealtimeService](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/realtime/realtime.service.ts) (audit de sécurité, A4 et S16). Le serveur Socket.IO est porté par la gateway de suivi (`tracking.gateway.ts`), qui l'enregistre auprès du service ; l'ancienne passerelle dédiée aux notifications a été supprimée. Les contrôleurs et services n'accèdent jamais au serveur : ils appellent `RealtimeService` après avoir validé les droits et écrit en base. Le transport multi-instance repose sur l'adaptateur Redis de Socket.IO.
+
+* **Authentification** : au handshake, par le cookie de session (jeton d'accès `typ: access`, Origin contrôlée) ; la session est revalidée toutes les 60 s sans passer par le cache.
+* **Salons** :
+  * `project:<id>` : événements contenant des données de tâches, rejoints pour chaque projet accessible (`PolicyService.listAccessibleProjectIds`) ;
+  * `workspace:<id>` : signaux non sensibles uniquement (aucune donnée de tâche) ;
+  * `user:<id>` : notifications personnelles ;
+  * `task:<id>` : suivi d'une tâche (commentaires, saisie), rejoint par `join-task` seulement si l'utilisateur a un rôle de lecture sur le projet de la tâche (équivalent de l'action `task.read`).
+* **Révocation** : `refreshUserRooms(userId)` recalcule les salons de toutes les sockets d'un utilisateur après tout changement d'appartenance ou de rôle (invitation acceptée, rôle de projet attribué ou retiré, SCIM) et fait quitter les salons perdus ; `evictTaskRoom(taskId)` vide le salon d'une tâche qui change de projet.
 
 ```
 [ Événement Métier ] (Ex: Assignation de tâche, Commentaire avec @mention, Jalon atteint)
@@ -699,8 +707,8 @@ La passerelle [notifications.gateway.ts](file:///home/gaetan/Documents/GitHub/pl
 |  1. Persistance en base de données :                                                  |
 |     INSERT INTO Notification (userId, title, message, type, read=false)               |
 |                                                                                       |
-|  2. Routage vers la passerelle WebSocket :                                            |
-|     notificationsGateway.server.to(`user:${targetUserId}`).emit('notification', {     |
+|  2. Routage via RealtimeService :                                                     |
+|     realtimeService.emitToUser(targetUserId, 'new-notification', {                    |
 |       id, type, title, message, createdAt                                             |
 |     });                                                                               |
 |                                                                                       |
@@ -776,8 +784,8 @@ Un audit d'architecture et de sécurité complet a été conduit en octobre 2026
 | 1 | Authentification et sessions : MFA, sessions révocables, contrôles uniformes à la connexion, OAuth GitHub | A3, S7, S8, S6, S9, P6, S27 | **Validée côté code** (revue r7, commit `c5f1391`) |
 | 2 | SSO et SCIM complets : validation OIDC, vérification DNS des domaines, durcissement SCIM | S10, S11 | **Validée côté code** (revue r10) — SSO et SCIM désactivés jusqu'à l'exécution du runbook Phase 2 et la décision de l'utilisateur |
 | 3 | Autorisation centralisée, IDOR, temps réel (Socket.IO) | A1, A2, A4, S12, S13, S14 (suite), S15, S16 | **Validée côté code** (revue r16) — migration `20261111000000` et script optionnel de reprise des accès soumis au runbook Phase 3 et à la décision de l'utilisateur |
-| 4 | Invitations, console d'administration | P4, S17, S18 (suite) | À venir |
-| 5 | Durcissement : SSRF, XSS, en-têtes, DTO, limitation de débit, webhooks, dépendances, code mort | S19 à S26, A5, A6, A7, P5, P8 | À venir |
+| 4 | Invitations, console d'administration, RBAC workspace/projet (`workspace.directory.read`, restrictions VIEWER, créateur MANAGER seulement si MEMBER, MANAGER protégé) | P4, P10, P11, P11-a, P12, S17, S18 (suite), O7, O8, O9 | **Validée côté code** (revue r20) — migration `20261112000000`, MFA des comptes de plateforme et promotion des VIEWER internes soumis au runbook Phase 4 et à la décision de l'utilisateur |
+| 5 | Durcissement : SSRF, XSS, en-têtes, DTO, limitation de débit, webhooks, dépendances, code mort | S19 à S26, A5, A6, A7, P5, P8, O10 à O15 | À venir |
 | 6 | Journal d'audit, tests e2e, intégration continue, montée vers pnpm 10 | A8, A9, P2, P7 | À venir |
 
 ### 15.2 Règles de Développement Issues du Programme

@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PolicyService } from '../authz/policy.service';
+import { WORKSPACE_PERMISSIONS } from '../authz/permissions';
 import { WorkspaceRole } from '@prisma/client';
 import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
 
@@ -66,7 +67,12 @@ export class ResourcesService {
 
   async getResourceCapacityReport(userId: string, workspaceId?: string) {
     const workspace = workspaceId ? { id: workspaceId } : await this.ensureDefaultWorkspace(userId);
-    const caller = await this.policy.assertWorkspaceMember(workspace.id, userId);
+    // La charge, les absences et les adresses de tous les membres : pas pour un VIEWER (P11)
+    const caller = await this.policy.assertWorkspace(
+      workspace.id,
+      userId,
+      'workspace.directory.read',
+    );
     // Les taux de coût et de facturation relèvent de `workspace.finances.read` : OWNER/ADMIN (S12-e)
     const canSeeRates = caller.role === 'OWNER' || caller.role === 'ADMIN';
     await this.ensureResourceProfiles(workspace.id);
@@ -432,14 +438,18 @@ export class ResourcesService {
 
   async getResourceLeaves(actingUserId: string, userId: string) {
     if (actingUserId !== userId) {
+      // Les absences sont des données personnelles : lecture réservée aux rôles qui voient
+      // l'annuaire (`workspace.directory.read`), jamais à un VIEWER (P11-a)
+      const targetMemberships = await this.prisma.membership.findMany({
+        where: { userId, workspace: { deletedAt: null } },
+        select: { workspaceId: true },
+      });
       const commonWorkspaces = await this.prisma.membership.findMany({
         where: {
           userId: actingUserId,
-          workspace: {
-            memberships: {
-              some: { userId },
-            },
-          },
+          workspaceId: { in: targetMemberships.map((m) => m.workspaceId) },
+          role: { in: [...WORKSPACE_PERMISSIONS['workspace.directory.read']] },
+          workspace: { deletedAt: null },
         },
       });
       if (commonWorkspaces.length === 0) {
