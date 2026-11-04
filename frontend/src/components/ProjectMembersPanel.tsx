@@ -127,15 +127,14 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
     setSuccess(null);
     setGeneratedInviteLink(null);
     try {
-      // Mapper le rôle projet vers le rôle workspace approprié
-      const wsRole = externalRole === 'CLIENT' ? 'VIEWER' : 'MEMBER';
-
+      // Un invité de projet est toujours VIEWER du workspace (S17) ; son rôle de projet est explicite
       const res = await createInvitation(
         activeWorkspaceId,
         externalEmail.trim() || null,
-        wsRole,
+        'VIEWER',
         projectId,
         7,
+        externalRole,
       );
 
       if (res && res.rawToken) {

@@ -13,11 +13,38 @@ import { OTHER_W, USERS, W, buildRbacPrisma } from '../../support/rbac-fixture';
  * S12-f / S16-c : le module des notes passe par `PolicyService` pour le projet cible, les tâches
  * existantes et les assignés, et fait quitter le salon `task:<id>` d'une tâche déplacée.
  */
+/**
+ * Faux `task.findMany` pour `deleteNote` (O8) : évalue le `where` (noteId, projectId.in, deletedAt),
+ * refuse toute autre clé, et renvoie assignés et projet comme l'`include` réel.
+ */
+function installNoteTaskFinder(prisma: any) {
+  prisma.task.findMany = jest.fn(async ({ where }: any) => {
+    const known = new Set(['noteId', 'projectId', 'deletedAt']);
+    const unknown = Object.keys(where).filter((k) => !known.has(k));
+    if (unknown.length > 0) throw new Error(`where inconnu : ${unknown.join(',')}`);
+    return prisma.data.tasks
+      .filter(
+        (t: any) =>
+          t.noteId === where.noteId &&
+          (where.projectId === undefined || where.projectId.in.includes(t.projectId)) &&
+          (where.deletedAt === undefined || t.deletedAt === where.deletedAt),
+      )
+      .map((t: any) => ({
+        createdAt: new Date(0),
+        updatedAt: new Date(0),
+        ...t,
+        assignees: [{ userId: 'u-assigned' }],
+        project: prisma.data.projects.find((p: any) => p.id === t.projectId),
+      }));
+  });
+}
+
 describe('S12-f / S16-c : notes et politique d’autorisation', () => {
   let prisma: any;
   let service: NotesService;
   let policy: PolicyService;
   const evictTaskRoom = jest.fn();
+  const enqueue = jest.fn();
   const gemini = { isAvailable: jest.fn(), extractTasksFromText: jest.fn() };
 
   const userNames: Record<string, string> = {
@@ -90,7 +117,7 @@ describe('S12-f / S16-c : notes et politique d’autorisation', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: RedisService, useValue: { del: jest.fn(), get: jest.fn(), set: jest.fn() } },
         { provide: GeminiService, useValue: gemini },
-        { provide: FirestoreSyncService, useValue: { enqueue: jest.fn() } },
+        { provide: FirestoreSyncService, useValue: { enqueue } },
         { provide: RealtimeService, useValue: { evictTaskRoom } },
       ],
     }).compile();
@@ -250,6 +277,53 @@ describe('S12-f / S16-c : notes et politique d’autorisation', () => {
     });
   });
 
+  describe('O7 : aucun projet personnel vide créé par un déplacement refusé', () => {
+    const taskOf = (id: string, projectId: string, userId: string) => ({
+      id,
+      title: 'Tâche C',
+      status: 'TODO',
+      projectId,
+      userId,
+      noteId: 'N1',
+      deletedAt: null,
+    });
+
+    it('tâche d’un projet de workspace, tag inconnu : déplacement refusé, aucun projet créé', async () => {
+      prisma.data.tasks.push(taskOf('TC', 'P1', USERS.contributor));
+      await service.createNote(USERS.contributor, 'N', '- [ ] Tâche C #Inconnu <!-- task:TC -->');
+      expect(prisma.project.create).not.toHaveBeenCalled();
+    });
+
+    it('auteur qui ne peut plus écrire dans le projet de la tâche : aucun projet créé', async () => {
+      prisma.data.tasks.push(taskOf('TC', 'P1', USERS.commenter));
+      await service.createNote(USERS.commenter, 'N', '- [ ] Tâche C #Inconnu <!-- task:TC -->');
+      expect(prisma.project.create).not.toHaveBeenCalled();
+      expect(prisma.task.update).not.toHaveBeenCalled();
+    });
+
+    it('contrôle : tâche d’un projet personnel, tag inconnu : le projet personnel est créé (déplacement permis)', async () => {
+      prisma.data.projects.push({
+        id: 'PP1',
+        name: 'Perso1',
+        userId: USERS.owner,
+        workspaceId: null,
+        deletedAt: null,
+      });
+      prisma.data.tasks.push(taskOf('TP', 'PP1', USERS.owner));
+      await service.createNote(USERS.owner, 'N', '- [ ] Tâche C #Nouveau <!-- task:TP -->');
+      expect(prisma.project.create).toHaveBeenCalledTimes(1);
+      expect(
+        prisma.task.update.mock.calls.map((c: any) => c[0].data).some((d: any) => d.projectId),
+      ).toBe(true);
+    });
+
+    it('contrôle : nouvelle tâche avec tag inconnu : le projet personnel est créé', async () => {
+      await service.createNote(USERS.owner, 'N', '- [ ] Nouvelle #Nouveau');
+      expect(prisma.project.create).toHaveBeenCalledTimes(1);
+      expect(prisma.task.create).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('S12-i : l’assigné est résolu contre le projet où reste la tâche', () => {
     const askFor = (title: string, assigneeName: string) => {
       gemini.isAvailable.mockReturnValue(true);
@@ -371,6 +445,7 @@ describe('S12-f / S16-c : notes et politique d’autorisation', () => {
       prisma.note.findFirst = jest.fn(async ({ where }: any) =>
         where.id === 'N9' && where.userId === author ? { id: 'N9', userId: author } : null,
       );
+      installNoteTaskFinder(prisma);
       // Faux updateMany : évalue le `where` reçu (noteId, projectId.in) sur les tâches
       prisma.task.updateMany = jest.fn(async ({ where, data }: any) => {
         const known = new Set(['noteId', 'projectId']);
@@ -424,6 +499,96 @@ describe('S12-f / S16-c : notes et politique d’autorisation', () => {
       setupNote(USERS.contributor, 'P1');
       await service.deleteNote(USERS.contributor, 'N9');
       expect(deletedAtOf('T9')).toBeInstanceOf(Date);
+    });
+  });
+
+  describe('O8 : un événement Firestore delete par tâche réellement supprimée par deleteNote', () => {
+    const baseTask = (id: string, projectId: string, userId: string) => ({
+      id,
+      title: id,
+      description: null,
+      priority: 'MEDIUM',
+      status: 'TODO',
+      startDate: null,
+      dueDate: null,
+      estimatedMinutes: null,
+      progress: 0,
+      labels: null,
+      storyPoints: null,
+      sprintId: null,
+      userId,
+      noteId: 'N9',
+      projectId,
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+      updatedAt: new Date('2026-01-01T00:00:00Z'),
+      deletedAt: null as Date | null,
+    });
+    const fakeFind = () => installNoteTaskFinder(prisma);
+    const events = () =>
+      enqueue.mock.calls
+        .map((c: any) => c[1])
+        .filter((e: any) => e.entityType === 'task' && e.operation === 'delete');
+    const noteDeleted = () =>
+      prisma.note.update.mock.calls.length > 0 && prisma.task.updateMany.mock.calls.length > 0;
+
+    beforeEach(() => {
+      // Mêmes fausses écritures que S12-j
+      prisma.note.findFirst = jest.fn(async ({ where }: any) =>
+        where.id === 'N9' ? { id: 'N9', userId: where.userId } : null,
+      );
+      prisma.task.updateMany = jest.fn(async ({ where, data }: any) => {
+        const rows = prisma.data.tasks.filter(
+          (t: any) =>
+            t.noteId === where.noteId &&
+            (where.projectId === undefined || where.projectId.in.includes(t.projectId)),
+        );
+        rows.forEach((t: any) => Object.assign(t, data));
+        return { count: rows.length };
+      });
+      fakeFind();
+    });
+
+    it('COMMENTER de P1 : seule la tâche du projet personnel est supprimée et notifiée', async () => {
+      prisma.data.projects.push({
+        id: 'PP-c',
+        name: 'Perso',
+        userId: USERS.commenter,
+        workspaceId: null,
+        deletedAt: null,
+      });
+      prisma.data.tasks.push(
+        baseTask('T9', 'P1', USERS.commenter),
+        baseTask('T10', 'PP-c', USERS.commenter),
+      );
+
+      await service.deleteNote(USERS.commenter, 'N9');
+
+      expect(noteDeleted()).toBe(true);
+      const sent = events();
+      expect(sent.map((e: any) => e.entityId)).toEqual(['T10']);
+      expect(sent[0]).toMatchObject({
+        workspaceId: `personal-${USERS.commenter}`,
+        payload: expect.objectContaining({
+          id: 'T10',
+          projectId: 'PP-c',
+          assigneeIds: ['u-assigned'],
+          deletedAt: expect.any(String),
+        }),
+      });
+    });
+
+    it('CONTRIBUTOR de P1 : la tâche de P1 est supprimée et notifiée avec le workspace du projet', async () => {
+      prisma.data.tasks.push(baseTask('T9', 'P1', USERS.contributor));
+      await service.deleteNote(USERS.contributor, 'N9');
+      const sent = events();
+      expect(sent).toHaveLength(1);
+      expect(sent[0]).toMatchObject({ entityId: 'T9', workspaceId: W });
+    });
+
+    it('aucune tâche supprimée : aucun événement de tâche', async () => {
+      prisma.data.tasks.push(baseTask('T9', 'P1', USERS.deprovisioned));
+      await service.deleteNote(USERS.deprovisioned, 'N9');
+      expect(events()).toEqual([]);
     });
   });
 

@@ -83,7 +83,7 @@ export class ProjectsService {
 
   async getWorkspaces(userId: string) {
     await this.ensureDefaultWorkspace(userId);
-    return this.prisma.workspace.findMany({
+    const workspaces = await this.prisma.workspace.findMany({
       where: {
         deletedAt: null,
         memberships: { some: { userId } },
@@ -98,14 +98,28 @@ export class ProjectsService {
       },
       orderBy: { createdAt: 'asc' },
     });
+    // Annuaire borné au rôle de l'appelant dans chaque workspace (P11)
+    return Promise.all(
+      workspaces.map(async (workspace) => {
+        const visible = new Set(
+          await this.policy.listVisibleWorkspaceMemberIds(workspace.id, userId),
+        );
+        return {
+          ...workspace,
+          memberships: workspace.memberships.filter((m) => visible.has(m.userId)),
+        };
+      }),
+    );
   }
 
   async getWorkspaceMembers(userId: string, workspaceId?: string) {
     const workspace = workspaceId ? { id: workspaceId } : await this.ensureDefaultWorkspace(userId);
     await this.policy.assertWorkspace(workspace.id, userId, 'workspace.read');
+    // Un VIEWER (invité) ne voit que les personnes de ses projets (P11)
+    const visible = await this.policy.listVisibleWorkspaceMemberIds(workspace.id, userId);
 
     return this.prisma.membership.findMany({
-      where: { workspaceId: workspace.id },
+      where: { workspaceId: workspace.id, userId: { in: visible } },
       include: {
         user: { select: { id: true, name: true, email: true } },
       },

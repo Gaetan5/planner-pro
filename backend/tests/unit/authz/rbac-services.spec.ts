@@ -256,11 +256,11 @@ describe('S12 : cloisonnement par projet dans les services', () => {
     it('un MEMBER gère les sprints', async () => {
       await expect(service.createSprint(W, USERS.member, dto as any)).resolves.toBeDefined();
     });
-    it('un VIEWER lit la liste des sprints', async () => {
-      await expect(service.listSprints(W, USERS.viewer)).resolves.toEqual([]);
+    it('un VIEWER ne lit pas la liste des sprints (P11)', async () => {
+      await refused(service.listSprints(W, USERS.viewer));
     });
     it('listSprints n’expose que les tâches des projets accessibles', async () => {
-      await service.listSprints(W, USERS.client);
+      await service.listSprints(W, USERS.contributor);
       const args = prisma.sprint.findMany.mock.calls[0][0];
       expect(args.include.tasks.where.projectId).toEqual({ in: ['P1'] });
     });
@@ -408,7 +408,7 @@ describe('S12 : cloisonnement par projet dans les services', () => {
       service = module.get(ResourcesService);
     });
 
-    it.each(['member', 'contributor', 'viewer', 'client'] as const)(
+    it.each(['member', 'contributor'] as const)(
       '%s : aucun taux dans la réponse',
       async (persona) => {
         const report = await service.getResourceCapacityReport(USERS[persona], W);

@@ -55,6 +55,7 @@ model Invitation {
   workspace   Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   projectId   String?
   project     Project?         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectRole ProjectRole?     // Rôle de projet de l'invité (S17) ; null = CLIENT à l'acceptation
   invitedById String
   invitedBy   User             @relation("SentInvitations", fields: [invitedById], references: [id])
   expiresAt   DateTime

@@ -77,6 +77,47 @@ export class PolicyService {
     return admins.map((m) => m.userId);
   }
 
+  /**
+   * Utilisateurs du workspace que l'appelant a le droit de voir (P11). Avec
+   * `workspace.directory.read` (OWNER, ADMIN, MEMBER) : tous les membres. Un VIEWER (invité) ne voit
+   * que lui-même, les OWNER/ADMIN (MANAGER implicites) et les personnes qui ont accès à au moins un
+   * projet qu'il peut lire. Seuls les titulaires d'une `Membership` du workspace sont renvoyés.
+   * 403 si l'appelant n'est pas membre.
+   */
+  async listVisibleWorkspaceMemberIds(workspaceId: string, userId: string): Promise<string[]> {
+    const caller = await this.assertWorkspaceMember(workspaceId, userId);
+    const members = await this.prisma.membership.findMany({
+      where: { workspaceId, workspace: { deletedAt: null } },
+      select: { userId: true, role: true },
+    });
+    if (WORKSPACE_PERMISSIONS['workspace.directory.read'].includes(caller.role as never)) {
+      return members.map((m) => m.userId);
+    }
+
+    const memberRole = new Map(members.map((m) => [m.userId, m.role]));
+    const visible = new Set<string>([userId]);
+    for (const m of members) {
+      if (m.role === 'OWNER' || m.role === 'ADMIN') visible.add(m.userId);
+    }
+    const projectIds = await this.listAccessibleProjectIds(userId, { workspaceId });
+    if (projectIds.length > 0) {
+      const projects = await this.prisma.project.findMany({
+        where: { id: { in: projectIds }, deletedAt: null },
+        select: { id: true, userId: true },
+      });
+      const grants = await this.prisma.projectMembership.findMany({
+        where: { projectId: { in: projectIds } },
+        select: { userId: true },
+      });
+      // Créateurs (au moins MEMBER, P10) et titulaires d'un rôle de projet, s'ils sont membres
+      for (const project of projects) {
+        if (this.creatorIsManager(memberRole.get(project.userId))) visible.add(project.userId);
+      }
+      for (const grant of grants) visible.add(grant.userId);
+    }
+    return members.map((m) => m.userId).filter((id) => visible.has(id));
+  }
+
   // ─── Projet ─────────────────────────────────────────────────────────
 
   /**
@@ -87,7 +128,7 @@ export class PolicyService {
    * `ProjectMembership` n'a aucun accès (S12). Un projet personnel (sans workspace) reste réservé
    * à son créateur.
    */
-  private async effectiveProjectRole(
+  async effectiveProjectRole(
     project: { id: string; userId: string; workspaceId: string | null },
     userId: string,
   ): Promise<ProjectRoleName | null> {
@@ -99,11 +140,19 @@ export class PolicyService {
     });
     if (!membership) return null;
     if (membership.role === 'OWNER' || membership.role === 'ADMIN') return 'MANAGER';
-    if (project.userId === userId) return 'MANAGER';
+    if (project.userId === userId && this.creatorIsManager(membership.role)) return 'MANAGER';
     const projectMembership = await this.prisma.projectMembership.findUnique({
       where: { projectId_userId: { projectId: project.id, userId } },
     });
     return (projectMembership?.role as ProjectRoleName | undefined) ?? null;
+  }
+
+  /**
+   * Le créateur d'un projet de workspace n'en est MANAGER que s'il est au moins MEMBER du
+   * workspace (P10) : un créateur rétrogradé VIEWER retombe sur sa `ProjectMembership` éventuelle.
+   */
+  private creatorIsManager(workspaceRole: string | null | undefined): boolean {
+    return workspaceRole === 'OWNER' || workspaceRole === 'ADMIN' || workspaceRole === 'MEMBER';
   }
 
   /** Rôle accepté s'il est au moins égal au plus faible des rôles autorisés. */
@@ -226,7 +275,9 @@ export class PolicyService {
     return memberships
       .filter((m) => {
         const role: ProjectRoleName | undefined =
-          m.role === 'OWNER' || m.role === 'ADMIN' || project.userId === m.userId
+          m.role === 'OWNER' ||
+          m.role === 'ADMIN' ||
+          (project.userId === m.userId && this.creatorIsManager(m.role))
             ? 'MANAGER'
             : granted.get(m.userId);
         return !!role && this.roleSatisfies(role, allowed);
@@ -252,6 +303,9 @@ export class PolicyService {
       select: { workspaceId: true, role: true },
     });
     const memberWorkspaceIds = memberships.map((m) => m.workspaceId);
+    const creatorWorkspaceIds = memberships
+      .filter((m) => this.creatorIsManager(m.role))
+      .map((m) => m.workspaceId);
     const adminWorkspaceIds = memberships
       .filter((m) => m.role === 'OWNER' || m.role === 'ADMIN')
       .map((m) => m.workspaceId);
@@ -272,7 +326,8 @@ export class PolicyService {
         deletedAt: null,
         ...scope,
         OR: [
-          { userId, workspaceId: { in: memberWorkspaceIds } },
+          // Créateur : seulement dans les workspaces où il est au moins MEMBER (P10)
+          { userId, workspaceId: { in: creatorWorkspaceIds } },
           { id: { in: grantedIds }, workspaceId: { in: memberWorkspaceIds } },
           ...(adminWorkspaceIds.length > 0 ? [{ workspaceId: { in: adminWorkspaceIds } }] : []),
           ...(options.workspaceId ? [] : [{ userId, workspaceId: null }]),

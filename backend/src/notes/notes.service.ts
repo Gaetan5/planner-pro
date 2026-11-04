@@ -4,6 +4,7 @@ import { RedisService } from '../redis/redis.service';
 import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
 import { randomUUID } from 'crypto';
 import { PolicyService } from '../authz/policy.service';
+import { taskSyncPayload } from '../projects/task-sync-payload';
 import { RealtimeService } from '../realtime/realtime.service';
 
 import { GeminiService } from './gemini.service';
@@ -169,14 +170,36 @@ export class NotesService {
       // a encore `task.write` (dont ses projets personnels) le sont avec elle.
       const writable = await this.policy.listAccessibleProjectIds(userId, { action: 'task.write' });
       await this.prisma.$transaction(async (tx) => {
+        // O8 : les tâches réellement supprimées (même filtre que `updateMany`) sont lues avant,
+        // pour émettre un événement `delete` par tâche, comme `deleteTask`.
+        const deletable = await tx.task.findMany({
+          where: { noteId, projectId: { in: writable }, deletedAt: null },
+          include: {
+            assignees: { select: { userId: true } },
+            project: { select: { workspaceId: true, userId: true } },
+          },
+        });
+        const deletedAt = new Date();
         await tx.note.update({
           where: { id: noteId },
-          data: { deletedAt: new Date() },
+          data: { deletedAt },
         });
         await tx.task.updateMany({
           where: { noteId, projectId: { in: writable } },
-          data: { deletedAt: new Date() },
+          data: { deletedAt },
         });
+        for (const task of deletable) {
+          await this.firestoreSync.enqueue(tx, {
+            entityType: 'task',
+            entityId: task.id,
+            workspaceId: task.project.workspaceId ?? `personal-${task.project.userId}`,
+            operation: 'delete',
+            payload: taskSyncPayload(
+              { ...task, deletedAt },
+              task.assignees.map((assignee) => assignee.userId),
+            ),
+          });
+        }
         await this.firestoreSync.enqueue(tx, {
           entityType: 'note',
           entityId: noteId,
@@ -413,20 +436,24 @@ export class NotesService {
             deletedAt: null,
           },
         });
-
-        if (!project) {
-          project = await this.prisma.project.create({
-            data: {
-              name: targetProjectName,
-              description:
-                targetProjectName === 'Inbox'
-                  ? 'Boîte de réception pour les tâches capturées dans les notes'
-                  : `Projet créé automatiquement via les notes`,
-              userId,
-            },
-          });
-          writableIds.push(project.id);
-        }
+        // Le projet personnel n'est créé qu'au moment où une tâche peut vraiment y aller (O7) : ni
+        // pour un marqueur dont l'auteur ne peut plus écrire, ni pour un déplacement refusé.
+        const ensureProject = async () => {
+          if (!project) {
+            project = await this.prisma.project.create({
+              data: {
+                name: targetProjectName,
+                description:
+                  targetProjectName === 'Inbox'
+                    ? 'Boîte de réception pour les tâches capturées dans les notes'
+                    : `Projet créé automatiquement via les notes`,
+                userId,
+              },
+            });
+            writableIds!.push(project.id);
+          }
+          return project;
+        };
 
         // Assigné proposé par l'IA : uniquement une personne qui peut lire le projet où se trouvera
         // la tâche (S12-f, S12-i). Résolu dans chaque branche, après la décision de déplacement.
@@ -468,9 +495,13 @@ export class NotesService {
             const titleChanged = existingTask.title !== taskText;
             // S12-h : une note ne déplace une tâche que dans le même workspace (ou entre projets
             // personnels) ; sinon le projet reste inchangé, sans erreur, les autres champs sont appliqués.
-            const sameWorkspace =
-              (existingTask.project?.workspaceId ?? null) === (project.workspaceId ?? null);
-            const projectChanged = existingTask.projectId !== project.id && sameWorkspace;
+            const existingWorkspaceId = existingTask.project?.workspaceId ?? null;
+            // Sans projet trouvé, le seul candidat serait un projet personnel : refusé pour une
+            // tâche de workspace, donc rien n'est créé (O7)
+            const target = project ?? (existingWorkspaceId === null ? await ensureProject() : null);
+            const sameWorkspace = !!target && existingWorkspaceId === (target.workspaceId ?? null);
+            const projectChanged =
+              !!target && existingTask.projectId !== target.id && sameWorkspace;
             const dateChanged = dueDate
               ? existingTask.dueDate
                 ? existingTask.dueDate.toISOString().split('T')[0] !==
@@ -490,7 +521,7 @@ export class NotesService {
                 data: {
                   title: taskText,
                   status: statusChanged ?? existingTask.status,
-                  projectId: projectChanged ? project.id : existingTask.projectId,
+                  projectId: projectChanged ? target.id : existingTask.projectId,
                   dueDate: dueDate || undefined,
                   deletedAt: null,
                 },
@@ -505,7 +536,7 @@ export class NotesService {
             // Projet effectif : le projet d'origine si le déplacement est refusé (S12-i)
             const assigneeId = await resolveFor(
               projectChanged
-                ? project
+                ? target
                 : {
                     id: existingTask.projectId,
                     workspaceId: existingTask.project?.workspaceId ?? null,
@@ -527,6 +558,7 @@ export class NotesService {
           } else {
             // Ne pas réutiliser l'identifiant d'un marqueur périmé ou étranger.
             const newTaskId = randomUUID();
+            const project = await ensureProject();
             const assigneeId = await resolveFor(project);
             await this.prisma.task.create({
               data: {
@@ -552,6 +584,7 @@ export class NotesService {
         } else {
           // Aucun identifiant présent : création d'une nouvelle tâche et injection du tag dans la note
           const newTaskId = randomUUID();
+          const project = await ensureProject();
           const assigneeId = await resolveFor(project);
 
           await this.prisma.task.create({

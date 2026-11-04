@@ -38,7 +38,8 @@ describe('S12-c : notifications limitées aux personnes autorisées', () => {
     const members = prisma.membership.findMany;
     prisma.membership.findMany = jest.fn(async (args: any) =>
       (await members(args)).map((m: any) => {
-        const name = m.userId.replace('u-', '');
+        // Nom = clé du profil dans USERS (« client », « commenter »...)
+        const name = Object.entries(USERS).find(([, id]) => id === m.userId)?.[0] ?? m.userId;
         return { ...m, user: { id: m.userId, name, email: `${name}@x.com` } };
       }),
     );

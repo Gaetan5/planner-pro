@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { InvitationsService } from './invitations.service';
 import { Public } from '../auth/public.decorator';
+import { ForbiddenInImpersonation } from '../auth/forbidden-in-impersonation.decorator';
 import { CreateInvitationDto } from './dto/create-invitation.dto';
 
 interface AuthenticatedRequest {
@@ -29,6 +30,7 @@ export class InvitationsController {
    * Crée une invitation pour rejoindre un workspace.
    */
   @Post('workspaces/:workspaceId/invitations')
+  @ForbiddenInImpersonation()
   createInvitation(
     @Req() req: AuthenticatedRequest,
     @Param('workspaceId') workspaceId: string,
@@ -41,6 +43,7 @@ export class InvitationsController {
       body.role,
       body.projectId,
       body.durationDays,
+      body.projectRole,
     );
   }
 

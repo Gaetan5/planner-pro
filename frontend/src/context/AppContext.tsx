@@ -353,6 +353,7 @@ interface AppContextType {
     role: 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER',
     projectId?: string,
     durationDays?: number,
+    projectRole?: 'MANAGER' | 'CONTRIBUTOR' | 'COMMENTER' | 'CLIENT',
   ) => Promise<{ invitation: unknown; rawToken: string }>;
   listInvitations: (workspaceId: string) => Promise<unknown[]>;
   revokeInvitation: (invitationId: string) => Promise<void>;
@@ -766,16 +767,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     refreshTimeoutRef.current = setTimeout(async () => {
       try {
-        const [projRes, noteRes, membersRes, tbRes, activeRes, workspacesRes, capacityRes] =
-          await Promise.all([
-            fetch(`${BACKEND_URL}/projects`, { headers: getHeaders() }),
-            fetch(`${BACKEND_URL}/notes`, { headers: getHeaders() }),
-            fetch(`${BACKEND_URL}/projects/members`, { headers: getHeaders() }),
-            fetch(`${BACKEND_URL}/projects/timeblocks/all`, { headers: getHeaders() }),
-            fetch(`${BACKEND_URL}/tracking/active`, { headers: getHeaders() }),
-            fetch(`${BACKEND_URL}/projects/workspaces`, { headers: getHeaders() }),
-            fetch(`${BACKEND_URL}/projects/resources/capacity`, { headers: getHeaders() }),
-          ]);
+        const [projRes, noteRes, membersRes, tbRes, activeRes, workspacesRes] = await Promise.all([
+          fetch(`${BACKEND_URL}/projects`, { headers: getHeaders() }),
+          fetch(`${BACKEND_URL}/notes`, { headers: getHeaders() }),
+          fetch(`${BACKEND_URL}/projects/members`, { headers: getHeaders() }),
+          fetch(`${BACKEND_URL}/projects/timeblocks/all`, { headers: getHeaders() }),
+          fetch(`${BACKEND_URL}/tracking/active`, { headers: getHeaders() }),
+          fetch(`${BACKEND_URL}/projects/workspaces`, { headers: getHeaders() }),
+        ]);
 
         const anyUnauthorized = [
           projRes,
@@ -784,7 +783,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           tbRes,
           activeRes,
           workspacesRes,
-          capacityRes,
         ].some((res) => res.status === 401);
 
         if (anyUnauthorized) {
@@ -800,16 +798,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (workspacesRes.ok) {
           const workspaceData: Workspace[] = await workspacesRes.json();
           setWorkspaces(workspaceData);
-          setWorkspaceRoles(
-            Object.fromEntries(
-              workspaceData.flatMap((workspace) => {
-                const membership = workspace.memberships?.find((item) => item.user.id === user.id);
-                return membership ? [[workspace.id, membership.role]] : [];
-              }),
-            ),
+          const roles: Record<string, WorkspaceMember['role']> = Object.fromEntries(
+            workspaceData.flatMap((workspace) => {
+              const membership = workspace.memberships?.find((item) => item.user.id === user.id);
+              return membership ? [[workspace.id, membership.role]] : [];
+            }),
           );
+          setWorkspaceRoles(roles);
+          // La capacité (charge, absences, adresses) est refusée à un VIEWER : on ne l'appelle pas (P11)
+          const defaultRole = workspaceData[0] ? roles[workspaceData[0].id] : undefined;
+          if (defaultRole && defaultRole !== 'VIEWER') {
+            const capacityRes = await fetch(`${BACKEND_URL}/projects/resources/capacity`, {
+              headers: getHeaders(),
+            });
+            if (capacityRes.status === 401) {
+              console.warn('Session expirée ou révoquée détectée par le serveur.');
+              logout();
+              return;
+            }
+            if (capacityRes.ok) setResourceCapacity(await capacityRes.json());
+          }
         }
-        if (capacityRes.ok) setResourceCapacity(await capacityRes.json());
         if (activeRes.ok) {
           const text = await activeRes.text();
           const act = text ? JSON.parse(text) : null;
@@ -1377,11 +1386,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     role: 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER',
     projectId?: string,
     durationDays?: number,
+    projectRole?: 'MANAGER' | 'CONTRIBUTOR' | 'COMMENTER' | 'CLIENT',
   ) => {
     const res = await fetch(`${BACKEND_URL}/projects/workspaces/${workspaceId}/invitations`, {
       method: 'POST',
       headers: getHeaders(),
-      body: JSON.stringify({ email, role, projectId, durationDays }),
+      body: JSON.stringify({ email, role, projectId, durationDays, projectRole }),
     });
     if (!res.ok) await reportApiError(res, "Impossible de créer l'invitation.");
     return res.json();

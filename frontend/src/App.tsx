@@ -54,7 +54,10 @@ function AppWithSession() {
     toggleTheme,
     apiError,
     dismissApiError,
+    currentUserRole,
   } = useApp();
+  // Un VIEWER (invité) n'a ni sprints, ni capacité, ni intégrations : écrans masqués (P11)
+  const canSeeInternalViews = currentUserRole !== 'VIEWER';
   // Ticket MFA obtenu par un retour OAuth (GitHub, SSO) : le challenge se fait dans <Login />
   const [oauthMfaTicket, setOauthMfaTicket] = useState<string | null>(null);
   // Lien reçu par e-mail (vérification d'adresse, réinitialisation) : jeton retiré de l'URL (P6)
@@ -166,9 +169,9 @@ function AppWithSession() {
       case 'governance':
         return <GovernanceView />;
       case 'resources':
-        return <CapacityView />;
+        return canSeeInternalViews ? <CapacityView /> : <DashboardContent />;
       case 'agile':
-        return <AgileView />;
+        return canSeeInternalViews ? <AgileView /> : <DashboardContent />;
       case 'gantt':
         return <GanttView />;
       case 'finances':
@@ -238,18 +241,22 @@ function AppWithSession() {
           >
             Gouvernance
           </button>
-          <button
-            onClick={() => setActiveTab('resources')}
-            className={`nav-tab ${activeTab === 'resources' ? 'nav-tab--active' : ''}`}
-          >
-            Ressources
-          </button>
-          <button
-            onClick={() => setActiveTab('agile')}
-            className={`nav-tab ${activeTab === 'agile' ? 'nav-tab--active' : ''}`}
-          >
-            Agile
-          </button>
+          {canSeeInternalViews && (
+            <button
+              onClick={() => setActiveTab('resources')}
+              className={`nav-tab ${activeTab === 'resources' ? 'nav-tab--active' : ''}`}
+            >
+              Ressources
+            </button>
+          )}
+          {canSeeInternalViews && (
+            <button
+              onClick={() => setActiveTab('agile')}
+              className={`nav-tab ${activeTab === 'agile' ? 'nav-tab--active' : ''}`}
+            >
+              Agile
+            </button>
+          )}
           <button
             onClick={() => setActiveTab('finances')}
             className={`nav-tab ${activeTab === 'finances' ? 'nav-tab--active' : ''}`}
@@ -395,20 +402,24 @@ function AppWithSession() {
           <ShieldCheck size={20} />
           <span>Gouv.</span>
         </button>
-        <button
-          onClick={() => setActiveTab('resources')}
-          className={`bottom-nav-item ${activeTab === 'resources' ? 'bottom-nav-item--active' : ''}`}
-        >
-          <Users size={20} />
-          <span>Ress.</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('agile')}
-          className={`bottom-nav-item ${activeTab === 'agile' ? 'bottom-nav-item--active' : ''}`}
-        >
-          <Milestone size={20} />
-          <span>Agile</span>
-        </button>
+        {canSeeInternalViews && (
+          <button
+            onClick={() => setActiveTab('resources')}
+            className={`bottom-nav-item ${activeTab === 'resources' ? 'bottom-nav-item--active' : ''}`}
+          >
+            <Users size={20} />
+            <span>Ress.</span>
+          </button>
+        )}
+        {canSeeInternalViews && (
+          <button
+            onClick={() => setActiveTab('agile')}
+            className={`bottom-nav-item ${activeTab === 'agile' ? 'bottom-nav-item--active' : ''}`}
+          >
+            <Milestone size={20} />
+            <span>Agile</span>
+          </button>
+        )}
         <button
           onClick={() => setActiveTab('finances')}
           className={`bottom-nav-item ${activeTab === 'finances' ? 'bottom-nav-item--active' : ''}`}

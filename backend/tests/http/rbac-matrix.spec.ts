@@ -139,7 +139,7 @@ const TABLE: Record<string, Row> = {
   },
   'GET /projects/timeblocks/all': { need: ANY },
   // ── ressources (portée utilisateur/workspace)
-  'GET /projects/resources/capacity': { need: ws('read'), query: `workspaceId=${W}` },
+  'GET /projects/resources/capacity': { need: ws('contribute'), query: `workspaceId=${W}` },
   'PUT /projects/resources/:userId/profile': {
     need: ws('admin'),
     params: { userId: USERS.member },
@@ -151,7 +151,10 @@ const TABLE: Record<string, Row> = {
     params: { userId: USERS.member },
     body: { startDate: DATE, endDate: DATE2 },
   },
-  'GET /projects/resources/:userId/leaves': { need: ANY, params: { userId: USERS.member } },
+  'GET /projects/resources/:userId/leaves': {
+    need: ws('contribute'),
+    params: { userId: USERS.member },
+  },
   'DELETE /projects/resources/leaves/:leaveId': { need: ANY, params: { leaveId: 'L1' } },
   'POST /projects/:id/allocations': {
     need: ws('admin'),
@@ -255,11 +258,11 @@ const TABLE: Record<string, Row> = {
   },
   // ── intégrations et calendrier
   'GET /projects/workspaces/:workspaceId/integrations': {
-    need: ws('read'),
+    need: ws('contribute'),
     params: { workspaceId: W },
   },
   'GET /projects/workspaces/:workspaceId/integrations/status': {
-    need: ws('read'),
+    need: ws('contribute'),
     params: { workspaceId: W },
   },
   'POST /projects/workspaces/:workspaceId/integrations': {
@@ -310,7 +313,11 @@ const TABLE: Record<string, Row> = {
     params: { workspaceId: W },
     body: { name: 'S', startDate: DATE, endDate: '2026-06-14T12:00:00.000Z' },
   },
-  'GET /projects/workspaces/:workspaceId/sprints': { need: ws('read'), params: { workspaceId: W } },
+  // P11 : les sprints, la capacité et les intégrations sont fermés à un VIEWER (niveau « contribute »)
+  'GET /projects/workspaces/:workspaceId/sprints': {
+    need: ws('contribute'),
+    params: { workspaceId: W },
+  },
   'PUT /projects/sprints/:sprintId': {
     need: ws('contribute'),
     params: { sprintId: 'S1' },
@@ -325,10 +332,13 @@ const TABLE: Record<string, Row> = {
     noP1: true,
   },
   'GET /projects/workspaces/:workspaceId/velocity': {
-    need: ws('read'),
+    need: ws('contribute'),
     params: { workspaceId: W },
   },
-  'GET /projects/sprints/:sprintId/burndown': { need: ws('read'), params: { sprintId: 'S1' } },
+  'GET /projects/sprints/:sprintId/burndown': {
+    need: ws('contribute'),
+    params: { sprintId: 'S1' },
+  },
   'GET /projects/workspaces/:workspaceId/finances': {
     need: ws('admin'),
     params: { workspaceId: W },
