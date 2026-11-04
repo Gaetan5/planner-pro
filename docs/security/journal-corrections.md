@@ -1343,3 +1343,662 @@ Aucun commit, aucune exécution contre une base réelle, `FEATURE_SSO_ENABLED` e
   - `revue-phase2.md` : la ligne « Document historique » est conforme.
 - **Écart de décompte** : 49 entrées est le bon chiffre (31 modifiées, 18 nouvelles). La consigne annonçait 17 nouveaux fichiers mais en listait bien 18. Avec `backend/tsconfig.build.json`, le commit compte 50 fichiers, plus le retrait du suivi de `backend/tsconfig.tsbuildinfo`.
 - **Absence de modification de code depuis r10** : contrôlée par `find backend/src backend/scripts backend/tests backend/prisma frontend/src -newer docs/security/rapport-audit.md`, qui ne renvoie rien.
+
+---
+
+## Entrées de la Phase 3 (autorisation centralisée, IDOR, temps réel)
+
+Ordre suivi : O4, O3, puis A1, A2, S12, S13, S14 (suite), S15, A4, S16. Aucune base réelle, aucun commit, drapeaux `FEATURE_SSO_ENABLED` et `FEATURE_SCIM_ENABLED` inchangés (`false`). Procédure de déploiement et migration : `docs/security/runbook-phase3.md`.
+
+**Décision produit à confirmer (P4)** : P4 n'étant pas tranché, j'ai appliqué la règle par défaut de S12 : un MEMBER ou un VIEWER sans `ProjectMembership` n'a **aucun accès** au projet (cohérent avec `getProject`, qui la pratiquait déjà). Effet visible : ces utilisateurs ne voient plus les projets dont ils ne sont pas membres. Requête de dénombrement des personnes concernées au runbook § 2. L'alternative « MEMBER = CONTRIBUTOR implicite » se règle dans `PolicyService.effectiveProjectRole` et `listAccessibleProjectIds`.
+
+### O4 — `domain` et `verifiedDomain` harmonisés dans `processCallback`
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Cause confirmée** : `sso.service.ts` comparait l'adresse et `hd` à `ssoConfig.domain`, alors que la règle S10-d et la recherche de configuration utilisent `verifiedDomain`. De plus `getAuthorizationUrl` stockait `domain` dans le flux Redis, alors que `findUsableConfig` cherche par `verifiedDomain` : une configuration où les deux diffèrent donnait un 401 au retour.
+- **Changement** : `sso.service.ts` : adresse, `hd` et compte trouvé par `ssoUid` comparés au seul `verifiedDomain` (refus si absent) ; le flux Redis stocke `verifiedDomain`.
+- **Tests** : `tests/unit/auth/sso-oidc.spec.ts` (+2) : `domain` ≠ `verifiedDomain`, adresse du `domain` déclaré non prouvé : 409 sans session ; adresse du domaine prouvé : acceptée. **Avant correctif : 2 en échec** (le premier cas était accepté ou donnait 401 selon le chemin).
+- **Écart par rapport au rapport** : l'attendu « une configuration où `domain` diffère de `verifiedDomain` donne 409 » est appliqué au cas à risque (adresse du domaine non prouvé). Une adresse du domaine **prouvé** reste acceptée, puisque c'est lui qui fait foi. Si vous voulez un refus systématique de toute configuration incohérente, c'est une ligne à ajouter.
+- **Questions** : voir écart ci-dessus.
+
+### O3 — `SSO_LOGIN_FAILURE` ne journalise plus le message de l'exception
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Cause confirmée** : `reason: error.message` (`sso.service.ts`, `handleCallback`).
+- **Changement** : `failureReason()` : motif **contrôlé** déduit du seul statut HTTP (`REQUETE_INVALIDE`, `NON_AUTHENTIFIE`, `REFUSE`, `CONFLIT`, `NON_IMPLEMENTE`, `INDISPONIBLE`, `AUTRE_REFUS`, `ERREUR_INTERNE`). Aucun jeton, code, `state`, adresse ni donnée personnelle ne peut y figurer.
+- **Tests** : `sso-oidc.spec.ts` (+7) : exception portant une adresse, un code, un `state` et un nom : rien de cela dans la ligne ; motif attendu par statut. **Avant correctif : 7 en échec sur 8** (le cas `Error` brut passait déjà).
+- **Écart** : le motif est volontairement grossier (statut) pour garantir l'absence de donnée personnelle ; le détail fin (état rejoué, jeton invalide) n'est plus distinguable dans le journal. Si l'exploitation le demande, ajouter des codes explicites aux points de levée.
+
+### A1 — Authentification par défaut (`JwtAuthGuard` global)
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Cause confirmée** : seul `AppThrottlerGuard` était global (`app.module.ts`) ; chaque contrôleur devait penser à `@UseGuards(JwtAuthGuard)`.
+- **Changement** : `app.module.ts` : `APP_GUARD` dans l'ordre `AppThrottlerGuard`, `FeatureFlagGuard` (404 avant toute authentification, comme avant), `JwtAuthGuard`. `@Public()` posé explicitement sur les routes publiques (`app.controller.ts`, 10 routes de `auth.controller.ts` qui n'avaient aucun garde). Tous les `@UseGuards(JwtAuthGuard)` des contrôleurs retirés (une seule vérification de session par requête). `tests/http/http-test-app.ts` reproduit les gardes globaux quand un test fournit `JwtAuthGuard`.
+- **Tests** : `tests/unit/authz/public-routes.spec.ts` (4) : inventaire par métadonnées de tous les contrôleurs de `AppModule`, comparé à une liste blanche **figée** de 28 routes publiques ; ordre des gardes globaux ; aucun `JwtAuthGuard` répété. `tests/http/global-auth.spec.ts` (4) : contrôleur « oublié » sans décorateur : 401 sans jeton et avec jeton forgé ; `@Public()` : 200 ; fonctionnalité désactivée : 404 avant 401. `impersonation-routes.spec.ts` adapté (une route non publique lit désormais toujours la session). **Avant correctif : 3 des 4 tests méta en échec.**
+- **Écart** : l'inventaire utilise les métadonnées Nest (`controllers`/`imports` des modules) plutôt que `DiscoveryService`, qui exigerait d'instancier l'application (donc une base). Même garantie : toute nouvelle route publique doit être ajoutée à la liste blanche.
+- **Questions** : `auth/mfa/challenge` et `auth/mock/login` sont `@Public()` (authentifiés par ticket / garde d'environnement), comme avant dans les faits.
+
+### A2 — Politique d'autorisation centrale
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Cause confirmée** : 9 implémentations privées `assertWorkspace*` aux sémantiques divergentes (grep de départ du rapport).
+- **Changement** : `src/authz/permissions.ts` (matrice action → rôles : 12 actions de workspace, 13 de projet), `policy.service.ts` (`assertWorkspace`, `assertWorkspaceRoles/Member`, `assertProject`, `assertTask`, `assertTaskOrBadRequest`, `listAccessibleProjectIds`, `listWorkspaceIds`), `authz.module.ts` (global). Les assertions privées de `projects`, `resources`, `finances`, `milestones`, `invitations`, `comments`, `sprint` sont supprimées ; `ProjectPermissionsService.assertProjectRole/assertWorkspaceAccess` deviennent des délégués de la politique. `dependencies`, `timeblocks`, `tracking` passent par `assertTask`.
+- **Tests** : `tests/unit/authz/policy.service.spec.ts` (334) : matrice **table-driven** persona × projet × action (8 personas dont CLIENT, COMMENTER, CONTRIBUTOR, VIEWER, MEMBER sans rôle, membre d'un autre workspace), workspace × action, `listAccessibleProjectIds`. Fixture : `tests/support/rbac-fixture.ts`.
+- **Critères** : `grep -rn "private async assertWorkspace" backend/src` : vide ; `grep -n "TrackingGateway\|trackingGateway" backend/src/*/*.controller.ts` : vide ; aucun `PrismaService` dans un contrôleur de `projects`.
+- **Écarts** : (1) pas de décorateur `@RequirePermission` ni de guard : la politique s'appelle depuis les services, où la ressource est chargée (la ressource d'un `taskId` de chemin ne se résout qu'après lecture en base). À reprendre en Phase 5 avec le découpage des contrôleurs (A5) si vous le souhaitez. (2) `MilestonesService.assertProjectAccess` (chargeur « membre du workspace ou créateur ») subsiste : il est toujours suivi d'un contrôle OWNER/ADMIN, donc sans effet d'accès. (3) `tasks.service` et `critical-path` utilisaient déjà des rôles de projet ; inchangés.
+
+### S12 — Rôles projet contournés par l'appartenance au workspace
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Cause confirmée** : voir le rapport ; confirmée ligne par ligne (getProjects, commentaires, pièces jointes, sprints, minuteur, copilote, planification, créneaux).
+- **Changement** :
+  - `getProjects` : filtre par `listAccessibleProjectIds`.
+  - Commentaires et pièces jointes : lecture `comment.read`, écriture `comment.write` / `attachment.write` (MANAGER, CONTRIBUTOR, COMMENTER), suppression de pièce jointe par l'auteur (`uploadedById`) ou un MANAGER, suppression de commentaire par l'auteur ayant encore accès ou un MANAGER, modification par l'auteur ayant encore `comment.write`.
+  - Sprints : `sprint.manage` (OWNER/ADMIN/MEMBER), `sprint.read` pour tous ; tâches de `listSprints`, vélocité et burndown bornées aux projets accessibles.
+  - Minuteur : `timelog.write` pour démarrer, `timelog.read` pour lire les logs d'une tâche (réponse unique 400 pour tâche absente ou refusée).
+  - Copilote : alertes et briefing bornés aux projets accessibles ; **le briefing ne contrôlait pas l'appartenance au workspace** (ajouté).
+  - `autoScheduleWorkspace(workspaceId, userId)` : `schedule.run` (OWNER/ADMIN/MEMBER) et seuls les projets où l'appelant a `task.write` ; `detectCalendarConflicts(workspaceId, projectIds)` borné.
+  - `timeblocks` : écriture exigeant `task.write` ; `GET timeblocks/all` borné aux projets lisibles ; `dependencies` : `task.write`.
+  - Migration `20261111000000_s12_attachment_uploader` (colonne, index, clé étrangère, reprise : auteur du commentaire). DDL vérifié par `prisma migrate diff --from-schema <HEAD> --to-schema prisma/schema` **sans base**.
+- **Tests** : `tests/unit/authz/rbac-services.spec.ts` (59, services réels sur la fixture) : `getProjects` par persona ; création, lecture, pièces jointes, suppression de commentaires et pièces jointes ; sprints ; minuteur ; copilote ; planification et conflits. `tests/http/projects-realtime-routes.spec.ts` (auto-schedule, conflits). **Avant correctif : 42 échecs sur 55** (les 13 réussites sont des contrôles positifs) ; les tests de planification échouaient à la compilation (la signature n'acceptait pas l'appelant). Suites historiques adaptées (providers `PolicyService`, rôle dans les mocks de membership) sans affaiblir d'assertion.
+- **Écarts** : (1) matrice : `timelog.read` réservé à MANAGER/CONTRIBUTOR (les temps peuvent porter sur la facturation) ; à valider par le PO. (2) `schedule.run` reste ouvert aux MEMBER mais borné aux projets où ils écrivent (plutôt que fermé à OWNER/ADMIN). (3) Le test « table-driven » couvre la politique et les services listés par le rapport ; il n'énumère pas chaque route de `projects.controller.ts` (pas de base pour un e2e) : à étendre en Phase 6 (A9, e2e).
+- **Questions / observations** : (a) les mentions `@nom` notifient les membres du workspace sans vérifier l'accès au projet de la tâche (le titre de la tâche figure dans la notification) : à traiter avec P4. (b) `assignProjectRole` n'exige pas que la cible soit membre du workspace : c'est S17 (Phase 4).
+
+### S13 — IDOR `associateTasksToSprint`
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Cause confirmée** : contrôle sur `taskIds[0]` seul, puis `updateMany` sur tous ; diffusion de tâches étrangères dans la room du workspace de la première.
+- **Changement** : `AssociateTasksDto` (200 UUID v4 au plus). `sprint.service.ts` : toutes les tâches chargées avant écriture, `tasks.length === ids.length`, un seul workspace, celui du sprint, `sprint.manage` puis `task.write` sur chaque projet ; sinon 403 sans écriture. Le service renvoie les tâches modifiées ; le contrôleur ne diffuse que celles-ci, vers `project:<id>`.
+- **Tests** : `tests/unit/authz/sprint-associate.spec.ts` (12) : tâche étrangère en 2e position (sprint ou backlog), identifiant inexistant, sprint d'un autre workspace, CLIENT, COMMENTER, VIEWER, CONTRIBUTOR sur P2 : 403 et `updateMany`/outbox jamais appelés ; cas nominal ; DTO. `projects-realtime-routes.spec.ts` : 400 sur UUID invalide, diffusion bornée. **Avant correctif (service d'origine) : 8 en échec sur 12.**
+- **Écart** : un identifiant inexistant donne 403, comme une tâche interdite (pas d'oracle d'existence).
+
+### S14 (suite) — Intégrations
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Cause confirmée** : `toggle`/`delete` par `id` seul dans le service ; branches mortes `if (!integration) return service.toggle(...)` ; `url` en clair dans les réponses `create`/`toggle`.
+- **Changement** : `IntegrationService.toggleIntegration/deleteIntegration(workspaceId, integrationId)` filtrent `where: { id, workspaceId }` (404) ; `getWorkspaceIdOf` ; URL masquée dans `create` et `toggle`. Contrôleur : branches mortes supprimées ; `OWNER/ADMIN` exigé ; intégration absente **ou** d'un workspace dont l'appelant n'est pas membre : même 404 ; membre non administrateur : 403. `exportToCalendar`, `sync` et `listIntegrations` (sans jetons) avaient été traités en Phase 0 (r2/r3).
+- **Tests** : `tests/unit/authz/integrations-idor.spec.ts` (6), `projects-realtime-routes.spec.ts` (6 : inexistante, étrangère, propriétaire, pour `toggle` et `delete`), `integration.service.spec.ts` adapté. **Avant correctif** : échec de compilation (signatures à 1 argument) ; pas de comptage comportemental.
+- **Écart** : les routes `integrations/:id/toggle|delete` gardent leur chemin sans `workspaceId` (pas de changement de contrat frontend) ; le workspace est résolu côté serveur puis imposé au service.
+
+### S15 — IDOR IA
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Cause confirmée** : aucune vérification d'appartenance dans `analyzeCommand`, vision, voix, `executeActions` ; `resolveActions` énumérait tous les membres et toutes les tâches du `workspaceId` fourni ; `project-data-updated` émis vers la room du `workspaceId` du corps.
+- **Changement** : `AiService.authorize` (`ai.use`, puis `task.write` sur le projet visé **et** appartenance du projet au workspace) appelé **avant** toute lecture et avant tout appel Gemini (y compris la transcription) ; `resolveActions` borné aux projets où l'appelant écrit ; `CREATE_TASK` sans projet : premier projet **accessible en écriture** ; `ExecuteAiActionsDto` (50 actions au plus, types validés) ; `executeActions` renvoie `changedTaskIds` (seules tâches réellement modifiées) ; le contrôleur émet un signal non sensible au workspace vérifié et les tâches modifiées vers leurs projets.
+- **Tests** : `tests/unit/authz/ai-idor.spec.ts` (15) : non-membre et VIEWER sur les 4 entrées : 403, aucune lecture de membres/tâches, Gemini non appelé ; projet d'un autre workspace ; MEMBER sans rôle projet ; résolution bornée ; création dans un projet accessible ; DTO. **Avant correctif (service d'origine) : 12 en échec sur 15.** Gateway `voice-end` avec workspace étranger : `{ status: 'error' }` (`tracking.gateway.spec.ts`).
+- **Écart** : un DTO strict pour `actions` pourrait refuser un champ inattendu produit par le modèle ; les champs de `ResolvedAiAction` sont tous couverts. À surveiller à la première utilisation réelle.
+
+### A4 — Une seule gateway, diffusion via `RealtimeService`
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Cause confirmée** : deux gateways sur le même espace de noms (double authentification, double jonction des rooms, deux adaptateurs Redis) ; diffusion codée dans les contrôleurs.
+- **Changement** : `src/realtime/realtime.service.ts` + module global (`emitToProject`, `emitToTask`, `emitToUser`, `emitSignalToWorkspace`, `roomsForUser`, `refreshUserRooms`). `NotificationsGateway` supprimée (fichier et spec) ; `TrackingGateway` seule gateway (un seul adaptateur Redis, `realtime.attach`). `NotificationsService`, `ProactiveSchedulerService`, `projects`, `comments` et `ai` contrôleurs diffusent par `RealtimeService`.
+- **Critère** : `grep -nE "trackingGateway|TrackingGateway" backend/src/*/*.controller.ts` : vide.
+- **Écart** : l'émission reste dans les contrôleurs (après le succès du service), pas dans les services : le rapport vise les services « après commit ». Déplacer l'appel dans chaque service élargirait le périmètre (signatures et tests de la majorité des services) ; le critère mesurable est atteint.
+
+### S16 — Temps réel : salons par projet, saisie, DoS audio, révocation
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Cause confirmée** : jonction de `workspace:<id>` pour tous les workspaces et diffusion des tâches dans cette room ; `typing` sans contrôle ; `voice-chunk` sans limite et sous `@SkipThrottle()` ; salons jamais recalculés. (Le point 5, authentification par le service de session, était déjà livré en Phase 1.)
+- **Changement** : à la connexion, jonction de `project:<id>` pour chaque projet accessible (`listAccessibleProjectIds`) et de `workspace:<id>` réservé aux signaux non sensibles ; toutes les données de tâches vont vers `project:<id>`. `refreshUserRooms` (quitte/rejoint via `fetchSockets`, échec fermé : sockets coupées) appelé par `assignProjectRole`, `removeProjectRole`, l'acceptation d'invitation et l'activation/désactivation SCIM. `typing` exige `client.rooms.has('task:<id>')`. `voice-chunk` : binaire uniquement, 64 Ko par morceau, 10 Mo par session, purge et erreur au-delà ; compteur de 300 messages par 10 s et par socket sur les gestionnaires à effet.
+- **Tests** : `tracking.gateway.spec.ts` (+11) : `typing` sans `join-task` ; morceau trop gros ; session > 10 Mo ; message non binaire ; débit ; salons de connexion ; cookie `accessToken` ; coupure après révocation de session. `tests/unit/authz/realtime.spec.ts` (6) : un CLIENT de P1 rejoint `project:P1` et pas `project:P2` ; après `removeProjectRole` la socket a quitté `project:P1` ; après `assignProjectRole` elle rejoint le nouveau salon ; échec fermé. `scim.service.spec.ts` : désactivation SCIM rafraîchit les salons. **Avant correctif : 6 en échec sur 16 (gateway) et 2 sur 6 (révocation).**
+- **Écarts** : (1) la suppression directe d'un workspace ou d'une membership hors SCIM/invitations/rôle projet n'existe pas dans le code actuel (aucun autre `membership.delete`) ; à brancher si une telle route apparaît (Phase 4). (2) Le test « un CLIENT de P1 ne reçoit pas l'événement de P2 » est démontré par la composition des salons et du ciblage (`emitToProject`) avec un faux serveur, et non par un serveur Socket.IO réel (e2e, Phase 6). (3) `@SkipThrottle()` est conservé sur la gateway ; la limite est portée par le compteur par socket.
+
+---
+
+## Résultats (Phase 3)
+
+Environnement : branche `security/phase-0`, aucune base de données (`env -u DATABASE_URL`).
+
+| Commande | Résultat |
+| --- | --- |
+| `cd backend && env -u DATABASE_URL npx jest` | **69 suites / 69 passées, 1122 tests / 1122 passés** (Phase 2 : 61 suites, 657 tests) |
+| `cd backend && env -u DATABASE_URL npx nest build` | exit 0 ; `find dist -name '*.spec.js'` : 0 ; 122 fichiers `.js`, `dist/main.js` présent |
+| `cd backend && npx tsc --noEmit -p tsconfig.build.json` | exit 0 |
+| `cd backend && npx tsc --noEmit -p tsconfig.json` | 1 erreur TS6059 (`rootDir`), de même nature que celle d'avant la Phase 2 (désormais attribuée à `tracking.gateway.spec.ts` après suppression de la spec des notifications) |
+| `cd backend && npx eslint src tests scripts` | 0 erreur, 20 avertissements (17 en fin de Phase 2) |
+| `cd backend && npx prettier --check src tests scripts` | conforme |
+| `cd backend && npx prisma validate` | schéma valide |
+| `prisma migrate diff --from-schema <HEAD> --to-schema prisma/schema --script` (sans base) | `ALTER TABLE Attachment ADD COLUMN uploadedById`, index, clé étrangère, rien d'autre ; identique à la migration (hors reprise de données `UPDATE`) |
+| `cd frontend && npx vitest run` | 15 fichiers / 15, 59 tests / 59 |
+| `cd frontend && npx tsc --noEmit -p .` | exit 0 |
+| `cd frontend && npx eslint src` | 0 erreur, 36 avertissements |
+| `cd frontend && npx vite build` | built in 5.04s |
+
+- `git status` : aucun `*.tsbuildinfo`, aucun `dist`, `pnpm-lock.yaml` non modifié, aucune dépendance ajoutée.
+- Frontend : aucun changement de code ; contrats REST et noms d'événements Socket.IO inchangés. Les corps de `sprints/:id/tasks` et `ai/execute` sont désormais validés strictement (le frontend actuel envoie des formes conformes).
+- Non touchés : phases 4 à 6, `rapport-audit.md`, `.claude/`, `GEMINI.md`, DAT (la mise à jour de leur section « État » est laissée à l'architecte).
+
+### Points ouverts pour l'architecte
+
+1. Valider la règle P4 par défaut (MEMBER/VIEWER sans rôle projet : aucun accès) ou choisir « MEMBER = CONTRIBUTOR implicite ».
+2. Valider `timelog.read` réservé à MANAGER/CONTRIBUTOR.
+3. O4 : accepter l'écart (adresse du domaine prouvé acceptée même si `domain` diffère) ou exiger le refus de toute configuration incohérente.
+4. A2 : `@RequirePermission` + guard non livrés (écart documenté) ; A4 : émission dans les contrôleurs et non dans les services.
+5. Observations hors périmètre : mentions `@nom` sans contrôle d'accès au projet ; `assignProjectRole` vers un non-membre (S17).
+
+---
+
+## Actions de la revue r11 (Phase 3 : plan d'action r11 pour fixeur)
+
+Reprise après interruption de la session précédente (2026-11-02, vers 19h33). L'état hérité (S12-d, S12-a, S12-b, S12-c partiellement faits, aucune entrée de journal, aucun échec consigné) a été **relu et vérifié contre chaque critère** avant d'être complété. Aucune base réelle, aucun commit, aucun push. Les décisions produit P4, `timelog.read` et DTO IA restent **en attente de l'utilisateur** : non tranchées, script `grant-legacy-project-access.ts` **non écrit**, `timelog.read` inchangé.
+
+**Honnêteté sur les preuves « avant correctif »** : la session précédente n'a pas consigné l'échec initial. Les fichiers `src/authz/` étant non versionnés, il n'existe pas de version HEAD de `policy.service.ts`. Les preuves ci-dessous sont donc, selon le cas : (a) rejeu du test contre la version HEAD du fichier de service (`git show HEAD:...`, fichier restauré ensuite, vérifié par `diff`) ; (b) **mutation** du correctif (reconstitution de l'ancien comportement décrit au rapport r11, annulée ensuite, vérifiée par `diff`) ; (c) test écrit avant le correctif et échec observé (S16-a, S16-b, décision 4, S12-e, A2-b). Ce qui n'a pas pu être prouvé est indiqué entrée par entrée.
+
+### S12-d (action 1) — Test de matrice par route
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Changement** : `backend/tests/http/rbac-matrix.spec.ts` (app Nest réelle, `JwtAuthGuard` global, contrôleurs et services réels, `PolicyService` réelle, `FakePrisma` sur `tests/support/rbac-fixture.ts`). Une ligne par route de `projects`, `comments`, `tracking` et `ai` (dont `delivery-report`), 9 profils (owner, admin, member, contributor, commenter, viewer, client, outsider, désactivé SCIM), variante P1 des routes de projet, oracle indépendant de `permissions.ts`. Test méta de complétude dans les deux sens. Pour chaque refus : statut 403/404 (ou 400 documenté) **et aucune écriture** ; pour le CLIENT(P1) et les autres : aucune donnée de P2 dans la réponse. **982 tests.**
+- **Corrections apportées à l'existant** : (1) le Prisma simulé de la matrice déclarait `var proxy` jamais assigné : `$transaction` appelait donc `cb(undefined)`, ce qui faisait échouer en 500 toute route transactionnelle autorisée sans que la matrice le voie (elle ne vérifie que « ni 401 ni 403 » pour un accès autorisé) ; réécrit en `const proxy`, les écritures dans une transaction sont maintenant enregistrées. (2) 2 erreurs ESLint (`no-var`, `no-unassigned-vars`) et 3 directives devenues inutiles retirées.
+- **Preuve avant correctif** : milestones HEAD (`git show HEAD:backend/src/projects/milestones.service.ts`) rejoué contre la matrice : **16 échecs sur 982** (`GET /projects/:id/delivery-report` : 11 ; `PUT /projects/deliveries/items/:itemId/toggle` : 5), les 966 autres passent. Test méta : retrait de la ligne `GET /tracking/logs` : le test méta échoue (`Received: ["GET /tracking/logs"]`). **Non prouvé** : l'échec exact initial de la session précédente (non consigné).
+- **Tests** : `tests/http/rbac-matrix.spec.ts` 982/982 passent avec le code actuel.
+- **Écart** : aucun par rapport au rapport. Les routes `ANY` (listes bornées, minuteur personnel) ne vérifient que l'absence de 401 ; leur filtrage est couvert par `rbac-services.spec.ts`.
+- **Questions pour l'architecte** : aucune.
+
+#### Revue architecte r12 (2026-11-03)
+
+VALIDÉ. 982/982 ; rejeu de milestones HEAD : 16 échecs (refait). Test méta dans les deux sens conforme. Amélioration non bloquante Q-2 (Phase 6) : 120 cas autorisés finissent en 500 à cause du Prisma simulé, et seul « ni 401 ni 403 » est vérifié pour eux.
+
+### S12-a (action 2) — Appartenance au workspace exigée pour tout rôle de projet
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Cause confirmée** : le créateur était MANAGER et la `ProjectMembership` faisait foi sans lire la `Membership` ; `listAccessibleProjectIds` n'imposait pas l'appartenance.
+- **Changement** : `src/authz/policy.service.ts` : `effectiveProjectRole` lit la `Membership` d'abord et renvoie `null` si elle manque (projet personnel : créateur seul) ; `listAccessibleProjectIds` restreint les branches « créateur » et « ProjectMembership » aux workspaces de l'utilisateur, OWNER/ADMIN aux leurs, projet personnel seulement hors filtre de workspace ; `filterUsersWithProjectAction` applique la même règle.
+- **Tests** : `tests/unit/authz/policy.service.spec.ts` (suppression de la `Membership` : 403 pour le créateur et pour la `ProjectMembership`, plus rien dans `listAccessibleProjectIds` hors projet personnel, projet personnel conservé) ; persona `deprovisioned` dans la matrice HTTP ; `tests/integration/realtime/task-room-revocation.spec.ts` (désactivation SCIM sur un vrai Socket.IO : plus de `project:P1` ni `task:T1`, plus de `new-comment`) ; `project-permissions.service.spec.ts` (3 mocks de `membership` corrigés, un test ajouté).
+- **Preuve avant correctif** : mutation (ancien comportement reconstitué d'après le rapport) : **35 échecs** (matrice HTTP : 20 lignes `deprovisioned [P1]` ; `policy.service.spec` : 14 ; `project-permissions.service.spec` : 1 ; le reste de l'échantillon passe). **Non prouvé** : exécution contre l'original exact (fichier non versionné).
+- **Critère 2 (test SCIM)** : couvert par la combinaison matrice HTTP (403 sur `GET /projects/:id` pour le profil désactivé) + test d'intégration Socket.IO (même suppression de `Membership` puis `refreshUserRooms`) + `scim.service.spec` existant (la désactivation appelle `refreshUserRooms`). Je n'ai pas écrit de test `PATCH active=false` de bout en bout qui enchaîne SCIM puis `GET /projects/:id` (pas de base). **À valider.**
+- **Écart** : l'effet sur les `ProjectMembership` orphelines (comptes désactivés puis réactivés) est décrit au runbook § 4.1.
+
+#### Revue architecte r12 (2026-11-03)
+
+VALIDÉ. Mutation refaite : 35 échecs. Critère 2 par composition : accepté (réponse 1 du rapport r12). Le chemin des notes contourne encore la règle : nouveau constat S12-f, bloquant.
+
+### S12-b (action 3) — Livrables et rapport de livraison
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Changement** : `src/projects/milestones.service.ts` : `assertProjectAccess` et `assertWorkspaceRole` locaux supprimés ; `getDeliveryReport` : `policy.assertProject(..., 'project.read')` (404 projet absent, 403 sinon), `NotFoundException` à la place du `throw new Error` ; créations et changements d'état (jalon, livrable, livraison) : `project.manage` ; `toggleDeliveryChecklistItem` : `project.write`. `grep -n "memberships: { some: { userId" src/projects/milestones.service.ts` : aucune ligne.
+- **Tests** : `rbac-services.spec.ts` (S12-b : 404 sur projet inexistant, 403 sans lecture pour client/viewer/member/outsider/désactivé, checklist 403 sans écriture) ; lignes de la matrice HTTP pour `delivery-report`, `deliveries`, `milestones`, `deliverables`, `toggle`.
+- **Preuve avant correctif** : milestones HEAD : matrice **16 échecs** (voir S12-d) ; `rbac-services.spec -t S12-b` : **7 échecs sur 7**.
+- **Écart** : les recherches d'entité par identifiant (jalon, livrable, livraison, élément de checklist) répondent encore 400 « introuvable » quand l'entité n'existe pas, et 403 quand elle existe sans accès : léger oracle d'existence sur ces identifiants UUID. Le rapport n'exigeait que le 404 de `delivery-report`. **Question pour l'architecte** : faut-il unifier (400/403 identiques) ?
+
+#### Revue architecte r12 (2026-11-03)
+
+VALIDÉ. `grep` vide, 404 au lieu du 500, rôles de projet par la politique. Oracle 400/403 sur des UUID : accepté, aucun changement (réponse 2).
+
+### S12-c (action 4) — Mentions et assignations limitées aux personnes autorisées
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Changement** : `PolicyService.filterUsersWithProjectAction(projectId, userIds, action)` (deux requêtes, mêmes règles que `assertProject`). `comments.service.ts` : `parseMentions(content, workspaceId, projectId)` ne cherche que parmi les lecteurs `comment.read` (mention inconnue ou non autorisée ignorée, sans erreur) ; `tasks.service.ts` : `replaceTaskAssignees(taskId, projectId, ids, actor)` n'assigne que les `task.read` (suppression de `getAccessibleUserIds`).
+- **Tests** : `tests/unit/authz/notifications-access.spec.ts` (mention d'un sans-rôle : ni notification ni identifiant ; mention d'un COMMENTER : notifié ; assignation d'un membre sans rôle : ignorée et aucune notification ; méthode de politique) ; `comments.service.spec.ts` (`parseMentions` à 3 arguments, un test d'exclusion ajouté) ; `tasks.service.spec.ts` (mock de `PolicyService`).
+- **Preuve avant correctif** : mutation (`filterUsersWithProjectAction` renvoie tous les identifiants) : **7 échecs** dans `notifications-access.spec`. **Non prouvé** : exécution contre `parseMentions` d'origine à 2 arguments (la signature a changé, le test d'origine ne compile plus).
+- **Correction de tests hérités** : 2 tests de `notifications-access.spec` échouaient à l'état hérité (mock de tâche sans `createdAt`/`updatedAt`) : corrigés ; `comments.service.spec` et `tasks.service.spec` ne compilaient plus ou échouaient (huit suites rouges à l'état hérité, 17 tests) : adaptés sans affaiblir d'assertion.
+- **Écart** : `PUT` d'un commentaire (mentions) passe par la même méthode ; aucune autre source de notification n'a été trouvée (`grep createNotification`).
+
+#### Revue architecte r12 (2026-11-03)
+
+VALIDÉ pour son périmètre (mutation refaite : 7 échecs). L'affirmation « aucune autre source » est inexacte : `notes.service.ts` (recherche d'assigné sur toute la plateforme, `taskAssignee.create` sans filtre) et `resources.service.ts` (`optimizeWorkspaceResources`) assignent sans `task.read`. À traiter en S12-f.
+
+### S16-a (action 5) — Révocation des salons `task:<id>`
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Cause confirmée** : `refreshUserRooms` ne traitait que `project:` et `workspace:`.
+- **Changement** : `src/realtime/realtime.service.ts` : `refreshUserRooms` collecte les `task:<id>` de toutes les sockets de l'utilisateur, **une seule requête** `PolicyService.filterTaskIdsInProjects(taskIds, projectIds accessibles)` (`task.findMany` bornée, tâches non supprimées) et fait quitter les salons dont la tâche n'est plus dans un projet accessible ; échec fermé conservé. Défense en profondeur (`emitToTask` par intersection) **non faite** : la révocation suffit au critère.
+- **Tests** : `tests/integration/realtime/task-room-revocation.spec.ts` : **vrai serveur Socket.IO** (gateway `TrackingGateway` réelle, `IoAdapter` Nest, clients `socket.io-client`, vrai `POST /projects/tasks/:id/comments`, `redis` simulé injoignable). Retrait de rôle : le client révoqué ne reçoit plus `new-comment` (contrôle positif avant), le client autorisé le reçoit ; désactivation SCIM ; salon conservé si le projet reste accessible. Unitaires : `tests/unit/authz/realtime.spec.ts` (+2).
+- **Preuve avant correctif** : test d'intégration écrit avant le correctif : **2 échecs sur 3** (`task:T1` toujours présent après `removeProjectRole` et après désactivation). Les 2 tests unitaires ajoutés n'ont **pas** été rejoués sans correctif.
+- **Hygiène** : `--detectOpenHandles` sur le fichier : aucun handle signalé ; suite complète : aucun message « did not exit ».
+- **Dépendance** : `socket.io-client@4.7.5` en `devDependencies` du backend (déjà verrouillée côté frontend ; installation `pnpm add -D --offline`, `pnpm-lock.yaml` reformaté par prettier : **3 lignes ajoutées**, aucun autre paquet). Justification : critère 2 du rapport.
+- **Écart** : le test d'intégration simule Redis (pas d'adaptateur Redis en test) ; la révocation multi-instances reste décrite au runbook § 3.
+
+#### Revue architecte r12 (2026-11-03)
+
+VALIDÉ. Mutation refaite : 3 échecs ; `--detectOpenHandles` propre. Dépendance `socket.io-client@4.7.5` acceptée (réponse 6, `ws` transitif suivi en S25). Défense en profondeur d'`emitToTask` facultative ; le déplacement de tâche par les notes est traité en S16-c, exigé.
+
+### S16-b (action 6) — Salons du nouveau projet et de l'invité
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Changement** : `RealtimeService.refreshWorkspaceManagersRooms(workspaceId, extraUserIds)` (n'échoue jamais ; liste des OWNER/ADMIN via `PolicyService.listWorkspaceAdminIds`) appelé par `ProjectsService.createProject` après commit pour le créateur et chaque OWNER/ADMIN ; `InvitationsService.validateAndAcceptInvitation` appelle `refreshUserRooms` aussi sur le chemin « déjà membre du workspace ». Option retenue pour OWNER/ADMIN : recalcul par personne (pas de salon `workspace-admin:<id>`).
+- **Tests** : intégration Socket.IO réelle (le créateur MEMBER et un ADMIN déjà connectés reçoivent `task-status-changed` du nouveau projet, un CLIENT de P1 non) ; `invitations.service.spec` (membre existant invité sur un projet : rôle attribué et `refreshUserRooms` appelé).
+- **Preuve avant correctif** : appel retiré (mutation) : l'intégration S16-b échoue (1 échec) ; invitation : 1 échec sans l'appel.
+- **Écart** : coût O(OWNER+ADMIN) recalculs par création de projet ; acceptable pour des workspaces de petite taille. **Question** : préférer un salon `workspace-admin:<id>` si les workspaces ont beaucoup d'administrateurs ?
+
+#### Revue architecte r12 (2026-11-03)
+
+VALIDÉ. Recalcul par administrateur accepté (réponse 4) ; réévaluation en Phase 6 au-delà d'environ 50 administrateurs.
+
+### Décision 4 (action 7, partie technique) — Normalisation de `resolveActions`
+
+- **Statut** : `CORRIGÉ – À REVOIR` (la décision produit « DTO strict » reste **en attente** de l'utilisateur ; DTO inchangé, `forbidNonWhitelisted` conservé)
+- **Changement** : `src/projects/ai.service.ts` : `normalizeResolvedAction` appliquée à chaque action renvoyée : champs connus de `ResolvedAiAction` uniquement, valeurs non chaînes retirées (dont `null`), `estimatedMinutes` arrondi à un entier entre 0 et 100000.
+- **Tests** : `tests/unit/authz/ai-roundtrip.spec.ts` : sortie d'`analyzeCommand` (45.5, champ inconnu, `null`) passée par le même `AppValidationPipe` strict que l'application sur `ExecuteAiActionsDto` : acceptée ; bornes ; le DTO refuse toujours un champ inconnu ou une décimale envoyés par un client.
+- **Preuve avant correctif** : **2 échecs sur 3** avant (arrondi et champs), le 3e (DTO strict) passait déjà.
+- **Écart** : le test d'aller-retour passe par le pipe et non par un `POST` HTTP ; l'équivalence repose sur l'usage du même `AppValidationPipe` global.
+
+#### Revue architecte r12 (2026-11-03)
+
+VALIDÉ (partie technique). Test par le pipe global accepté. Observation O5, facultative : retirer les valeurs hors énumération (`priority`, `status`, `dependencyType`). La décision produit reste en attente de l'utilisateur.
+
+### S12-e, A2-b, Q-1 (action 8)
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **S12-e** : `resources.service.ts` : `costRateCents` et `billingRateCents` retirés du `profile` sauf pour OWNER/ADMIN. Test : `rbac-services.spec` (S12-e) : 4 profils sans taux (y compris la valeur numérique), OWNER/ADMIN avec taux. **Avant correctif : 4 échecs sur 6.**
+- **A2-b** : `sprint.service.ts` : sprint absent ou d'un autre workspace → même 403 `denied()`. Test : `sprint-associate.spec` (réponse identique à une tâche interdite). **Avant correctif : 1 échec.** `updateSprint` et `deleteSprint` répondent toujours 404 sur un sprint absent (hors périmètre du constat, qui ne visait que `associateTasksToSprint`). **Question** : à unifier aussi ?
+- **Q-1** : ESLint repassé à **17 avertissements** (le nouveau était un `Record<string, any>` de `tracking.gateway.spec.ts` ligne 298, remplacé par `unknown`) et **0 erreur**. Les 2 erreurs et 3 directives inutiles de la matrice ont été corrigées.
+
+#### Revue architecte r12 (2026-11-03)
+
+VALIDÉ. `updateSprint`/`deleteSprint` en 404 : accepté, aucun changement (réponse 3). ESLint : 17 avertissements (vérifié).
+
+### Documents (action 9)
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- `docs/security/runbook-phase3.md` : § 4 (effet de S12-a sur les comptes désactivés et requête SQL de repérage des `ProjectMembership` orphelines, changements visibles, dépendance de test) et § 5 (décisions P4, `timelog.read`, DTO IA **en attente**). Ce journal.
+
+#### Revue architecte r12 (2026-11-03)
+
+VALIDÉ. Requête § 4.1 correcte ; pas de nettoyage automatique : accepté (réponse 7). Complément S17 en Phase 4 : purger les `ProjectMembership` sur SCIM `DELETE`.
+
+## Résultats (r11)
+
+Environnement : branche `security/phase-0`, `env -u DATABASE_URL`, aucune base, aucun commit.
+
+| Commande | Résultat |
+| --- | --- |
+| `cd backend && env -u DATABASE_URL npx jest` | **73 suites / 73 passées, 2183 tests / 2183 passés** (r11 d'entrée : 69 suites, 1122 tests ; état hérité en début de reprise : 8 suites et 17 tests en échec) |
+| `npx nest build` | exit 0 ; `find dist -name '*.spec.js'` : 0 ; 122 `.js`, `dist/main.js` présent |
+| `npx tsc --noEmit -p tsconfig.build.json` | exit 0 |
+| `npx tsc --noEmit -p tsconfig.json` | 1 erreur TS6059 (`rootDir`) sur `tracking.gateway.spec.ts`, antérieure et inchangée |
+| `npx eslint src tests scripts` | **0 erreur, 17 avertissements** |
+| `npx prettier --check src tests scripts` | conforme |
+| `npx prisma validate` | schéma valide (aucun changement de schéma en r11) |
+| `cd frontend && npx vitest run` | 15 fichiers / 15, 59 tests / 59 |
+| `npx tsc --noEmit -p .` | exit 0 |
+| `npx eslint src` | 0 erreur, 36 avertissements |
+| `npx vite build` | built in 7.96s |
+
+- `git status` : aucun `*.tsbuildinfo`, `dist`, `.claude/` ni fichier `.env*` ajouté ; `pnpm-lock.yaml` +3 lignes ; `backend/package.json` +1 ligne (`socket.io-client`).
+- Frontend : aucun changement de code.
+
+## Points ouverts pour l'architecte (r11)
+
+1. **S12-a, critère 2** : pas de test `PATCH active=false` de bout en bout (SCIM puis `GET /projects/:id`) ; couvert par composition (matrice + Socket.IO + spec SCIM). Acceptable ?
+2. **S12-b** : oracle 400/403 résiduel sur les identifiants de jalon, livrable, livraison et élément de checklist ; à unifier ou à accepter ?
+3. **A2-b** : `updateSprint` et `deleteSprint` répondent toujours 404 sur un sprint absent ; à unifier ?
+4. **S16-b** : recalcul par administrateur (retenu) ou salon `workspace-admin:<id>` ?
+5. **S16-a** : défense en profondeur d'`emitToTask` (intersection avec `project:<id>`) non faite ; la révocation est testée sur un vrai serveur.
+6. **Dépendance** : `socket.io-client@4.7.5` en `devDependencies` du backend (lock +3 lignes). Accepter ?
+7. **Preuves « avant correctif »** : voir l'en-tête de la section r11 ; l'échec initial de la session interrompue n'a pas été consigné et ne peut pas être reconstitué ; les mutations et rejeux HEAD le remplacent.
+8. **Décisions produit en attente de l'utilisateur** (non tranchées) : P4 (script de reprise non écrit), `timelog.read` (inchangé), DTO IA (strict, normalisation faite).
+9. Les entrées ci-dessus sont toutes en `CORRIGÉ – À REVOIR` ; aucune n'est marquée `VALIDÉ`.
+
+## Revue architecte r12 (2026-11-03) : NON VALIDÉ
+
+Détail dans `rapport-audit.md`, section « Revue r12 ». Les entrées r11 sont validées. Le plan d'action r12 porte sur S12-f (notes et `optimizeWorkspaceResources` hors `PolicyService`, bloquant), sur S16-c (salon `task:<id>` après déplacement de tâche) et sur O5 (facultatif). Les décisions produit P4, `timelog.read` et DTO IA restent en attente de l'utilisateur.
+
+## Actions de la revue r12 (2026-11-03)
+
+Ordre suivi : S12-f, S16-c, O5, clôture. Aucune base réelle, aucun commit.
+
+### S12-f — Notes et optimisation de charge hors `PolicyService`
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Cause confirmée** : `notes.service.ts` cherchait le projet cible par `{ name, userId }`, mettait à jour (et déplaçait) les tâches existantes, cherchait l'assigné parmi tous les utilisateurs (`user.findFirst` par `name`/`githubUsername`) et créait les `taskAssignee` sans filtre. `resources.service.ts` (`optimizeWorkspaceResources`) réassignait à n'importe quel membre.
+- **Preuve avant correctif** : nouveau `tests/unit/authz/notes-access.spec.ts` (vrai `PolicyService`, fixture RBAC, Prisma simulé, utilisateur `deprovisioned` = Bob sans `Membership`, projet « Roadmap » de W créé par lui) sur le code d'avant : **8 échecs sur 10** (2 tests de contrôle positif passaient : OWNER crée dans le projet du workspace ; mise à jour sans changement de projet). Échecs : tâche créée dans le projet du workspace `P-W1` (critère 1) ; `task.update` sur une tâche d'un projet devenu inaccessible (critère 2) ; assignation de l'utilisateur d'un autre tenant, d'un membre sans rôle (critère 3) ; assignation COMMENTER impossible car `user.findFirst` renvoyait l'autre tenant ; auteur seul assignable en projet personnel ; `user.findFirst` appelé ; éviction du salon absente (S16-c). Pour `optimizeWorkspaceResources` : `rbac-services.spec` (S12-f) **2 échecs sur 2** avec l'ancien `resources.service.ts` (HEAD).
+- **Changement** :
+  - `src/notes/notes.service.ts` : injection de `PolicyService` et `RealtimeService` ; projet cible = projet de l'auteur (`userId`), de nom exact, dans `listAccessibleProjectIds(userId, { action: 'task.write' })` (qui inclut ses projets personnels), sinon création d'un projet **personnel** du même nom (comportement existant, sans erreur ni oracle) ; tâche existante : si `filterUsersWithProjectAction(projet actuel, [auteur], 'task.write')` ne renvoie pas l'auteur, la ligne est laissée telle quelle ; assigné : nouvelle méthode privée `resolveAssignee`, nom cherché parmi les membres du workspace du projet (ou l'auteur seul pour un projet personnel) puis filtré par `task.read` ; `user.findFirst` supprimé (`grep -n "user.findFirst" src/notes/notes.service.ts` : vide).
+  - `src/projects/resources.service.ts` : `optimizeWorkspaceResources` calcule les lecteurs `task.read` par projet (un appel par projet distinct) ; le meilleur candidat est choisi parmi eux ; une tâche sans candidat est ignorée.
+  - `src/notes/notes.service.spec.ts` : fournisseurs `PolicyService` et `RealtimeService` simulés (tout autorisé), comportement inchangé.
+- **Tests** : `tests/unit/authz/notes-access.spec.ts` (10), `rbac-services.spec.ts` section S12-f (2 : un VIEWER/MEMBER sans rôle n'est jamais choisi sur 6 tâches ; tâche sans candidat non réassignée). Résultat après correctif : tous verts (voir « Résultats (r12) »).
+- **Recherche élargie des chemins d'écriture hors `PolicyService`** (résultat honnête) :
+  - `taskAssignee.create*` : `tasks.service.ts` (filtré, S12-c), `resources.service.ts` et `notes.service.ts` (corrigés ici). Aucun autre.
+  - Écritures `task.*` : `sprint`, `timeblocks`, `dependencies`, `projects.service` passent par la politique (S12-b / A2). `calendar-sync.service.ts:754` crée la tâche technique « Synchronisation Calendrier » dans le premier projet du workspace : la route est réservée par contrôleur à des rôles de workspace (`assertWorkspaceAccess`), à confirmer comme OWNER/ADMIN (MANAGER de tous les projets) ; non modifié. `auth.service.ts:1103-1139` crée les tâches d'accueil d'un projet neuf de l'utilisateur.
+  - `proactive-scheduler.service.ts` (crons, pas de requête utilisateur) : notifications `SYSTEM` aux OWNER/ADMIN et à l'utilisateur surchargé (membre du workspace) ; les messages peuvent citer des titres de tâches de projets où ce dernier n'a pas de rôle. Non modifié (risque résiduel faible, contenu d'alerte agrégé) ; **question** ci-dessous. `timeBlock.create` du planificateur automatique : l'entrée utilisateur (`autoScheduleWorkspace`) est déjà filtrée.
+  - `user.findMany()` sans filtre : `proactive-scheduler` (cron briefings, boucle sur les membres, pas d'exposition), `admin.service` (console admin, réservée), purge des comptes non vérifiés.
+  - Je n'ai pas relu les services hors `projects/`, `notes/` et `auth/` ligne à ligne : la recherche est par motif (`prisma.*.(create|update|upsert|delete)`, `taskAssignee`, `createNotification`, `user.find*`), pas une preuve d'absence.
+- **Écart par rapport au rapport** : (1) j'ai conservé la contrainte `userId` du projet cible (comportement d'origine) : un CONTRIBUTOR ne peut pas viser par `#nom` un projet créé par un autre, il obtient un projet personnel (aucun gain d'accès, aucun oracle) ; (2) pour une tâche non écrivable, un projet personnel du même nom peut être créé avant le constat (effet de bord sans conséquence de sécurité) ; (3) une tâche dont le projet est supprimé (`deletedAt`) n'est plus modifiable par la note (`filterUsersWithProjectAction` renvoie vide) ; (4) comparaison des noms insensible à la casse faite en code.
+- **Questions** : voir « Points ouverts pour l'architecte (r12) ».
+
+#### Revue architecte r13 (2026-11-03)
+
+**VALIDÉ.** Les 6 critères passent. La preuve « avant » est rejouée (`notes.service.ts` de HEAD : 8 échecs sur 10). Les mutations isolées sont toutes détectées : projet cible sans `writableIds` (1 échec), tâche existante sans contrôle (1), assigné non filtré (1), optimisation sans filtre (2). `user.findFirst` a disparu. Les écarts (1) à (4) sont acceptés (rapport, r13, réponses 1 à 3). **Deux chemins voisins du même fichier restent ouverts, en nouveaux constats** : S12-h (déplacement d'une tâche hors de son workspace, bloquant) et S12-g (`syncTaskStatusToNote` écrit dans la note d'un auteur sans accès). La recherche par motifs ne suffisait pas seule (réponse 6).
+
+### S16-c — Salon `task:<id>` après déplacement par une note
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Changement** : `src/realtime/realtime.service.ts` : `evictTaskRoom(taskId)` = `server.in(taskRoom(id)).socketsLeave(taskRoom(id))` (sans effet si le serveur n'est pas attaché). `notes.service.ts` l'appelle après `task.update` quand `projectChanged`. `RealtimeModule` est global : `NotesModule` n'a pas eu besoin d'import (`nest build` OK, aucune dépendance circulaire).
+- **Tests** : `notes-access.spec` (déplacement P1 vers P2 : `evictTaskRoom('T1')` appelé ; mise à jour sans changement de projet ou refus : jamais appelé). **Avant correctif** : le test de déplacement échouait (méthode et appel absents). Pas de test d'intégration (non exigé).
+- **Écart** : le test unitaire vérifie l'appel du service ; l'effet réel de `socketsLeave` n'est pas rejoué contre un serveur Socket.IO (le critère du rapport ne l'exige pas). Aucun test unitaire de `RealtimeService.evictTaskRoom` isolé (appel sur un serveur factice) : à ajouter si l'architecte le souhaite.
+
+#### Revue architecte r13 (2026-11-03)
+
+**À REPRENDRE** (petit). L'appel depuis les notes est en place et testé : retirer l'appel produit 1 échec. En revanche, vider `RealtimeService.evictTaskRoom` (`return;`) laisse **525/525** tests verts. Le critère r12 (« `socketsLeave('task:T')` est appelé ») n'est donc pas vérifié. Attendu : un test dans `tests/unit/authz/realtime.spec.ts` sur un serveur factice, où `evictTaskRoom('T1')` appelle `in('task:T1')` et `socketsLeave('task:T1')`, sans exception si aucun serveur n'est attaché. La même mutation doit faire échouer ce test. Pas de test d'intégration exigé.
+
+### O5 — Valeurs hors énumération dans `normalizeResolvedAction`
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Changement** : `src/projects/ai.service.ts` : `RESOLVED_ACTION_ENUM_FIELDS` (`priority`, `status`, `dependencyType`, alignés sur `ExecuteAiActionsDto`) ; une valeur hors liste est retirée.
+- **Tests** : `ai-roundtrip.spec` : `priority: 'URGENT'`, `status`, `dependencyType` invalides retirés, valeurs valides conservées, action acceptée par le pipe strict. **Avant correctif** : en neutralisant seulement le filtre d'énumération, le test O5 échoue (1 échec, les 3 autres passent) ; code restauré.
+- **Écart** : aucun.
+
+#### Revue architecte r13 (2026-11-03)
+
+**VALIDÉ.** Les énumérations sont alignées sur les `@IsIn` d'`ExecuteAiActionsDto`. La mutation (filtre retiré) donne 1 échec.
+
+## Résultats (r12)
+
+Environnement : branche `security/phase-0`, `env -u DATABASE_URL`, aucune base, aucun commit.
+
+| Commande | Résultat |
+| --- | --- |
+| `cd backend && env -u DATABASE_URL npx jest` | **74 suites / 74 passées, 2196 tests / 2196 passés** (r11 : 73 / 2183 ; +1 suite `notes-access`, +13 tests : 10 notes, 2 optimisation, 1 O5) |
+| `npx nest build` ; `find dist -name '*.spec.js'` | exit 0 ; 0 fichier de test ; 122 `.js` |
+| `npx tsc --noEmit -p tsconfig.build.json` | exit 0 |
+| `npx tsc --noEmit -p tsconfig.json` | 1 erreur TS6059 (`rootDir`, `tracking.gateway.spec.ts`), antérieure et inchangée |
+| `npx eslint src tests scripts` | **0 erreur, 17 avertissements** |
+| `npx prettier --check src tests scripts` | conforme |
+| `npx prisma validate` | schéma valide (aucun changement de schéma) |
+| `cd frontend && npx vitest run` | 15 fichiers / 15, 59 tests / 59 |
+| `npx tsc --noEmit -p .` | exit 0 |
+| `npx eslint src` | 0 erreur, 36 avertissements |
+| `npx vite build` | built in 7.27s |
+
+- Frontend : aucun changement de code. Aucune migration, aucun changement d'API. Changement de comportement visible : un tag `#Projet` d'une note ne cible plus un projet de workspace dont l'auteur a perdu l'accès (projet personnel créé à la place) ; un assigné proposé par l'IA qui n'a pas accès au projet est ignoré.
+
+## Points ouverts pour l'architecte (r12)
+
+1. **S12-f, contrainte `userId` du projet cible** conservée (comportement d'origine). Faut-il autoriser le ciblage de tout projet de workspace où l'auteur a `task.write` ? (Ambiguïté en cas de noms identiques.)
+2. **Tâche non écrivable** : un projet personnel homonyme peut être créé avant le constat. Faut-il évaluer la tâche existante avant de résoudre le projet ?
+3. **`proactive-scheduler`** (crons) : alertes `SYSTEM` à l'utilisateur surchargé pouvant citer des titres de tâches de projets sans rôle. À traiter en Phase 6 ou à ignorer ?
+4. **`calendar-sync.service.ts:754`** : tâche technique créée dans le premier projet du workspace ; la route est réservée aux rôles de workspace par le contrôleur. À confirmer.
+5. **S16-c** : pas de test isolé de `RealtimeService.evictTaskRoom` ni d'intégration réelle.
+6. La recherche élargie est par motifs, pas une preuve d'absence (voir S12-f).
+7. Décisions produit en attente de l'utilisateur, non tranchées : P4, `timelog.read`, DTO IA. Points renvoyés à d'autres phases, non traités : Q-2, complément S17, `ws` (S25).
+8. Toutes les entrées r12 sont en `CORRIGÉ – À REVOIR` ; aucune n'est marquée `VALIDÉ`.
+
+## Revue architecte r13 (2026-11-03) : NON VALIDÉ
+
+Détail dans `rapport-audit.md`, section « Revue r13 ». Les chiffres de « Résultats (r12) » sont exacts : 74/74 suites, 2196 tests, build sans `*.spec.js`, ESLint 0 erreur et 17 avertissements, frontend vert. **Arbre de travail intact après les stashs** : `git stash list` vide, 83 entrées dans `git status`, tous les fichiers non suivis r11 présents, aucun marqueur de conflit, correctifs r11 en place.
+
+- S12-f : **VALIDÉ**. O5 : **VALIDÉ**. S16-c : **À REPRENDRE** (test de l'implémentation d'`evictTaskRoom`).
+- Nouveaux constats prouvés : **S12-h** (Moyen, bloquant : une note sort une tâche de son workspace, avec les commentaires et les pièces jointes des autres) et **S12-g** (Mineur : la note d'un auteur sans accès reçoit les nouveaux titres).
+- Réponses aux points ouverts r12 : 1 à 3 acceptés ; 4 tranché, aucun écart (calendrier réservé à OWNER/ADMIN, MANAGER implicites ; les alertes cron avec titres ne vont qu'aux OWNER/ADMIN ; briefings filtrés) ; 5 test isolé exigé ; 6 recherche par motifs insuffisante seule, relecture complète des notes faite ici.
+- **Plus de `git stash` pour les preuves** : `git show HEAD:<chemin> > <chemin>` après une copie de sauvegarde (`/bin/cp -f`), puis restauration et `cmp`.
+- Plan d'action r13 : S12-h, S12-g, test S16-c, runbook § 4.2, O6 facultatif, clôture.
+- Décisions produit P4, `timelog.read`, DTO IA : toujours en attente de l'utilisateur.
+
+## Actions de la revue r13 (2026-11-03)
+
+Procédure de preuve r13 respectée : **aucun `git stash`**. Les preuves « avant » utilisent une sauvegarde `/bin/cp -f` dans le scratchpad, une mutation ciblée ou `git show HEAD:<chemin>`, puis restauration par `/bin/cp -f` et vérification par `cmp` (« restored » à chaque fois). `git stash list` : vide (0 entrée). `git status --short` : 85 entrées (83 en début de r13, plus `scripts/grant-legacy-project-access.ts` et son test).
+
+### S12-h — Une note ne déplace plus une tâche hors de son workspace
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Cause confirmée** : `src/notes/notes.service.ts` (bloc de mise à jour d'une tâche existante) calculait `projectChanged` et écrivait `projectId: project.id` sans comparer le workspace de la source à celui de la destination.
+- **Preuve avant correctif** : 5 tests ajoutés dans `tests/unit/authz/notes-access.spec.ts` (section S12-h), lancés sur le code non corrigé : **3 échecs** — critère 1 (CONTRIBUTOR de P1, `#Perso` : `task.update` avec un `projectId` ≠ P1), critère 2 (membre de W et OTHER_W : déplacement W vers OTHER_W), et « projet personnel vers projet de workspace » ; les critères 3 et 4 (contrôles positifs) passaient déjà.
+- **Changement** :
+  - `src/notes/notes.service.ts` : `findFirst` de la tâche existante avec `include: { project: { select: { workspaceId: true } } }` ; `sameWorkspace = (existingTask.project?.workspaceId ?? null) === (project.workspaceId ?? null)` ; `projectChanged = existingTask.projectId !== project.id && sameWorkspace` ; `task.update` écrit `projectId: projectChanged ? project.id : existingTask.projectId`. Les autres champs sont appliqués normalement, aucune erreur, `evictTaskRoom` seulement si `projectChanged`.
+  - `src/notes/notes.service.spec.ts` : deux assertions sur `task.findFirst` adaptées (`expect.objectContaining({ where })`) à cause du `include`.
+- **Tests** : `notes-access.spec.ts`, 5 tests S12-h (critères 1 à 4 du rapport, plus personnel vers workspace refusé). Après correctif : verts. **Mutation** (`projectChanged = … || !sameWorkspace`) : 3 échecs. Rejeu de `notes.service.ts` de `HEAD` contre toute la spec : 15 échecs sur 18.
+- **Écart par rapport au rapport** : aucun. Précision : un projet personnel (`workspaceId` NULL) vers un projet de workspace, ou l'inverse, est aussi refusé (égalité stricte des workspaces). Une ligne sans tag (« Inbox », projet personnel) ne sort donc plus une tâche de son projet de workspace.
+- **Questions pour l'architecte** : voir « Points ouverts (r13) », 1.
+
+#### Revue architecte (r14)
+
+**VALIDÉ.** M8 (`sameWorkspace = true`) : 3 échecs ; M9 (`projectId: project.id`) : 2 échecs. Égalité stricte confirmée (question 1). **Régression du correctif prouvée, suivie à part en S12-i** : sur un déplacement refusé, l'assigné est encore résolu contre le projet cible refusé (`notes.service.ts:429-431`) puis attaché à la tâche restée dans P1 (`:501-510`), après `deleteMany` des assignés existants.
+
+### S12-g — `syncTaskStatusToNote` n'écrit plus dans la note d'un auteur sans accès
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Cause confirmée** : `notes.service.ts` (`syncTaskStatusToNote`) recopiait titre et nom du projet dans la note sans vérifier que son auteur a encore `task.read`.
+- **Preuve avant correctif** : tests S12-g sur le code non corrigé : **2 échecs sur 3** (auteur sans `Membership` : 1 `note.update` reçu au lieu de 0 ; membre sans rôle sur P1 : idem) ; le contrôle positif passait.
+- **Changement** : après le chargement de la tâche, `policy.filterUsersWithProjectAction(task.projectId, [task.note.userId], 'task.read')` ; si l'auteur n'est pas renvoyé, sortie silencieuse (aucun `note.update`, aucune invalidation de cache, aucune erreur pour `updateTask`).
+- **Tests** : `notes-access.spec.ts`, 3 tests S12-g (auteur `deprovisioned`, membre sans rôle, contrôle positif CONTRIBUTOR avec ligne `[x]` mise à jour). **Mutation** « vérification retirée » : 2 échecs. Après correctif : verts.
+- **Écart par rapport au rapport** : aucun.
+- **Questions pour l'architecte** : aucune.
+
+#### Revue architecte (r14)
+
+**VALIDÉ.** M10 (garde retirée) : 2 échecs. Sortie silencieuse, `updateTask` non affecté.
+
+### S16-c — Test isolé de `RealtimeService.evictTaskRoom`
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Changement** : aucun code de production. `tests/unit/authz/realtime.spec.ts` : 2 tests (« fait quitter le salon task:<id> » sur un serveur factice : `in('task:T1')` puis `socketsLeave('task:T1')` ; « sans serveur attaché : aucune exception »).
+- **Preuve (mutation M7)** : `evictTaskRoom` remplacé par `return;` : **1 échec** (le test sur le serveur factice), 9 réussites ; restauré (`cmp` identique), 10/10.
+- **Écart / questions** : aucun.
+
+#### Revue architecte (r14)
+
+**VALIDÉ.** M11 (`return;`, ex-M7) : 1 échec, alors qu'elle survivait en r13. S16 clos.
+
+### O6 — Droits de la note calculés une fois par analyse
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Changement** : `notes.service.ts` : `writableIds` est calculé au premier besoin (`??=`) puis réutilisé pour toutes les lignes de la note. **Piège évité** : un projet personnel créé en cours d'analyse est ajouté à `writableIds`, sinon deux lignes `#Perso` auraient créé deux projets (l'ancien calcul par ligne le retrouvait).
+- **Tests** : `notes-access.spec.ts` « O6 » : 3 lignes `#Perso` : `listAccessibleProjectIds` appelé 1 fois, 1 seul `project.create`, 3 tâches créées. Vert.
+- **Écart / questions** : aucun. Le calcul par assigné (`membership.findMany` dans `resolveAssignee`) n'est pas mis en cache (hors périmètre simple).
+
+#### Revue architecte (r14)
+
+**VALIDÉ.** M12 (projet personnel non ajouté au cache) : 1 échec. `resolveAssignee` sans cache : accepté (question 2).
+
+### P4 — Script de reprise `grant-legacy-project-access.ts` (décision utilisateur du 2026-11-03)
+
+- **Statut** : `CORRIGÉ – À REVOIR`
+- **Changement** : nouveau `backend/scripts/grant-legacy-project-access.ts`. Par défaut, rapport seul (aucune écriture) ; `--apply` accorde CONTRIBUTOR aux MEMBER et CLIENT aux VIEWER (`createMany` avec `skipDuplicates`, dans une transaction) sur les projets non supprimés des workspaces non supprimés où ils n'ont aucune `ProjectMembership`. Ignorés : OWNER/ADMIN, comptes sans `Membership`, projets personnels, projets supprimés, rôles déjà présents (jamais modifiés). CSV (`reprise-phase0/…`, droits 600) : identifiants et rôles seulement, aucune adresse e-mail. Calcul pur `planLegacyGrants`, lignes CSV `grantsToCsvRows`.
+- **Tests** : `tests/unit/scripts/grant-legacy-project-access.spec.ts` (6, Prisma simulé) : dry-run sans écriture ; `--apply` (5 accès créés, rôles existants intacts) ; exclusions ; idempotence (seconde exécution : 0) ; pas de doublon ; CSV sans `@`. Verts.
+- **Jamais exécuté** contre une base réelle (ni en dry-run).
+- **Écart par rapport au rapport** : la notion de « Membership active » = existence de la ligne (le modèle n'a pas de drapeau d'activité ; la désactivation SCIM supprime la `Membership`).
+- **Runbook** : § 2 (usage) et § 5.
+
+#### Revue architecte (r14)
+
+**À REPRENDRE (petit, non sécuritaire).** Revue de sûreté conforme : mode rapport par défaut, jeton `--apply` exact, une seule écriture (`createMany` + `skipDuplicates` sur `@@unique([projectId, userId])`), aucun `update`/`upsert`/`delete`, idempotent, CSV sans adresse (droits 600, `reprise-phase0/` ignoré par git). Mutations détectées : P4-1 (écriture en mode rapport), P4-2 (rôles existants), P4-8 (adresse dans le CSV). **Survivantes** : P4-3 (`OWNER` ajouté au mapping), P4-4 (filtre `role`/`workspace.deletedAt` retiré de la requête), P4-5 (`deletedAt` retiré de `project.findMany`), parce que le faux Prisma refait lui-même ces filtres. À faire : faux Prisma qui évalue les `where`, ou assertions sur les arguments, plus un test pur avec OWNER/ADMIN ; exclure le créateur du projet pour concorder avec la requête SQL du runbook § 2 ; facultatif : `timeout` de la transaction. « Membership active » = existence de la ligne : confirmé (question 3).
+
+### Décisions produit tranchées par l'utilisateur le 2026-11-03
+
+- **P4** : règle stricte confirmée (aucun accès implicite), script ci-dessus. **`timelog.read`** : réservé à MANAGER et CONTRIBUTOR, confirmé, aucun changement de code. **DTO IA** (`ai/execute`) : strict, confirmé, aucun changement de code.
+- Les trois passent de « en attente » à « tranchées par l'utilisateur le 2026-11-03 » (runbook § 5, ce journal). Cela ne vaut pas validation de la phase. `GEMINI.md` indique toujours « Prochaine phase : Phase 3 » et n'affirme aucune validation : non modifié.
+
+### Runbook § 4.2
+
+- **Statut** : `CORRIGÉ – À REVOIR`. `docs/security/runbook-phase3.md` § 4.2 : paragraphe « Reprise r12 et r13 » (tag `#Projet` borné aux projets de l'auteur où il écrit, projet personnel homonyme, tâche sans accès ou de projet supprimé non modifiée, plus de changement de workspace par une note, note d'un auteur sans accès non synchronisée, assigné IA sans accès ignoré, optimisation de charge sans candidat, éviction `task:<id>`).
+
+#### Revue architecte (r14)
+
+**VALIDÉ**, avec une ligne à ajouter pour S12-i après le correctif.
+
+## Résultats (r13)
+
+| Commande | Résultat |
+| --- | --- |
+| `cd backend && env -u DATABASE_URL npx jest` | **75/75 suites, 2213/2213 tests** (r12 : 74 et 2196 ; +1 suite, +17 tests : S12-h 5, S12-g 3, O6 1, S16-c 2, script 6) |
+| `npx nest build` ; `find dist -name '*.spec.js'` | exit 0 ; 122 `.js` ; 0 `*.spec.js` |
+| `npx tsc --noEmit -p tsconfig.build.json` | exit 0 |
+| `npx tsc --noEmit -p tsconfig.json` | 1 erreur TS6059 (`tracking.gateway.spec.ts`), antérieure et inchangée |
+| `npx eslint src tests scripts` | 0 erreur, 17 avertissements |
+| `npx prettier --check src tests scripts` | conforme |
+| `npx prisma validate` | valide |
+| `npx jest tests/integration --detectOpenHandles` | 1 suite, 4/4, aucun handle ouvert |
+| Frontend `pnpm test:run` | 15 fichiers, 59/59 |
+| Frontend `tsc --noEmit -p .` ; `eslint src` ; `vite build` | exit 0 ; 0 erreur (36 avertissements) ; built in 7.49s |
+| `git stash list` | vide (0 entrée) |
+| `git status --short` | 85 entrées (frontend : aucune) |
+
+Aucune migration, aucun changement d'API ni de frontend.
+
+## Points ouverts pour l'architecte (r13)
+
+1. **S12-h, projet personnel vers workspace et inverse** : refusé comme un changement de workspace. Le rapport ne le précise pas ; confirmer (une ligne sans tag ne sort plus une tâche de son projet de workspace vers « Inbox »).
+2. **O6** : `resolveAssignee` interroge encore `membership.findMany` par assigné ; non mis en cache.
+3. **P4, script** : accorde CONTRIBUTOR sur tous les projets du workspace aux MEMBER, ce qui reproduit l'ancien périmètre (large). Le rapport avant `--apply` permet à l'utilisateur d'en juger. Non exécuté.
+4. Hors périmètre, non traités : Q-2, complément S17, `ws`/S25.
+5. Toutes les entrées r13 sont en `CORRIGÉ – À REVOIR` ; aucune n'est marquée `VALIDÉ`.
+
+## Revue architecte r14 (2026-11-03) : NON VALIDÉ
+
+Détail dans `rapport-audit.md`, section « Revue r14 ». Les chiffres de « Résultats (r13) » sont exacts : 75/75 suites et 2213 tests ; build sans `*.spec.js` ; `tsc` (build) 0 ; TS6059 inchangée ; ESLint 0 erreur et 17 avertissements ; `prettier` et `prisma validate` OK ; intégration 4/4 sans handle ouvert ; frontend vert et inchangé. `git stash list` vide, 85 entrées, diff identique avant et après la revue.
+
+- S12-h, S12-g, S16-c, O6 : **VALIDÉ** (mutations M8 à M12 détectées). Runbook § 4.2 : validé.
+- **Nouveau constat S12-i** (Moyen, bloquant, régression de S12-h, prouvé) : quand le déplacement est refusé, l'assigné proposé par l'IA est résolu dans le projet refusé (autre workspace) et attaché à la tâche restée dans W, après suppression de ses assignés.
+- Script P4 : **À REPRENDRE** (petit). Il est sûr par construction, mais trois exclusions ne sont pas testées (P4-3, P4-4 et P4-5 survivent) et le créateur n'est pas exclu, alors que la requête SQL du runbook l'exclut.
+- Décisions produit tranchées par l'utilisateur le 2026-11-03 : prises en compte. `permissions.ts:11-13` à mettre à jour.
+- Réponses : 1 confirmé (égalité stricte) ; 2 accepté (pas de cache) ; 3 confirmé, créateur à exclure ; 4 confirmé hors périmètre.
+
+**Constats encore ouverts (pour relancer `fixeur`), dans l'ordre :** S12-i ; P4 (tests d'exclusion du script, exclusion du créateur) ; documentation (`permissions.ts`, runbook § 2 et § 4.2) ; clôture « Résultats (r14) ». Facultatif : O7 (projet personnel vide créé sur un déplacement refusé), délai de transaction du script.
+
+## Actions de la revue r14
+
+### S12-i — Assigné résolu contre le projet effectif de la tâche
+
+- **Statut** : `CORRIGÉ – À REVOIR`.
+- **Changement** : `backend/src/notes/notes.service.ts` : `resolveAssignee` n'est plus appelé avant la décision de déplacement. Un helper local `resolveFor(target)` est appelé dans chaque branche : tâche existante, avec `projectChanged ? project : { id: existingTask.projectId, workspaceId: existingTask.project?.workspaceId ?? null }` ; création (marqueur périmé, ou sans marqueur) avec `project`. La branche « tâche non écrivable » n'assigne toujours rien. Quand l'assigné n'est pas valide sur le projet effectif, `assigneeId` est nul et les assignations existantes ne sont pas touchées (pas de `deleteMany`).
+- **Tests** : `backend/tests/unit/authz/notes-access.spec.ts`, bloc « S12-i » (3 tests, critères 1 à 3). **Échec avant correctif** (consigné) : critère 1 en échec (`taskAssignee.create` reçu avec `{ taskId: 'TC', userId: 'u-outsider' }`), critère 2 en échec aussi (assigné COMMENTER de P1 non retenu car résolu contre le projet refusé), critère 3 vert (déjà correct). Après correctif : 3/3. **Mutation** (existant : toujours `project`) : 2 échecs (critères 1 et 2) ; fichier restauré, `cmp` identique. (Une première mutation écrite `true ? …` ne compilait pas, 0 test exécuté ; refaite avec `projectChanged || !projectChanged`.)
+- **Écart par rapport au rapport** : aucun.
+- **Questions** : aucune.
+
+#### Revue architecte (r15)
+
+**VALIDÉ.** Code conforme : `resolveFor` est appelé après la décision de déplacement dans les trois branches, et il n'y a ni `deleteMany` ni `create` si l'assigné est nul. Mutations rejouées : R1 (toujours `project`) 2 échecs, R2 (`deleteMany` inconditionnel) 2 échecs, R3 (`workspaceId` du projet visé) 1 échec. La mutation `projectChanged || !projectChanged` ne reste nulle part dans l'arbre.
+
+### P4 (script) — tests d'exclusion effectifs, créateur exclu, délai de transaction
+
+- **Statut** : `CORRIGÉ – À REVOIR`. Script jamais exécuté.
+- **Changement** : `backend/scripts/grant-legacy-project-access.ts` : `planLegacyGrants` ignore `project.userId === m.userId` ; `project.findMany` sélectionne `userId` ; `$transaction(…, { timeout: 120_000 })`. En-tête du script mis à jour.
+- **Tests** : `backend/tests/unit/scripts/grant-legacy-project-access.spec.ts` : le faux Prisma évalue les `where` reçus (`matches` : null, `in`, relation `workspace`, opérateur inconnu = erreur) sur des données contenant les cas exclus ; ajout de : créateur non concerné, `toHaveBeenCalledWith` sur `membership.findMany` et `project.findMany`, délai de transaction, calcul pur OWNER/ADMIN, calcul pur créateur. 11/11.
+- **Mutations** (une seule à la fois, sauvegarde `/bin/cp -f`, restauration, `cmp`) :
+  - P4-3 `OWNER: 'CONTRIBUTOR'` au mapping : 1 échec (calcul pur OWNER/ADMIN).
+  - P4-4 `where: {}` sur `membership.findMany` : 4 échecs ; filtre `workspace.deletedAt` seul retiré : 4 échecs.
+  - P4-5 `deletedAt: null` retiré de `project.findMany` : 4 échecs.
+  - Créateur non exclu : 4 échecs. `timeout` retiré : 1 échec.
+- **Écart** : l'effet des décomptes : le rapport donne maintenant 4 accès sur le jeu de test (au lieu de 5), `member` ayant créé P1.
+
+#### Revue architecte (r15)
+
+**VALIDÉ.** P4-3 : 1 échec ; P4-4 (`where: {}`) : 4 ; P4-4b (`workspace.deletedAt`) : 4 ; P4-4c (`role`) : 1 ; P4-5 : 4 ; créateur non exclu : 4 ; `userId` perdu dans `scoped` : 3 ; `userId` retiré du `select` : erreur de compilation ; `timeout` retiré : 1 ; P4-1 : 1 ; P4-2 : 2. Écart sur les décomptes (4 accès au lieu de 5) : accepté, c'est l'effet voulu. Script jamais exécuté.
+
+### Documentation
+
+- **Statut** : `CORRIGÉ – À REVOIR`. `backend/src/authz/permissions.ts` (commentaire : P4 tranchée le 2026-11-03, règle stricte, script optionnel) ; `docs/security/runbook-phase3.md` § 2 (créateur exclu, décomptes concordants avec la requête SQL) et § 4.2 (ligne S12-i).
+
+#### Revue architecte (r15)
+
+**VALIDÉ.** `permissions.ts:9-13`, runbook § 2 (l. 39) et § 4.2 (l. 90) : présents et exacts. S12-j demandera une ligne de plus au § 4.2.
+
+### O7 — projet personnel vide sur un déplacement refusé
+
+- **Statut** : `NON TRAITÉ` (facultatif). Le projet cible est créé avant la lecture de la tâche existante ; l'éviter demande de réordonner la résolution du projet par ligne, ce qui touche tous les chemins (création, O6). Risque disproportionné pour un effet cosmétique ; proposé pour une phase ultérieure.
+
+#### Revue architecte (r15)
+
+**Report accepté.** O7 reste ouvert en Amélioration, hors Phase 3 (avec A5 ou en Phase 4).
+
+## Résultats (r14)
+
+| Commande | Résultat |
+| --- | --- |
+| `cd backend && env -u DATABASE_URL npx jest` | **75/75 suites, 2221/2221 tests** (r13 : 2213 ; +8 : S12-i 3, script 5) |
+| `npx nest build` ; `find dist -name '*.spec.js'` | exit 0 ; 122 `.js` ; 0 `*.spec.js` |
+| `npx tsc --noEmit -p tsconfig.build.json` | exit 0 |
+| `npx tsc --noEmit -p tsconfig.json` | 1 erreur TS6059 (`tracking.gateway.spec.ts`), antérieure et inchangée |
+| `npx eslint src tests scripts` | 0 erreur, 17 avertissements |
+| `npx prettier --check src tests scripts` | conforme |
+| `npx prisma validate` | valide |
+| `npx jest tests/integration --detectOpenHandles` | 1 suite, 4/4, aucun handle ouvert |
+| Frontend `pnpm test:run` | 15 fichiers, 59/59 |
+| Frontend `tsc --noEmit -p .` ; `eslint src` ; `pnpm build` | exit 0 ; 0 erreur (36 avertissements) ; built in 4.51s |
+| `git stash list` | vide (0 entrée) |
+| `git status --short` | 85 entrées avant et après (frontend : aucune) |
+
+Aucune migration, aucun changement d'API ni de frontend.
+
+## Points ouverts pour l'architecte (r14)
+
+1. Toutes les entrées r14 sont en `CORRIGÉ – À REVOIR` ; aucune n'est marquée `VALIDÉ`.
+2. O7 non traité (voir ci-dessus) : accepter le report ?
+3. Le script P4 exclut le créateur : le rapport ne contient plus les couples (créateur MEMBER, son projet). Aucun accès perdu (le créateur est MANAGER par `project.userId`).
+4. Hors périmètre, non traités : Q-2, complément S17, `ws`/S25.
+
+## Revue architecte r15 (2026-11-04) : NON VALIDÉ
+
+Détail dans `rapport-audit.md`, section « Revue r15 ». Les chiffres de « Résultats (r14) » sont exacts : 75/75 suites et 2221 tests ; build sans `*.spec.js` (122 `.js`) ; `tsc` (build) 0 ; TS6059 inchangée ; ESLint 0 erreur et 17 avertissements ; `prettier` et `prisma validate` OK ; intégration 4/4 sans handle ouvert ; frontend vert et inchangé. `git stash list` vide, 85 entrées, diff et fichiers non suivis identiques avant et après la revue. L'arbre est cohérent malgré la perte du scratchpad : aucun reste de mutation, aucun fichier de sauvegarde, aucun fichier attendu manquant.
+
+- S12-i, script P4 et documentation : **VALIDÉ**. O7 : **report accepté**.
+- **Nouveau constat S12-j** (Moyen, CVSS 5.4, bloquant, défaut antérieur à la Phase 3, prouvé) : `deleteNote` (`notes.service.ts:162-190`, `updateMany` à la ligne 173) met `deletedAt` sur toutes les tâches liées à la note sans contrôle `task.write`. Un auteur rétrogradé COMMENTER ou CLIENT, retiré du projet ou désactivé par SCIM peut ainsi supprimer ses tâches d'un projet de workspace. Remédiation et critères 1 à 6 : voir le rapport.
+- Non bloquants : O8 (`deleteNote` n'émet aucun événement Firestore pour les tâches supprimées) ; P10 (le créateur reste MANAGER même rétrogradé VIEWER, décision produit à poser en Phase 4).
+- Réponses : 1, O7 reporté (accepté) ; 2, créateur MANAGER par `project.userId` dans les trois chemins de la politique (confirmé) ; 3, hors périmètre (confirmé) ; 4, A2 se ferme avec S12-j et non avec S12-i.
+- La liste des fichiers du futur commit de Phase 3 et le message proposé sont dans le rapport, pour l'utilisateur, après validation seulement.
+
+**Constats encore ouverts (pour relancer `fixeur`), dans l'ordre :** S12-j ; clôture « Résultats (r15) ». Facultatif : O8.
+
+## Actions de la revue r15
+
+### S12-j — `deleteNote` ne supprime que les tâches où l'auteur a encore `task.write`
+
+- **Statut** : `CORRIGÉ – À REVOIR`.
+- **Changement** : `backend/src/notes/notes.service.ts` (`deleteNote`) : `writable = await this.policy.listAccessibleProjectIds(userId, { action: 'task.write' })` (inclut les projets personnels) puis `tx.task.updateMany({ where: { noteId, projectId: { in: writable } }, … })`. La note est supprimée dans tous les cas, sans erreur. `docs/security/runbook-phase3.md` § 4.2 : ligne S12-j.
+- **Tests** : `backend/tests/unit/authz/notes-access.spec.ts`, bloc « S12-j » (3 tests, vrai `PolicyService`, faux `updateMany` qui évalue le `where` reçu sur `prisma.data.tasks` et rejette toute clé inconnue). Critère 1 : COMMENTER de P1, T9 (P1) conservée, T10 (projet personnel) supprimée, note supprimée. Critère 2 : `USERS.deprovisioned`, sa tâche de P1 conservée. Critère 3 : CONTRIBUTOR de P1, tâche supprimée.
+- **Échec avant correctif (consigné)** : critères 1 et 2 en échec (`deletedAt` de T9 était une `Date` au lieu de `null`), critère 3 vert. 23 verts, 2 échecs sur 25.
+- **Mutation** (`where: { noteId }` rétabli ; sauvegarde `/bin/cp -f` hors dépôt, restauration, `cmp` identique) : 2 échecs (critères 1 et 2).
+- **Écart par rapport au rapport** : aucun.
+- **Questions** : aucune.
+
+#### Revue architecte (r16)
+
+**VALIDÉ.** Code relu (`notes.service.ts:162-196` ; `writable` à la ligne 170, `updateMany` aux lignes 176-179). `listAccessibleProjectIds` (sans `workspaceId`) inclut les projets personnels (`{ userId, workspaceId: null }`), exclut les projets supprimés et exige une `Membership` pour toute branche de workspace. `Task.projectId` est non nul : aucune tâche n'échappe au filtre `in`. Note toujours supprimée, aucune erreur, API inchangée. Les 6 critères sont tenus : critères 1 à 3 dans le bloc « S12-j » de `notes-access.spec.ts` (vrai `PolicyService`, faux `updateMany` qui évalue le `where` et rejette toute clé inconnue) ; critère 4 consigné ci-dessus ; critère 5 rejoué ; critère 6 au runbook § 4.2, ligne 91. Mutations rejouées par l'architecte, une par une (sauvegarde `/bin/cp -f` hors dépôt, restauration, `cmp` « restored ») :
+
+| Mutation | Résultat |
+| --- | --- |
+| M1 : `where: { noteId }` rétabli (critère 5) | 2 échecs (critères 1 et 2) |
+| M2 : `task.write` remplacé par `task.read` | 1 échec (critère 1) |
+| M3 : `workspaceId: 'ws-1'` ajouté (projets personnels exclus) | 1 échec (critère 1, T10 non supprimée) |
+| M4 : `note.update` retiré | 2 échecs |
+| M5 : `in: []` (rien supprimé) | 2 échecs (critères 1 et 3) |
+
+Remarque non bloquante : `writable` est calculé hors de la transaction. La fenêtre de concurrence est négligeable, et c'est le même schéma que dans `parseTasksFromContent`.
+
+### O8 — événements Firestore `delete` pour les tâches supprimées par `deleteNote`
+
+- **Statut** : `NON TRAITÉ` (facultatif, report motivé). `taskSyncPayload` est privé à `TasksService` (et `sprint.service.ts` a sa propre copie du mécanisme) ; l'utiliser depuis `NotesService` demande soit une troisième copie, soit l'extraction d'un helper partagé, plus un `findMany` avec assignés avant le `updateMany` dans la transaction. Ce n'est pas trivial ni sans risque pour une clôture ; à traiter en Phase 4 avec O7/A5.
+
+#### Revue architecte (r16)
+
+**Report accepté** (Amélioration, Phase 4). Le motif est fondé : il faudrait une troisième copie de `taskSyncPayload` (privé à `TasksService`, déjà dupliqué dans `sprint.service.ts`) ou l'extraction d'un helper partagé. Ce ne serait pas trivial. Impact limité à la cohérence du miroir Firestore : la source de vérité MySQL est correcte, et il n'y a aucun accès indu. À faire en Phase 4 : extraire un helper `taskSyncPayload` partagé (tâches, sprints, notes), puis émettre un événement `delete` pour chaque tâche réellement supprimée par `deleteNote`, c'est-à-dire les tâches filtrées par `writable` (lecture `findMany` dans la transaction, avant `updateMany`).
+
+## Résultats (r15)
+
+| Commande | Résultat |
+| --- | --- |
+| `cd backend && env -u DATABASE_URL npx jest` | **75/75 suites, 2224/2224 tests** (r14 : 2221 ; +3 : S12-j) |
+| `npx nest build` ; `find dist -name '*.spec.js'` | exit 0 ; 122 `.js` ; 0 `*.spec.js` |
+| `npx tsc --noEmit -p tsconfig.build.json` | exit 0 |
+| `npx tsc --noEmit -p tsconfig.json` | 1 erreur TS6059 (`tracking.gateway.spec.ts`), antérieure et inchangée |
+| `npx eslint src tests scripts` | 0 erreur, 17 avertissements |
+| `npx prettier --check src tests scripts` | conforme |
+| `npx prisma validate` | valide |
+| `npx jest tests/integration --detectOpenHandles` | 4/4, aucun handle ouvert |
+| Frontend `pnpm test:run` | 15 fichiers, 59/59 |
+| Frontend `tsc --noEmit -p .` ; `eslint src` ; `pnpm build` | exit 0 ; 0 erreur (36 avertissements) ; built in 4.82s |
+| `git stash list` | vide (0 entrée) |
+| `git status --short` | 85 entrées (aucun nouveau fichier ; frontend : aucune) |
+
+Aucune migration, aucun changement d'API ni de frontend.
+
+## Points ouverts pour l'architecte (r15)
+
+1. S12-j en `CORRIGÉ – À REVOIR` ; A2 peut se fermer avec lui (dernier chemin d'écriture des notes passé par `PolicyService`).
+2. O8 non traité (report motivé ci-dessus) : accepter le report en Phase 4 ?
+3. Aucun nouveau fichier : la liste de commit de Phase 3 reste inchangée.
+4. Hors périmètre, non traités : O7, P10, Q-2, complément S17, `ws`/S25.
+
+## Revue architecte r16 (2026-11-04) : VALIDÉ — Phase 3 close côté code
+
+Détail dans `rapport-audit.md`, section « Revue r16 ». Les chiffres de « Résultats (r15) » sont exacts et ont été relancés par l'architecte : 75/75 suites et 2224/2224 tests ; `nest build` exit 0 (122 `.js`, 0 `*.spec.js`) ; `tsc` (build) 0 ; TS6059 seule et inchangée ; ESLint 0 erreur et 17 avertissements ; `prettier` et `prisma validate` OK ; intégration 4/4 sans handle ouvert ; frontend (15 fichiers, 59/59 ; `tsc` 0 ; ESLint 0 erreur ; build OK) inchangé. `git stash list` vide, 85 entrées. Diff (`6ef3c74d…`), statut et empreintes des 26 fichiers non suivis : identiques avant et après les mutations.
+
+- **S12-j : VALIDÉ** (6 critères tenus ; mutations M1 à M5 détectées). **A2 : VALIDÉ, fermé.** Plus aucun chemin d'écriture du module des notes ne passe hors `PolicyService`.
+- **O8 : report en Phase 4 accepté.**
+- Relecture finale de tous les chemins d'écriture Prisma des services modifiés en Phase 3 : aucun contournement de `PolicyService`. Les méthodes sans garde locale sont gardées par leur contrôleur (`assertWorkspaceAccess`, qui délègue à la politique), bornées au propriétaire, ou ce sont des chemins système déjà validés (webhook signé, cron, SCIM, SSO).
+- Nouveau constat non bloquant : **O9** (documentation). Le DAT § 12 (lignes 81, 690 et 703) décrit encore `notifications.gateway.ts`, supprimé en Phase 3. À mettre à jour en Phase 4.
+- `GEMINI.md` (section « État ») et DAT § 15.1 (ligne Phase 3) mis à jour par l'architecte, comme aux clôtures précédentes.
+- Hors périmètre, confirmé : O7, O8, O9, P10, Q-2, complément S17, `ws`/S25 (Phases 4 à 6).
+
+**Constats encore ouverts pour `fixeur` en Phase 3 :** aucun. Le commit relève de l'utilisateur (liste et message dans le rapport, section « Revue r16 »).

@@ -12,6 +12,7 @@ describe('IntegrationService', () => {
       create: jest.fn(),
       findMany: jest.fn(),
       findUnique: jest.fn(),
+      findFirst: jest.fn(),
       update: jest.fn(),
       delete: jest.fn(),
     },
@@ -98,7 +99,7 @@ describe('IntegrationService', () => {
   describe('toggleIntegration', () => {
     it("devrait inverser l'état actif de l'intégration", async () => {
       const integrationId = 'int-123';
-      mockPrisma.integration.findUnique.mockResolvedValue({
+      mockPrisma.integration.findFirst.mockResolvedValue({
         id: integrationId,
         active: true,
       });
@@ -107,10 +108,10 @@ describe('IntegrationService', () => {
         active: false,
       });
 
-      const result = await service.toggleIntegration(integrationId);
+      const result = await service.toggleIntegration('ws-1', integrationId);
 
-      expect(prisma.integration.findUnique).toHaveBeenCalledWith({
-        where: { id: integrationId },
+      expect(prisma.integration.findFirst).toHaveBeenCalledWith({
+        where: { id: integrationId, workspaceId: 'ws-1' },
       });
       expect(prisma.integration.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -122,22 +123,24 @@ describe('IntegrationService', () => {
     });
 
     it("devrait rejeter si l'intégration est introuvable", async () => {
-      mockPrisma.integration.findUnique.mockResolvedValue(null);
+      mockPrisma.integration.findFirst.mockResolvedValue(null);
 
-      await expect(service.toggleIntegration('int-not-found')).rejects.toThrow(NotFoundException);
+      await expect(service.toggleIntegration('ws-1', 'int-not-found')).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
   describe('deleteIntegration', () => {
     it("devrait supprimer l'intégration", async () => {
       const integrationId = 'int-123';
-      mockPrisma.integration.findUnique.mockResolvedValue({ id: integrationId });
+      mockPrisma.integration.findFirst.mockResolvedValue({ id: integrationId });
       mockPrisma.integration.delete.mockResolvedValue({ id: integrationId });
 
-      const result = await service.deleteIntegration(integrationId);
+      const result = await service.deleteIntegration('ws-1', integrationId);
 
-      expect(prisma.integration.findUnique).toHaveBeenCalledWith({
-        where: { id: integrationId },
+      expect(prisma.integration.findFirst).toHaveBeenCalledWith({
+        where: { id: integrationId, workspaceId: 'ws-1' },
       });
       expect(prisma.integration.delete).toHaveBeenCalledWith({
         where: { id: integrationId },
@@ -288,11 +291,11 @@ describe('IntegrationService', () => {
   describe('réponses de création et de bascule (S14)', () => {
     it('createIntegration et toggleIntegration projettent sans jetons', async () => {
       mockPrisma.integration.create.mockResolvedValue({ id: 'i-1' });
-      mockPrisma.integration.findUnique.mockResolvedValue({ id: 'i-1', active: true });
+      mockPrisma.integration.findFirst.mockResolvedValue({ id: 'i-1', active: true });
       mockPrisma.integration.update.mockResolvedValue({ id: 'i-1', active: false });
 
       await service.createIntegration('ws-1', { type: 'SLACK', name: 'Canal' });
-      await service.toggleIntegration('i-1');
+      await service.toggleIntegration('ws-1', 'i-1');
 
       for (const call of [
         mockPrisma.integration.create.mock.calls[0][0],

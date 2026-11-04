@@ -351,6 +351,18 @@ describe('S10 : SSO OIDC', () => {
       expectNoSideEffect();
     });
 
+    it('O4 : domain différent de verifiedDomain, adresse du domain déclaré (non prouvé) : 409, aucune session', async () => {
+      await prisma.sSOConfiguration.updateMany({ where: {}, data: { domain: 'ancien.com' } });
+      await expect(login({ email: 'ada@ancien.com' })).rejects.toThrow(ConflictException);
+      expectNoSideEffect();
+    });
+
+    it('O4 : domain différent de verifiedDomain, adresse du domaine prouvé : acceptée', async () => {
+      await prisma.sSOConfiguration.updateMany({ where: {}, data: { domain: 'ancien.com' } });
+      await login({ email: 'ada@acme.com' });
+      expect(authService.completeLogin).toHaveBeenCalledTimes(1);
+    });
+
     it('nOAuth : e-mail d’un autre domaine dans un tenant étranger configuré par un attaquant : 409', async () => {
       await prisma.user.create({ data: { id: 'pdg', email: 'pdg@victime.com', name: 'PDG' } });
       await expect(login({ email: 'pdg@victime.com' })).rejects.toThrow(ConflictException);
@@ -454,6 +466,51 @@ describe('S10 : SSO OIDC', () => {
         expect(line).toContain('ws-1');
         expect(line).not.toContain(idToken);
         expect(line).not.toContain(flow.state);
+        expect(line).not.toContain('ada@acme.com');
+      });
+
+      it('O3 : le message brut de l’exception n’est jamais journalisé, seulement un motif contrôlé', async () => {
+        authService.completeLogin.mockRejectedValueOnce(
+          new ForbiddenException('ada@acme.com a-secret-code-123 sso_state_xyz Ada Lovelace'),
+        );
+        const flow = await start();
+        mockIdp(await sign({ nonce: flow.nonce }));
+        const logs = captureLogs();
+        try {
+          await expect(service.handleCallback('code', flow.state, flow.state)).rejects.toThrow(
+            ForbiddenException,
+          );
+        } finally {
+          logs.restore();
+        }
+        const line = logs.logged.find((l) => l.includes('SSO_LOGIN_FAILURE')) as string;
+        expect(line).not.toContain('ada@acme.com');
+        expect(line).not.toContain('a-secret-code-123');
+        expect(line).not.toContain('sso_state_xyz');
+        expect(line).not.toContain('Lovelace');
+        expect(JSON.parse(line).reason).toBe('REFUSE');
+        expect(JSON.parse(line).status).toBe(403);
+      });
+
+      it.each([
+        [new BadRequestException('x'), 'REQUETE_INVALIDE'],
+        [new UnauthorizedException('x'), 'NON_AUTHENTIFIE'],
+        [new ConflictException('x'), 'CONFLIT'],
+        [new ServiceUnavailableException('x'), 'INDISPONIBLE'],
+        [new NotFoundException('x'), 'AUTRE_REFUS'],
+        [new Error('ada@acme.com'), 'ERREUR_INTERNE'],
+      ])('O3 : motif contrôlé pour %p', async (error, reason) => {
+        authService.completeLogin.mockRejectedValueOnce(error);
+        const flow = await start();
+        mockIdp(await sign({ nonce: flow.nonce }));
+        const logs = captureLogs();
+        try {
+          await expect(service.handleCallback('code', flow.state, flow.state)).rejects.toThrow();
+        } finally {
+          logs.restore();
+        }
+        const line = logs.logged.find((l) => l.includes('SSO_LOGIN_FAILURE')) as string;
+        expect(JSON.parse(line).reason).toBe(reason);
         expect(line).not.toContain('ada@acme.com');
       });
 

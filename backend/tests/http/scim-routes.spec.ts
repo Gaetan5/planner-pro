@@ -1,3 +1,4 @@
+import { RealtimeService } from '../../src/realtime/realtime.service';
 import { INestApplication } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ThrottlerModule } from '@nestjs/throttler';
@@ -39,6 +40,7 @@ describe('S11 : SCIM (HTTP)', () => {
       controllers: [ScimController],
       providers: [
         ScimService,
+        { provide: RealtimeService, useValue: { refreshUserRooms: jest.fn() } },
         ScimAuthGuard,
         JwtAuthGuard,
         TokenService,

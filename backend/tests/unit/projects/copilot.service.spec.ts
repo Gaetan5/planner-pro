@@ -1,3 +1,4 @@
+import { PolicyService } from '../../../src/authz/policy.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { CopilotService } from '../../../src/projects/copilot.service';
 import { PrismaService } from '../../../src/prisma/prisma.service';
@@ -38,6 +39,13 @@ describe('CopilotService', () => {
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          provide: PolicyService,
+          useValue: {
+            assertWorkspace: jest.fn().mockResolvedValue({}),
+            listAccessibleProjectIds: jest.fn().mockResolvedValue(['project-1']),
+          },
+        },
         CopilotService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: GeminiService, useValue: mockGeminiService },

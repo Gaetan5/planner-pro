@@ -1,3 +1,4 @@
+import { PolicyService } from '../../../src/authz/policy.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { TasksService } from '../../../src/projects/tasks.service';
 import { PrismaService } from '../../../src/prisma/prisma.service';
@@ -59,6 +60,10 @@ describe('TasksService - Critical Path Method (CPM)', () => {
         { provide: IntegrationService, useValue: mockIntegration },
         { provide: NotificationsService, useValue: mockNotifications },
         { provide: ProjectPermissionsService, useValue: mockPermissions },
+        {
+          provide: PolicyService,
+          useValue: { filterUsersWithProjectAction: jest.fn(async () => []) },
+        },
         { provide: FirestoreSyncService, useValue: { enqueue: jest.fn() } },
       ],
     }).compile();

@@ -35,6 +35,7 @@ model User {
   timeLogs          TimeLog[]
   sentInvitations    Invitation[]        @relation("SentInvitations")
   comments           Comment[]
+  uploadedAttachments Attachment[] @relation("AttachmentUploader")
   notifications      Notification[]      @relation("UserNotifications")
   sentNotifications  Notification[]      @relation("SentNotifications")
   projectMemberships ProjectMembership[]

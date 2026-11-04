@@ -15,20 +15,21 @@ Sources de vérité, à lire avant toute modification touchant la sécurité, l'
 2. `docs/security/journal-corrections.md` — journal de fixeur : plan, une entrée par constat (statut, changements, tests), et sous chaque entrée la « Revue architecte » de conrado.
 3. `docs/DOSSIER_ARCHITECTURE_TECHNIQUE.md` §15 — vue d'ensemble du programme (v2.2).
 
-### État (rapport r10, 02/11/2026)
+### État (rapport r16, 04/11/2026)
 
 - **Phase 0 validée côté code** par conrado (commit `aa66054`).
 - **Phase 1 validée côté code** par conrado (revue r7, commit `c5f1391` : A3, S7, S8, S6, S9, P6, S27).
-- **Phase 2 validée côté code** par conrado (revue r10, 02/11/2026 : S10, S11). Réactivation de SSO et SCIM soumise au runbook `docs/security/runbook-phase2.md` et à la décision de l'utilisateur.
+- **Phase 2 validée côté code** par conrado (revue r10, commit `aaf696d` : S10, S11). Réactivation de SSO et SCIM soumise au runbook `docs/security/runbook-phase2.md` et à la décision de l'utilisateur.
+- **Phase 3 validée côté code** par conrado (revue r16, 04/11/2026 : A1, A2, A4, S12-a à S12-j, S13 à S16, script P4). Migration `20261111000000`, et exécution éventuelle du script `backend/scripts/grant-legacy-project-access.ts` (rapport puis `--apply`), soumises au runbook `docs/security/runbook-phase3.md` et à la décision de l'utilisateur.
 - Le programme compte **7 phases (0 à 6)** :
   - 0 urgences — validée ;
   - 1 authentification et sessions — validée ;
   - 2 SSO/SCIM complets (S10, S11) — validée ;
-  - 3 autorisation centralisée, IDOR, temps réel (A1, A2, A4, S12, S13, S14 suite, S15, S16) ;
+  - 3 autorisation centralisée, IDOR, temps réel (A1, A2, A4, S12, S13, S14 suite, S15, S16) — validée ;
   - 4 invitations, console admin (P4, S17, S18 suite) ;
   - 5 durcissement (S19 à S26, A5, A6, A7, P5, P8) ;
   - 6 audit log, tests e2e, CI (A8, A9, P2, P7).
-- **Prochaine phase : Phase 3** (A1, A2, A4, S12, S13, S14 suite, S15, S16 ; première action : O4 puis O3). Phases 4 à 6 : pas commencées. Ne les anticipe pas. SSO et SCIM restent désactivés jusqu'à l'exécution du runbook Phase 2 et la décision de l'utilisateur. La montée vers pnpm 10 est prévue en Phase 6 (A9) : d'ici là, les overrides de `package.json` et `pnpm-workspace.yaml` doivent rester identiques.
+- **Prochaine phase : Phase 4** (invitations et console admin : S17 avec le complément SCIM `DELETE`, S18 suite ; P4 déjà tranché en Phase 3 ; reports acceptés : O7, O8, O9 ; décision produit P10). Phases 4 à 6 : pas commencées. Ne les anticipe pas. SSO et SCIM restent désactivés jusqu'à l'exécution du runbook Phase 2 et la décision de l'utilisateur. La montée vers pnpm 10 est prévue en Phase 6 (A9) : d'ici là, les overrides de `package.json` et `pnpm-workspace.yaml` doivent rester identiques.
 
 ### Ce qui a changé et que tu ne dois pas défaire
 
@@ -41,6 +42,7 @@ Sources de vérité, à lire avant toute modification touchant la sécurité, l'
 - Redis indisponible pendant le MFA → 503 en 2 s maximum (`withRedisTimeout`) ; ne change pas `maxRetriesPerRequest` globalement.
 - Base de données : `mariadb >= 3.5.4` (override pnpm), `DATABASE_URL` obligatoire hors dev/test, plus de repli `root`. **TLS MySQL obligatoire en production** (`DATABASE_SSL=true`, `--require-secure-transport=ON`, certificats via `ops/mysql-tls/generate-certs.sh`).
 - Les scripts de reprise de données ne sont pas réversibles : le retour arrière passe par une sauvegarde testée.
+- Autorisation par projet : toute lecture ou écriture d'un projet, d'une tâche ou d'un salon temps réel passe par `PolicyService` (`backend/src/authz/`, matrice unique `permissions.ts`) ; aucun rôle de projet sans `Membership` active dans le workspace du projet ; MEMBER/VIEWER sans `ProjectMembership` n'ont pas accès aux projets d'autrui (règle stricte P4). Les notes ne créent, modifient ou suppriment une tâche que là où l'auteur a `task.write`.
 
 ## Règles de travail
 

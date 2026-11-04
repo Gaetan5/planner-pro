@@ -27,10 +27,14 @@ model Attachment {
   comment   Comment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
   taskId    String?
   task      Task?    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  // Auteur du dépôt (S12) : NULL pour les pièces jointes antérieures sans commentaire
+  uploadedById String?
+  uploadedBy   User?   @relation("AttachmentUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
   createdAt DateTime @default(now())
 
   @@index([commentId])
   @@index([taskId])
+  @@index([uploadedById])
 }
 
 model Integration {

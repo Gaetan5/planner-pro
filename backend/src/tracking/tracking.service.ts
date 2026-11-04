@@ -1,26 +1,30 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
+import { PolicyService } from '../authz/policy.service';
+import { ProjectAction } from '../authz/permissions';
 
 @Injectable()
 export class TrackingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly firestoreSync: FirestoreSyncService,
+    private readonly policy: PolicyService,
   ) {}
 
+  /** Exige l'action de projet sur la tâche (S12) ; absente ou refusée : même réponse 400. */
+  private assertTaskAccess(taskId: string, userId: string, action: ProjectAction) {
+    return this.policy.assertTaskOrBadRequest(
+      taskId,
+      userId,
+      action,
+      "La tâche spécifiée n'existe pas ou vous n'y avez pas accès.",
+    );
+  }
+
   async startTracking(userId: string, taskId: string) {
-    // Vérifier si la tâche existe et si l'utilisateur y a accès
-    const task = await this.prisma.task.findFirst({
-      where: {
-        id: taskId,
-        deletedAt: null,
-        OR: [{ userId }, { project: { workspace: { memberships: { some: { userId } } } } }],
-      },
-    });
-    if (!task) {
-      throw new BadRequestException("La tâche spécifiée n'existe pas ou vous n'y avez pas accès.");
-    }
+    // Le minuteur exige le droit d'écrire du temps sur le projet de la tâche (S12)
+    await this.assertTaskAccess(taskId, userId, 'timelog.write');
 
     // Arrêter automatiquement toute session de tracking en cours pour cet utilisateur
     await this.stopActiveTracking(userId);
@@ -135,16 +139,7 @@ export class TrackingService {
   }
 
   async getTimeLogsForTask(userId: string, taskId: string) {
-    const task = await this.prisma.task.findFirst({
-      where: {
-        id: taskId,
-        deletedAt: null,
-        OR: [{ userId }, { project: { workspace: { memberships: { some: { userId } } } } }],
-      },
-    });
-    if (!task) {
-      throw new BadRequestException("La tâche spécifiée n'existe pas ou vous n'y avez pas accès.");
-    }
+    await this.assertTaskAccess(taskId, userId, 'timelog.read');
 
     return this.prisma.timeLog.findMany({
       where: { taskId },

@@ -1,9 +1,12 @@
 import { INestApplication, ModuleMetadata } from '@nestjs/common';
 import { AppValidationPipe } from '../../src/common/app-validation.pipe';
 import { NestExpressApplication } from '@nestjs/platform-express';
+import { APP_GUARD } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import * as cookieParser from 'cookie-parser';
 import { originCheckMiddleware } from '../../src/auth/origin-guard';
+import { FeatureFlagGuard } from '../../src/config/feature-flag.guard';
+import { JwtAuthGuard } from '../../src/auth/jwt.guard';
 import { PrismaService } from '../../src/prisma/prisma.service';
 
 /**
@@ -13,7 +16,20 @@ import { PrismaService } from '../../src/prisma/prisma.service';
 export async function startHttpTestApp(
   metadata: ModuleMetadata,
 ): Promise<{ app: INestApplication; baseUrl: string }> {
-  const moduleRef = await Test.createTestingModule(metadata).compile();
+  // Comme AppModule (A1) : drapeau de fonctionnalité puis authentification par défaut, dès que
+  // le test fournit JwtAuthGuard (donc SessionService).
+  const providers = metadata.providers ?? [];
+  const withAuth = providers.includes(JwtAuthGuard);
+  const moduleRef = await Test.createTestingModule({
+    ...metadata,
+    providers: withAuth
+      ? [
+          ...providers,
+          { provide: APP_GUARD, useClass: FeatureFlagGuard },
+          { provide: APP_GUARD, useClass: JwtAuthGuard },
+        ]
+      : providers,
+  }).compile();
   // Garde-fou : un test HTTP ne doit jamais ouvrir une connexion à une vraie base (une base de
   // développement locale peut écouter sur 3306). Importer PrismaModule/AuthModule/AppModule ici
   // instancierait le vrai PrismaService.

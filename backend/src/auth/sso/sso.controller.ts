@@ -14,7 +14,6 @@ import { Request, Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { SsoService, SSO_FLOW_TTL_SECONDS } from './sso.service';
 import { DiscoverSsoDto, SsoAuthorizeQueryDto, SsoCallbackDto, ConfigureSsoDto } from './sso.dto';
-import { JwtAuthGuard } from '../jwt.guard';
 import { Public } from '../public.decorator';
 import { respondWithLogin, userAgentOf } from '../login-response';
 import { FeatureFlagGuard, RequireFeature } from '../../config/feature-flag.guard';
@@ -94,7 +93,6 @@ export class SsoController {
   /**
    * Récupère la configuration SSO d'un espace de travail
    */
-  @UseGuards(JwtAuthGuard)
   @Get('workspaces/:workspaceId/sso')
   async getWorkspaceSSO(
     @Param('workspaceId') workspaceId: string,
@@ -106,7 +104,6 @@ export class SsoController {
   /**
    * Met à jour ou active la configuration SSO d'un espace de travail
    */
-  @UseGuards(JwtAuthGuard)
   @Post('workspaces/:workspaceId/sso')
   async configureWorkspaceSSO(
     @Param('workspaceId') workspaceId: string,
@@ -119,7 +116,6 @@ export class SsoController {
   /**
    * Vérifie l'enregistrement DNS TXT du domaine (preuve de propriété, S10)
    */
-  @UseGuards(JwtAuthGuard)
   @Post('workspaces/:workspaceId/sso/verify-domain')
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async verifyDomain(
@@ -132,7 +128,6 @@ export class SsoController {
   /**
    * Supprime la configuration SSO d'un espace de travail
    */
-  @UseGuards(JwtAuthGuard)
   @Delete('workspaces/:workspaceId/sso')
   async deleteWorkspaceSSO(
     @Param('workspaceId') workspaceId: string,

@@ -6,7 +6,6 @@ import {
   Body,
   Param,
   Query,
-  UseGuards,
   Req,
   Res,
   HttpCode,
@@ -17,7 +16,6 @@ import {
 import { Request, Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
-import { JwtAuthGuard } from './jwt.guard';
 import { Public } from './public.decorator';
 import { ForbiddenInImpersonation } from './forbidden-in-impersonation.decorator';
 import { RegisterDto } from './dto/register.dto';
@@ -103,6 +101,7 @@ export class AuthController {
   /**
    * Endpoint de login OAuth GitHub : `state` obligatoire, cookie effacé après usage.
    */
+  @Public()
   @Post('github/login')
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async loginWithGitHub(
@@ -123,7 +122,6 @@ export class AuthController {
   /**
    * Liaison d'un compte GitHub au compte connecté (liaison explicite, jamais automatique).
    */
-  @UseGuards(JwtAuthGuard)
   @ForbiddenInImpersonation()
   @Post('github/link')
   @Throttle({ default: { limit: 5, ttl: 60000 } })
@@ -144,6 +142,7 @@ export class AuthController {
    * Endpoint d'inscription classique : réponse générique 202, aucune session avant la
    * vérification de l'adresse e-mail (P6, S27).
    */
+  @Public()
   @Post('register')
   @HttpCode(202)
   @Throttle({ default: { limit: 5, ttl: 60000 } })
@@ -152,6 +151,7 @@ export class AuthController {
   }
 
   /** Confirme l'adresse e-mail avec le lien reçu (usage unique). */
+  @Public()
   @Post('email/verify')
   @HttpCode(200)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
@@ -160,6 +160,7 @@ export class AuthController {
   }
 
   /** Renvoie le lien de vérification (réponse générique). */
+  @Public()
   @Post('email/resend')
   @HttpCode(202)
   @Throttle({ default: { limit: 3, ttl: 60000 } })
@@ -168,6 +169,7 @@ export class AuthController {
   }
 
   /** Demande de réinitialisation de mot de passe (réponse générique). */
+  @Public()
   @Post('password/forgot')
   @HttpCode(202)
   @Throttle({ default: { limit: 3, ttl: 60000 } })
@@ -176,6 +178,7 @@ export class AuthController {
   }
 
   /** Réinitialisation du mot de passe avec le lien reçu : ferme toutes les sessions. */
+  @Public()
   @Post('password/reset')
   @HttpCode(200)
   @Throttle({ default: { limit: 5, ttl: 60000 } })
@@ -186,6 +189,7 @@ export class AuthController {
   /**
    * Endpoint de login classique
    */
+  @Public()
   @Post('login')
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async login(
@@ -202,6 +206,7 @@ export class AuthController {
   /**
    * Endpoint de validation du challenge MFA TOTP
    */
+  @Public()
   @Post('mfa/challenge')
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async verifyMfaChallenge(
@@ -271,7 +276,6 @@ export class AuthController {
   /**
    * Sessions actives du compte connecté (page « Sessions actives »).
    */
-  @UseGuards(JwtAuthGuard)
   @Get('sessions')
   async listSessions(@Req() req: AuthenticatedUserRequest) {
     return this.sessionService.listForUser(req.user.id, req.user.sid);
@@ -280,7 +284,6 @@ export class AuthController {
   /**
    * Révoque une session du compte connecté (jamais celle d'un autre compte : 404).
    */
-  @UseGuards(JwtAuthGuard)
   @ForbiddenInImpersonation()
   @Delete('sessions/:sid')
   @HttpCode(204)
@@ -294,7 +297,6 @@ export class AuthController {
   /**
    * Endpoint d'initialisation du MFA TOTP (génère la clé et le QR code URI)
    */
-  @UseGuards(JwtAuthGuard)
   @ForbiddenInImpersonation()
   @Post('mfa/setup')
   @Throttle({ default: { limit: 5, ttl: 60000 } })
@@ -305,7 +307,6 @@ export class AuthController {
   /**
    * Endpoint d'activation du MFA TOTP après saisie du premier code valide
    */
-  @UseGuards(JwtAuthGuard)
   @ForbiddenInImpersonation()
   @Post('mfa/confirm')
   @Throttle({ default: { limit: 10, ttl: 60000 } })
@@ -316,7 +317,6 @@ export class AuthController {
   /**
    * Endpoint de désactivation du MFA TOTP
    */
-  @UseGuards(JwtAuthGuard)
   @ForbiddenInImpersonation()
   @Post('mfa/disable')
   @Throttle({ default: { limit: 5, ttl: 60000 } })
@@ -327,7 +327,6 @@ export class AuthController {
   /**
    * Régénère les codes de récupération (code TOTP et mot de passe requis) : affichés une seule fois.
    */
-  @UseGuards(JwtAuthGuard)
   @ForbiddenInImpersonation()
   @Post('mfa/recovery-codes')
   @Throttle({ default: { limit: 5, ttl: 60000 } })
@@ -338,6 +337,7 @@ export class AuthController {
     return this.authService.regenerateRecoveryCodes(req.user.id, body, req.user.sid);
   }
 
+  @Public()
   @Post('firebase/login')
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async loginWithFirebase(
@@ -356,7 +356,6 @@ export class AuthController {
    */
   @ForbiddenInImpersonation()
   @Post('firebase/link')
-  @UseGuards(JwtAuthGuard)
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async linkFirebase(@Body() body: FirebaseLoginDto, @Req() req: AuthenticatedUserRequest) {
     return this.authService.linkFirebaseAccount(req.user.id, body.idToken);
@@ -365,6 +364,7 @@ export class AuthController {
   /**
    * Endpoint de login simulé pour le développement local
    */
+  @Public()
   @Post('mock/login')
   async mockLogin(
     @Body() body: { name: string },
@@ -379,7 +379,6 @@ export class AuthController {
    * Récupère les dépôts GitHub de l'utilisateur connecté
    */
   @Get('github/repos')
-  @UseGuards(JwtAuthGuard)
   getGitHubRepositories(@Req() req: AuthenticatedUserRequest) {
     const userId = req.user.id;
     return this.authService.getGitHubRepositories(userId);
@@ -389,7 +388,6 @@ export class AuthController {
    * Synchronise un dépôt GitHub à un projet Planner-Pro
    */
   @Post('github/sync')
-  @UseGuards(JwtAuthGuard)
   syncRepository(
     @Body() body: { projectId: string; repoFullName: string },
     @Req() req: AuthenticatedUserRequest,

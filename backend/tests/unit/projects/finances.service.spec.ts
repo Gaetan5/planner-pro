@@ -1,3 +1,4 @@
+import { PolicyService } from '../../../src/authz/policy.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenException } from '@nestjs/common';
 import { WorkspaceRole } from '@prisma/client';
@@ -18,7 +19,7 @@ describe('FinancesService', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [FinancesService, { provide: PrismaService, useValue: mockPrisma }],
+      providers: [PolicyService, FinancesService, { provide: PrismaService, useValue: mockPrisma }],
     }).compile();
 
     service = module.get<FinancesService>(FinancesService);

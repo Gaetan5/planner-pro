@@ -16,7 +16,6 @@ import {
 } from '@nestjs/common';
 import { ScimService } from './scim.service';
 import { ScimEndpoint, ScimExceptionFilter } from './scim-http';
-import { JwtAuthGuard } from '../jwt.guard';
 import { Public } from '../public.decorator';
 import {
   CreateScimKeyDto,
@@ -107,8 +106,6 @@ export class ScimController {
   }
 
   // --- Endpoints de gestion des clés API SCIM pour les Admins de l'espace ---
-
-  @UseGuards(JwtAuthGuard)
   @Get('workspaces/:workspaceId/scim/keys')
   async listApiKeys(
     @Param('workspaceId') workspaceId: string,
@@ -116,8 +113,6 @@ export class ScimController {
   ) {
     return this.scimService.listApiKeys(workspaceId, req.user.id);
   }
-
-  @UseGuards(JwtAuthGuard)
   @Post('workspaces/:workspaceId/scim/keys')
   async createApiKey(
     @Param('workspaceId') workspaceId: string,
@@ -126,8 +121,6 @@ export class ScimController {
   ) {
     return this.scimService.createApiKey(workspaceId, req.user.id, body);
   }
-
-  @UseGuards(JwtAuthGuard)
   @Delete('workspaces/:workspaceId/scim/keys/:keyId')
   async revokeApiKey(
     @Param('workspaceId') workspaceId: string,

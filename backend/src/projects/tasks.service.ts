@@ -1,4 +1,5 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
+import { PolicyService } from '../authz/policy.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotesService } from '../notes/notes.service';
 import { IntegrationService } from './integration.service';
@@ -26,7 +27,19 @@ export class TasksService {
     private readonly notificationsService: NotificationsService,
     private readonly projectPermissionsService: ProjectPermissionsService,
     private readonly firestoreSync: FirestoreSyncService,
+    private readonly policy: PolicyService,
   ) {}
+
+  /**
+   * Tâches à jour à diffuser en temps réel. À n'appeler que sur des identifiants dont la
+   * modification a déjà été autorisée (A4, S13, S16).
+   */
+  getTasksForBroadcast(taskIds: string[]) {
+    return this.prisma.task.findMany({
+      where: { id: { in: taskIds }, deletedAt: null },
+      include: { ...TASK_INCLUDE, project: { select: { workspaceId: true } } },
+    });
+  }
 
   parseTaskDates(data: CreateTaskDto | UpdateTaskDto) {
     const parse = (val?: string) => {
@@ -69,24 +82,20 @@ export class TasksService {
     };
   }
 
-  private async getAccessibleUserIds(workspaceId: string) {
-    const memberships = await this.prisma.membership.findMany({
-      where: { workspaceId },
-      select: { userId: true },
-    });
-    return memberships.map((membership) => membership.userId);
-  }
-
   async replaceTaskAssignees(
     taskId: string,
-    workspaceId: string | null,
+    projectId: string,
     assigneeIds?: string[],
     actingUserId?: string,
   ) {
     if (!assigneeIds) return;
 
-    const allowedUserIds = workspaceId ? await this.getAccessibleUserIds(workspaceId) : [];
-    const uniqueAssigneeIds = [...new Set(assigneeIds)].filter((id) => allowedUserIds.includes(id));
+    // Seules les personnes qui ont accès au projet peuvent être assignées (S12-c)
+    const uniqueAssigneeIds = await this.policy.filterUsersWithProjectAction(
+      projectId,
+      assigneeIds,
+      'task.read',
+    );
 
     const { existingUserIds, task } = await this.prisma.$transaction(async (tx) => {
       const existingAssignees = await tx.taskAssignee.findMany({
@@ -237,7 +246,7 @@ export class TasksService {
       return created;
     });
 
-    await this.replaceTaskAssignees(task.id, project.workspaceId, options.assigneeIds, userId);
+    await this.replaceTaskAssignees(task.id, projectId, options.assigneeIds, userId);
     const finalTask = await this.prisma.task.findUnique({
       where: { id: task.id },
       include: TASK_INCLUDE,
@@ -367,7 +376,7 @@ export class TasksService {
       return updated;
     });
 
-    await this.replaceTaskAssignees(taskId, task.project.workspaceId, data.assigneeIds, userId);
+    await this.replaceTaskAssignees(taskId, task.projectId, data.assigneeIds, userId);
 
     if ((data.status || data.title) && updatedTask.noteId) {
       await this.notesService.syncTaskStatusToNote(taskId, updatedTask.status);

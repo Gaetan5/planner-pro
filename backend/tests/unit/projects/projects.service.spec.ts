@@ -1,3 +1,5 @@
+import { PolicyService } from '../../../src/authz/policy.service';
+import { RealtimeService } from '../../../src/realtime/realtime.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ProjectsService } from '../../../src/projects/projects.service';
 import { PrismaService } from '../../../src/prisma/prisma.service';
@@ -99,7 +101,9 @@ describe('ProjectsService - GitHub Webhooks', () => {
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        PolicyService,
         ProjectsService,
+        { provide: RealtimeService, useValue: { refreshWorkspaceManagersRooms: jest.fn() } },
         { provide: PrismaService, useValue: mockPrisma },
         { provide: NotesService, useValue: mockNotesService },
         { provide: IntegrationService, useValue: mockIntegration },

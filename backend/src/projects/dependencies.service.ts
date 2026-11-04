@@ -2,12 +2,14 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { DependencyType } from '@prisma/client';
 import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
+import { PolicyService } from '../authz/policy.service';
 
 @Injectable()
 export class DependenciesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly firestoreSync: FirestoreSyncService,
+    private readonly policy: PolicyService,
   ) {}
 
   private async hasPath(
@@ -32,20 +34,6 @@ export class DependenciesService {
     return false;
   }
 
-  private async assertTaskAccess(taskId: string, userId: string) {
-    const task = await this.prisma.task.findFirst({
-      where: {
-        id: taskId,
-        deletedAt: null,
-        OR: [{ userId }, { project: { workspace: { memberships: { some: { userId } } } } }],
-      },
-    });
-    if (!task) {
-      throw new BadRequestException('Task not found or unauthorized');
-    }
-    return task;
-  }
-
   async addTaskDependency(
     taskId: string,
     userId: string,
@@ -56,24 +44,18 @@ export class DependenciesService {
       throw new BadRequestException('A task cannot depend on itself');
     }
 
-    const [task, dependsOnTask] = await Promise.all([
-      this.prisma.task.findFirst({
-        where: {
-          id: taskId,
-          deletedAt: null,
-          OR: [{ userId }, { project: { workspace: { memberships: { some: { userId } } } } }],
-        },
-        include: { project: { select: { workspaceId: true } } },
-      }),
-      this.prisma.task.findFirst({
-        where: {
-          id: dependsOnTaskId,
-          deletedAt: null,
-          OR: [{ userId }, { project: { workspace: { memberships: { some: { userId } } } } }],
-        },
-        include: { project: { select: { workspaceId: true } } },
-      }),
-    ]);
+    // Écriture sur la tâche source exigée (S12) ; la cible doit être dans le même projet, donc
+    // sous le même contrôle d'accès.
+    const task = await this.policy.assertTaskOrBadRequest(
+      taskId,
+      userId,
+      'task.write',
+      'Dependency tasks not found, unauthorized, or not in the same project',
+    );
+    const dependsOnTask = await this.prisma.task.findFirst({
+      where: { id: dependsOnTaskId, deletedAt: null, projectId: task.projectId },
+      include: { project: { select: { workspaceId: true } } },
+    });
 
     if (!task || !dependsOnTask || task.projectId !== dependsOnTask.projectId) {
       throw new BadRequestException(
@@ -113,18 +95,17 @@ export class DependenciesService {
 
   async removeTaskDependency(taskId: string, userId: string, dependsOnTaskId: string) {
     const dependency = await this.prisma.taskDependency.findFirst({
-      where: {
-        taskId,
-        dependsOnTaskId,
-        task: {
-          deletedAt: null,
-          OR: [{ userId }, { project: { workspace: { memberships: { some: { userId } } } } }],
-        },
-      },
+      where: { taskId, dependsOnTaskId, task: { deletedAt: null } },
     });
     if (!dependency) {
       throw new Error('Dependency not found or unauthorized');
     }
+    await this.policy.assertTaskOrBadRequest(
+      taskId,
+      userId,
+      'task.write',
+      'Dependency not found or unauthorized',
+    );
 
     return this.prisma.$transaction(async (tx) => {
       const deleted = await tx.taskDependency.delete({ where: { id: dependency.id } });

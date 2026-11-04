@@ -13,7 +13,6 @@ import {
 } from '@nestjs/common';
 import { Response } from 'express';
 import { ForbiddenInImpersonation } from '../auth/forbidden-in-impersonation.decorator';
-import { JwtAuthGuard } from '../auth/jwt.guard';
 import { setSessionCookies } from '../auth/session-cookies';
 import { User, AuthenticatedUser } from '../auth/user.decorator';
 import { AdminService } from './admin.service';
@@ -25,7 +24,7 @@ import { FeatureFlagGuard, RequireFeature } from '../config/feature-flag.guard';
 @ForbiddenInImpersonation()
 @Controller('admin')
 // FeatureFlagGuard en premier : une route désactivée répond 404 avant toute authentification
-@UseGuards(FeatureFlagGuard, JwtAuthGuard, PlatformAdminGuard)
+@UseGuards(FeatureFlagGuard, PlatformAdminGuard)
 @UsePipes(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true }))
 export class AdminController {
   constructor(private readonly adminService: AdminService) {}

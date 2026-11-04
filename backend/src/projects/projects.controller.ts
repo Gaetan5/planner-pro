@@ -7,22 +7,21 @@ import {
   Param,
   Put,
   Delete,
-  UseGuards,
   Req,
   Query,
   Headers,
+  NotFoundException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { Public } from '../auth/public.decorator';
 import { DeliverableStatus, ProjectRole } from '@prisma/client';
 import { ProjectsService } from './projects.service';
 import { SprintService } from './sprint.service';
-import { JwtAuthGuard } from '../auth/jwt.guard';
-import { TrackingGateway } from '../tracking/tracking.gateway';
+import { RealtimeService } from '../realtime/realtime.service';
+import { PolicyService } from '../authz/policy.service';
 import { ProjectPermissionsService } from './project-permissions.service';
 import { IntegrationService, IntegrationDto } from './integration.service';
 import { CalendarSyncService } from './calendar-sync.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { TASK_INCLUDE } from './tasks.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { CreateTaskDto } from './dto/create-task.dto';
@@ -38,21 +37,33 @@ import { CreateDeliveryDto } from './dto/create-delivery.dto';
 import { UpdateDeliveryStatusDto } from './dto/update-delivery-status.dto';
 import { CreateSprintDto } from './dto/create-sprint.dto';
 import { UpdateSprintDto } from './dto/update-sprint.dto';
+import { AssociateTasksDto } from './dto/associate-tasks.dto';
 import { ProactiveSchedulerService } from './proactive-scheduler.service';
 
 @Controller('projects')
-@UseGuards(JwtAuthGuard)
 export class ProjectsController {
   constructor(
     private readonly projectsService: ProjectsService,
     private readonly sprintService: SprintService,
-    private readonly trackingGateway: TrackingGateway,
+    private readonly realtime: RealtimeService,
     private readonly integrationService: IntegrationService,
     private readonly calendarSyncService: CalendarSyncService,
     private readonly projectPermissionsService: ProjectPermissionsService,
-    private readonly prisma: PrismaService,
+    private readonly policy: PolicyService,
     private readonly proactiveSchedulerService: ProactiveSchedulerService,
   ) {}
+
+  /**
+   * Diffuse l'état à jour de tâches DÉJÀ modifiées et autorisées, uniquement vers le salon de
+   * leur projet (A4, S16).
+   */
+  private async broadcastTasks(taskIds: string[], event = 'task-status-changed') {
+    if (!this.realtime.isReady || taskIds.length === 0) return;
+    const tasks = await this.projectsService.getTasksForBroadcast(taskIds);
+    for (const task of tasks) {
+      this.realtime.emitToProject(task.projectId, event, { taskId: task.id, task });
+    }
+  }
 
   @Get('workspaces')
   getWorkspaces(@Req() req: any) {
@@ -349,41 +360,34 @@ export class ProjectsController {
   @Put('tasks/:taskId')
   async updateTask(@Req() req: any, @Param('taskId') taskId: string, @Body() body: UpdateTaskDto) {
     const updated = await this.projectsService.updateTask(taskId, req.user.id, body);
-    if (this.trackingGateway.server) {
-      const dbTask = await this.prisma.task.findUnique({
-        where: { id: taskId },
-        include: {
-          ...TASK_INCLUDE,
-          project: true,
-        },
-      });
-      const workspaceId = dbTask?.project?.workspaceId;
-      if (workspaceId && dbTask) {
-        const room = `workspace:${workspaceId}`;
+    if (this.realtime.isReady) {
+      const [dbTask] = await this.projectsService.getTasksForBroadcast([taskId]);
+      if (dbTask) {
         if (body.status) {
-          this.trackingGateway.server
-            .to(room)
-            .emit('task-status-changed', { taskId, task: dbTask });
+          this.realtime.emitToProject(dbTask.projectId, 'task-status-changed', {
+            taskId,
+            task: dbTask,
+          });
         }
         const impactedTaskIds = (updated as any).impactedTaskIds;
         if (impactedTaskIds && impactedTaskIds.length > 0) {
-          const impactedTasks = await this.prisma.task.findMany({
-            where: { id: { in: impactedTaskIds } },
-            include: TASK_INCLUDE,
-          });
-          this.trackingGateway.server.to(room).emit('task-schedule-propagated', {
+          const impactedTasks = await this.projectsService.getTasksForBroadcast(impactedTaskIds);
+          this.realtime.emitToProject(dbTask.projectId, 'task-schedule-propagated', {
             projectId: (updated as any).projectId,
             impactedTaskIds,
             impactedTasks,
           });
           for (const t of impactedTasks) {
-            this.trackingGateway.server
-              .to(room)
-              .emit('task-status-changed', { taskId: t.id, task: t });
+            this.realtime.emitToProject(t.projectId, 'task-status-changed', {
+              taskId: t.id,
+              task: t,
+            });
           }
         }
         // Lancer la détection proactive de risques en arrière-plan (non bloquante)
-        this.proactiveSchedulerService.runProactiveChecksForWorkspace(workspaceId);
+        if (dbTask.project?.workspaceId) {
+          this.proactiveSchedulerService.runProactiveChecksForWorkspace(dbTask.project.workspaceId);
+        }
       }
     }
     return updated;
@@ -434,39 +438,15 @@ export class ProjectsController {
     @Headers('x-hub-signature-256') signature?: string,
   ) {
     const closedTaskIds = await this.projectsService.handleGitHubWebhook(payload, signature);
-    if (this.trackingGateway.server) {
-      for (const taskId of closedTaskIds) {
-        const dbTask = await this.prisma.task.findUnique({
-          where: { id: taskId },
-          include: {
-            ...TASK_INCLUDE,
-            project: true,
-          },
-        });
-        const workspaceId = dbTask?.project?.workspaceId;
-        if (workspaceId && dbTask) {
-          this.trackingGateway.server
-            .to(`workspace:${workspaceId}`)
-            .emit('task-status-changed', { taskId, task: dbTask });
-        }
-      }
-    }
+    await this.broadcastTasks(closedTaskIds);
     return { closedTaskIds };
   }
 
   @Post('workspaces/:workspaceId/resources/optimize')
   async optimizeResources(@Req() req: any, @Param('workspaceId') workspaceId: string) {
     const result = await this.projectsService.optimizeWorkspaceResources(workspaceId, req.user.id);
-    if (result.success && result.reallocatedTaskIds && this.trackingGateway.server) {
-      const reallocatedTasks = await this.prisma.task.findMany({
-        where: { id: { in: result.reallocatedTaskIds } },
-        include: TASK_INCLUDE,
-      });
-      for (const t of reallocatedTasks) {
-        this.trackingGateway.server
-          .to(`workspace:${workspaceId}`)
-          .emit('task-status-changed', { taskId: t.id, task: t });
-      }
+    if (result.success && result.reallocatedTaskIds) {
+      await this.broadcastTasks(result.reallocatedTaskIds);
     }
     return result;
   }
@@ -496,28 +476,43 @@ export class ProjectsController {
     return this.integrationService.createIntegration(workspaceId, body);
   }
 
+  /**
+   * Résout le workspace d'une intégration et exige OWNER/ADMIN. Intégration absente ou d'un
+   * workspace dont l'appelant n'est pas membre : même 404 (S14, pas d'oracle d'existence).
+   */
+  private async resolveManagedIntegration(integrationId: string, userId: string) {
+    const workspaceId = await this.integrationService.getWorkspaceIdOf(integrationId);
+    if (!workspaceId) throw new NotFoundException('Intégration introuvable.');
+    try {
+      await this.policy.assertWorkspace(workspaceId, userId, 'workspace.integrations.manage');
+    } catch (error) {
+      if (error instanceof ForbiddenException && (await this.isMember(workspaceId, userId))) {
+        throw error;
+      }
+      throw new NotFoundException('Intégration introuvable.');
+    }
+    return workspaceId;
+  }
+
+  private async isMember(workspaceId: string, userId: string): Promise<boolean> {
+    try {
+      await this.policy.assertWorkspace(workspaceId, userId, 'workspace.read');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   @Post('integrations/:integrationId/toggle')
   async toggleIntegration(@Req() req: any, @Param('integrationId') integrationId: string) {
-    const integration = await this.prisma.integration.findUnique({ where: { id: integrationId } });
-    if (!integration) return this.integrationService.toggleIntegration(integrationId);
-    await this.projectPermissionsService.assertWorkspaceAccess(
-      integration.workspaceId,
-      req.user.id,
-      ['OWNER', 'ADMIN'],
-    );
-    return this.integrationService.toggleIntegration(integrationId);
+    const workspaceId = await this.resolveManagedIntegration(integrationId, req.user.id);
+    return this.integrationService.toggleIntegration(workspaceId, integrationId);
   }
 
   @Delete('integrations/:integrationId')
   async deleteIntegration(@Req() req: any, @Param('integrationId') integrationId: string) {
-    const integration = await this.prisma.integration.findUnique({ where: { id: integrationId } });
-    if (!integration) return this.integrationService.deleteIntegration(integrationId);
-    await this.projectPermissionsService.assertWorkspaceAccess(
-      integration.workspaceId,
-      req.user.id,
-      ['OWNER', 'ADMIN'],
-    );
-    return this.integrationService.deleteIntegration(integrationId);
+    const workspaceId = await this.resolveManagedIntegration(integrationId, req.user.id);
+    return this.integrationService.deleteIntegration(workspaceId, integrationId);
   }
 
   @Post('workspaces/:workspaceId/integrations/:integrationId/export')
@@ -536,8 +531,10 @@ export class ProjectsController {
 
   @Get('workspaces/:workspaceId/calendar-conflicts')
   async getCalendarConflicts(@Req() req: any, @Param('workspaceId') workspaceId: string) {
-    await this.projectPermissionsService.assertWorkspaceAccess(workspaceId, req.user.id);
-    return this.calendarSyncService.detectCalendarConflicts(workspaceId);
+    await this.policy.assertWorkspace(workspaceId, req.user.id, 'workspace.read');
+    // Uniquement les créneaux des projets accessibles à l'appelant (S12)
+    const projectIds = await this.policy.listAccessibleProjectIds(req.user.id, { workspaceId });
+    return this.calendarSyncService.detectCalendarConflicts(workspaceId, projectIds);
   }
 
   // ═══════════════════════════════════════════════════════════════════
@@ -581,12 +578,8 @@ export class ProjectsController {
 
   @Post('workspaces/:workspaceId/auto-schedule')
   async autoScheduleWorkspace(@Req() req: any, @Param('workspaceId') workspaceId: string) {
-    await this.projectPermissionsService.assertWorkspaceAccess(workspaceId, req.user.id, [
-      'OWNER',
-      'ADMIN',
-      'MEMBER',
-    ]);
-    return this.proactiveSchedulerService.autoScheduleWorkspace(workspaceId);
+    // Droits et périmètre (projets où l'appelant peut écrire) contrôlés par le service (S12)
+    return this.proactiveSchedulerService.autoScheduleWorkspace(workspaceId, req.user.id);
   }
 
   @Post('workspaces/:workspaceId/sprints')
@@ -621,31 +614,12 @@ export class ProjectsController {
   async associateTasksToSprint(
     @Req() req: any,
     @Param('sprintId') sprintId: string,
-    @Body() body: { taskIds: string[] },
+    @Body() body: AssociateTasksDto,
   ) {
     const sId = sprintId === 'backlog' ? null : sprintId;
-    await this.sprintService.associateTasksToSprint(sId, body.taskIds, req.user.id);
-    if (this.trackingGateway.server && body.taskIds && body.taskIds.length > 0) {
-      const tasks = await this.prisma.task.findMany({
-        where: { id: { in: body.taskIds } },
-        include: TASK_INCLUDE,
-      });
-      if (tasks.length > 0) {
-        const sampleTask = await this.prisma.task.findUnique({
-          where: { id: body.taskIds[0] },
-          select: { project: { select: { workspaceId: true } } },
-        });
-        const workspaceId = sampleTask?.project?.workspaceId;
-        if (workspaceId) {
-          const room = `workspace:${workspaceId}`;
-          for (const t of tasks) {
-            this.trackingGateway.server
-              .to(room)
-              .emit('task-status-changed', { taskId: t.id, task: t });
-          }
-        }
-      }
-    }
+    const changed = await this.sprintService.associateTasksToSprint(sId, body.taskIds, req.user.id);
+    // Uniquement les tâches vérifiées et modifiées, vers le salon de leur projet (S13)
+    await this.broadcastTasks(changed.map((t) => t.id));
     return { success: true };
   }
 

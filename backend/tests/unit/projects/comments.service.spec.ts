@@ -1,3 +1,4 @@
+import { PolicyService } from '../../../src/authz/policy.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { CommentsService } from '../../../src/projects/comments.service';
 import { PrismaService } from '../../../src/prisma/prisma.service';
@@ -5,6 +6,7 @@ import { IntegrationService } from '../../../src/projects/integration.service';
 import { NotificationsService } from '../../../src/notifications/notifications.service';
 import { FirestoreSyncService } from '../../../src/firestore-sync/firestore-sync.service';
 import { WorkspaceRole } from '@prisma/client';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 
 describe('CommentsService', () => {
   let service: CommentsService;
@@ -35,6 +37,13 @@ describe('CommentsService', () => {
     },
   };
 
+  // Politique centrale simulée : la tâche chargée par prisma, accès accordé sauf mention contraire
+  const mockPolicy = {
+    assertTask: jest.fn(),
+    assertProject: jest.fn(),
+    filterUsersWithProjectAction: jest.fn(),
+  };
+
   const mockIntegration = {
     sendNotification: jest.fn().mockResolvedValue(undefined),
   };
@@ -51,9 +60,14 @@ describe('CommentsService', () => {
     mockPrisma.$transaction.mockImplementation((callback: (tx: typeof mockPrisma) => unknown) =>
       callback(mockPrisma),
     );
+    // Tous les identifiants proposés ont accès, sauf mention contraire (S12-c)
+    mockPolicy.filterUsersWithProjectAction.mockImplementation(
+      async (_projectId: string, ids: string[]) => ids,
+    );
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        { provide: PolicyService, useValue: mockPolicy },
         CommentsService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: IntegrationService, useValue: mockIntegration },
@@ -66,6 +80,12 @@ describe('CommentsService', () => {
     prisma = module.get<PrismaService>(PrismaService);
 
     jest.clearAllMocks();
+    mockPolicy.assertProject.mockResolvedValue({});
+    mockPolicy.assertTask.mockImplementation(async () => {
+      const task = await mockPrisma.task.findFirst();
+      if (!task) throw new NotFoundException('Tâche introuvable.');
+      return task;
+    });
   });
 
   describe('createComment', () => {
@@ -86,10 +106,12 @@ describe('CommentsService', () => {
         id: taskId,
         project: { workspaceId },
       });
-      mockPrisma.membership.findFirst.mockResolvedValue(null);
+      mockPolicy.assertTask.mockRejectedValue(
+        new ForbiddenException('Accès non autorisé au projet'),
+      );
 
       await expect(service.createComment(taskId, userId, 'Nouveau commentaire')).rejects.toThrow(
-        /Vous n'êtes pas membre/,
+        /Accès non autorisé/,
       );
     });
 
@@ -187,13 +209,12 @@ describe('CommentsService', () => {
         },
       });
 
-      mockPrisma.membership.findFirst.mockResolvedValue({
-        role: WorkspaceRole.MEMBER, // Pas admin/owner
-      });
-
-      await expect(service.deleteComment(commentId, userId)).rejects.toThrow(
-        /Vous n'êtes pas autorisé/,
+      // Ni auteur ni MANAGER du projet
+      mockPolicy.assertProject.mockRejectedValue(
+        new ForbiddenException('Permissions de projet insuffisantes'),
       );
+
+      await expect(service.deleteComment(commentId, userId)).rejects.toThrow(/Permissions/);
     });
 
     it("devrait autoriser la suppression si l'utilisateur n'est pas l'auteur mais est admin ou owner", async () => {
@@ -203,10 +224,6 @@ describe('CommentsService', () => {
         task: {
           project: { workspaceId },
         },
-      });
-
-      mockPrisma.membership.findFirst.mockResolvedValue({
-        role: WorkspaceRole.ADMIN, // Admin
       });
 
       mockPrisma.comment.delete.mockResolvedValue({ id: commentId });
@@ -301,15 +318,44 @@ describe('CommentsService', () => {
         },
       ]);
 
-      const mentions1 = await service.parseMentions('Hello @alice, comment ça va ?', workspaceId);
+      const mentions1 = await service.parseMentions(
+        'Hello @alice, comment ça va ?',
+        workspaceId,
+        'project-1',
+      );
       expect(mentions1).toContain('alice-id');
 
-      const mentions2 = await service.parseMentions('Bravo @bob@test.com et @alice', workspaceId);
+      const mentions2 = await service.parseMentions(
+        'Bravo @bob@test.com et @alice',
+        workspaceId,
+        'project-1',
+      );
       expect(mentions2).toContain('bob-id');
       expect(mentions2).toContain('alice-id');
 
-      const mentionsNone = await service.parseMentions('Pas de mentions ici.', workspaceId);
+      const mentionsNone = await service.parseMentions(
+        'Pas de mentions ici.',
+        workspaceId,
+        'project-1',
+      );
       expect(mentionsNone).toEqual([]);
+    });
+
+    it("ignore sans erreur un utilisateur mentionné qui n'a pas comment.read sur le projet (S12-c)", async () => {
+      mockPrisma.membership.findMany.mockResolvedValue([
+        { userId: 'alice-id', user: { id: 'alice-id', name: 'Alice', email: 'alice@planner.pro' } },
+        { userId: 'bob-id', user: { id: 'bob-id', name: 'Bob', email: 'bob@test.com' } },
+      ]);
+      mockPolicy.filterUsersWithProjectAction.mockResolvedValue(['bob-id']);
+
+      const mentions = await service.parseMentions('@alice et @bob', 'workspace-123', 'project-1');
+
+      expect(mentions).toEqual(['bob-id']);
+      expect(mockPolicy.filterUsersWithProjectAction).toHaveBeenCalledWith(
+        'project-1',
+        ['alice-id', 'bob-id'],
+        'comment.read',
+      );
     });
   });
 
@@ -395,6 +441,7 @@ describe('CommentsService', () => {
           fileType: 'application/pdf',
           fileSize: 1024,
           taskId,
+          uploadedById: userId,
         },
       });
     });

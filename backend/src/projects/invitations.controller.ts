@@ -5,13 +5,11 @@ import {
   Delete,
   Body,
   Param,
-  UseGuards,
   Req,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
 import { InvitationsService } from './invitations.service';
-import { JwtAuthGuard } from '../auth/jwt.guard';
 import { Public } from '../auth/public.decorator';
 import { CreateInvitationDto } from './dto/create-invitation.dto';
 
@@ -24,7 +22,6 @@ interface AuthenticatedRequest {
 }
 
 @Controller('projects')
-@UseGuards(JwtAuthGuard)
 export class InvitationsController {
   constructor(private readonly invitationsService: InvitationsService) {}
 

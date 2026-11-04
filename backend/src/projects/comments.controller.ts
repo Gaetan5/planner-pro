@@ -6,22 +6,19 @@ import {
   Delete,
   Body,
   Param,
-  UseGuards,
   Req,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
 import { CommentsService } from './comments.service';
-import { JwtAuthGuard } from '../auth/jwt.guard';
 import { CreateCommentDto } from './dto/create-comment.dto';
-import { TrackingGateway } from '../tracking/tracking.gateway';
+import { RealtimeService } from '../realtime/realtime.service';
 
 @Controller('projects')
-@UseGuards(JwtAuthGuard)
 export class CommentsController {
   constructor(
     private readonly commentsService: CommentsService,
-    private readonly trackingGateway: TrackingGateway,
+    private readonly realtime: RealtimeService,
   ) {}
 
   /**
@@ -42,17 +39,14 @@ export class CommentsController {
     );
 
     // Diffuser le commentaire en temps réel via WebSockets à la room de la tâche
-    if (this.trackingGateway.server) {
-      this.trackingGateway.server.to(`task:${taskId}`).emit('new-comment', {
-        comment: result.comment,
-        taskId,
-      });
+    {
+      this.realtime.emitToTask(taskId, 'new-comment', { comment: result.comment, taskId });
 
       // Notifier individuellement chaque utilisateur mentionné
       for (const mentionedUserId of result.mentionedUserIds) {
         // Optionnel : éviter de notifier l'auteur lui-même
         if (mentionedUserId !== req.user.id) {
-          this.trackingGateway.server.to(`user:${mentionedUserId}`).emit('mention-notification', {
+          this.realtime.emitToUser(mentionedUserId, 'mention-notification', {
             taskId,
             comment: result.comment,
             message: `${req.user.name || req.user.email} vous a mentionné dans un commentaire.`,
@@ -81,12 +75,10 @@ export class CommentsController {
     const deletedComment = await this.commentsService.deleteComment(commentId, req.user.id);
 
     // Diffuser la suppression en temps réel
-    if (this.trackingGateway.server) {
-      this.trackingGateway.server.to(`task:${deletedComment.taskId}`).emit('comment-deleted', {
-        commentId,
-        taskId: deletedComment.taskId,
-      });
-    }
+    this.realtime.emitToTask(deletedComment.taskId, 'comment-deleted', {
+      commentId,
+      taskId: deletedComment.taskId,
+    });
   }
 
   /**
@@ -101,8 +93,8 @@ export class CommentsController {
     const result = await this.commentsService.updateComment(commentId, req.user.id, body.content);
 
     // Diffuser le commentaire mis à jour en temps réel via WebSockets à la room de la tâche
-    if (this.trackingGateway.server) {
-      this.trackingGateway.server.to(`task:${result.comment.taskId}`).emit('comment-updated', {
+    {
+      this.realtime.emitToTask(result.comment.taskId, 'comment-updated', {
         comment: result.comment,
         taskId: result.comment.taskId,
       });
@@ -110,7 +102,7 @@ export class CommentsController {
       // Notifier individuellement chaque utilisateur mentionné
       for (const mentionedUserId of result.mentionedUserIds) {
         if (mentionedUserId !== req.user.id) {
-          this.trackingGateway.server.to(`user:${mentionedUserId}`).emit('mention-notification', {
+          this.realtime.emitToUser(mentionedUserId, 'mention-notification', {
             taskId: result.comment.taskId,
             comment: result.comment,
             message: `${req.user.name || req.user.email} vous a mentionné dans un commentaire modifié.`,

@@ -4,6 +4,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AiService } from './ai.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ProjectsService } from './projects.service';
+import { PolicyService } from '../authz/policy.service';
 describe('AiService', () => {
   let service: AiService;
 
@@ -39,6 +40,14 @@ describe('AiService', () => {
         AiService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: ProjectsService, useValue: mockProjectsService },
+        {
+          provide: PolicyService,
+          useValue: {
+            assertWorkspace: jest.fn().mockResolvedValue({}),
+            assertProject: jest.fn().mockResolvedValue({ workspaceId: 'workspace-123' }),
+            listAccessibleProjectIds: jest.fn().mockResolvedValue(['project-123']),
+          },
+        },
         { provide: 'AI_PROVIDER', useValue: mockAiProvider },
       ],
     }).compile();

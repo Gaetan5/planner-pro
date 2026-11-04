@@ -1,3 +1,4 @@
+import { PolicyService } from '../authz/policy.service';
 /// <reference types="jest" />
 
 import { Test, TestingModule } from '@nestjs/testing';
@@ -27,6 +28,17 @@ describe('TrackingService', () => {
     enqueue: jest.fn().mockResolvedValue(undefined),
   };
 
+  // Politique centrale simulée : la tâche est celle que prisma renvoie ; null = refus (S12)
+  const mockPolicy = {
+    assertTaskOrBadRequest: jest.fn(
+      async (_id: string, _u: string, _a: string, message: string) => {
+        const task = await mockPrisma.task.findFirst();
+        if (!task) throw new BadRequestException(message);
+        return task;
+      },
+    ),
+  };
+
   beforeEach(async () => {
     mockPrisma.$transaction.mockImplementation((callback: (tx: typeof mockPrisma) => unknown) =>
       callback(mockPrisma),
@@ -34,6 +46,7 @@ describe('TrackingService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        { provide: PolicyService, useValue: mockPolicy },
         TrackingService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: FirestoreSyncService, useValue: mockFirestoreSync },
@@ -52,16 +65,12 @@ describe('TrackingService', () => {
       await expect(service.startTracking('user-123', 'task-456')).rejects.toThrow(
         BadRequestException,
       );
-      expect(mockPrisma.task.findFirst).toHaveBeenCalledWith({
-        where: {
-          id: 'task-456',
-          deletedAt: null,
-          OR: [
-            { userId: 'user-123' },
-            { project: { workspace: { memberships: { some: { userId: 'user-123' } } } } },
-          ],
-        },
-      });
+      expect(mockPolicy.assertTaskOrBadRequest).toHaveBeenCalledWith(
+        'task-456',
+        'user-123',
+        'timelog.write',
+        expect.any(String),
+      );
     });
 
     it('devrait démarrer le chronomètre et créer un TimeLog si la tâche est accessible', async () => {

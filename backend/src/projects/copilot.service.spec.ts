@@ -1,3 +1,4 @@
+import { PolicyService } from '../authz/policy.service';
 import { CopilotService } from './copilot.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { GeminiService } from '../notes/gemini.service';
@@ -25,7 +26,11 @@ describe('CopilotService', () => {
       },
     } as unknown as PrismaService;
     const gemini = { isAvailable: jest.fn().mockReturnValue(false) } as unknown as GeminiService;
-    const service = new CopilotService(prisma, gemini);
+    const policy = {
+      assertWorkspace: jest.fn().mockResolvedValue({}),
+      listAccessibleProjectIds: jest.fn().mockResolvedValue(['project-1']),
+    } as unknown as PolicyService;
+    const service = new CopilotService(prisma, gemini, policy);
     jest.spyOn(service, 'calculatePredictiveAlerts').mockResolvedValue([
       {
         id: 'alert-1',

@@ -1,4 +1,5 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
+import { PolicyService } from '../authz/policy.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
 
@@ -7,35 +8,30 @@ export class TimeBlocksService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly firestoreSync: FirestoreSyncService,
+    private readonly policy: PolicyService,
   ) {}
 
-  private async assertTaskAccess(taskId: string, userId: string) {
-    const task = await this.prisma.task.findFirst({
-      where: {
-        id: taskId,
-        deletedAt: null,
-        OR: [{ userId }, { project: { workspace: { memberships: { some: { userId } } } } }],
-      },
-    });
-    if (!task) {
-      throw new BadRequestException('Task not found or unauthorized');
-    }
-    return task;
+  /** Écrire dans le planning d'une tâche exige `task.write` sur son projet (S12). */
+  private assertTaskAccess(taskId: string, userId: string) {
+    return this.policy.assertTaskOrBadRequest(
+      taskId,
+      userId,
+      'task.write',
+      'Task not found or unauthorized',
+    );
   }
 
   private async assertTimeBlockAccess(timeBlockId: string, userId: string) {
-    const timeBlock = await this.prisma.timeBlock.findFirst({
-      where: {
-        id: timeBlockId,
-        task: {
-          deletedAt: null,
-          OR: [{ userId }, { project: { workspace: { memberships: { some: { userId } } } } }],
-        },
-      },
-    });
+    const timeBlock = await this.prisma.timeBlock.findUnique({ where: { id: timeBlockId } });
     if (!timeBlock) {
       throw new BadRequestException('Time block not found or unauthorized');
     }
+    await this.policy.assertTaskOrBadRequest(
+      timeBlock.taskId,
+      userId,
+      'task.write',
+      'Time block not found or unauthorized',
+    );
     return timeBlock;
   }
 
@@ -68,11 +64,13 @@ export class TimeBlocksService {
   }
 
   async getTimeBlocks(userId: string, start?: Date, end?: Date) {
+    // Uniquement les créneaux des projets où l'appelant a accès en lecture (S12)
+    const projectIds = await this.policy.listAccessibleProjectIds(userId, { action: 'task.read' });
     return this.prisma.timeBlock.findMany({
       where: {
         task: {
           deletedAt: null,
-          OR: [{ userId }, { project: { workspace: { memberships: { some: { userId } } } } }],
+          projectId: { in: projectIds },
         },
         ...(start || end
           ? {

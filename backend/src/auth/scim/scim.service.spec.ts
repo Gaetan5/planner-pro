@@ -1,3 +1,4 @@
+import { RealtimeService } from '../../realtime/realtime.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ScimService } from './scim.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -36,9 +37,15 @@ describe('ScimService', () => {
     },
   };
 
+  const realtime = { refreshUserRooms: jest.fn() };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [ScimService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        ScimService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: RealtimeService, useValue: realtime },
+      ],
     }).compile();
 
     service = module.get<ScimService>(ScimService);
@@ -214,6 +221,8 @@ describe('ScimService', () => {
         where: { workspaceId_userId: { workspaceId: 'ws-attaquant', userId: 'u-victim' } },
       });
       expect(res.active).toBe(false);
+      // Flux temps réel coupé pour la personne retirée (S16)
+      expect(realtime.refreshUserRooms).toHaveBeenCalledWith('u-victim');
     });
 
     it('PATCH active=true : réactive un utilisateur provisionné par ce workspace (membership recréée)', async () => {

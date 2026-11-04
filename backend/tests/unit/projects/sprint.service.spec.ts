@@ -1,3 +1,4 @@
+import { PolicyService } from '../../../src/authz/policy.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { SprintService } from '../../../src/projects/sprint.service';
 import { PrismaService } from '../../../src/prisma/prisma.service';
@@ -13,7 +14,10 @@ describe('SprintService', () => {
     $transaction: jest.fn(),
     membership: {
       findFirst: jest.fn(),
+      findMany: jest.fn(),
     },
+    project: { findMany: jest.fn(), findFirst: jest.fn() },
+    projectMembership: { findMany: jest.fn(), findUnique: jest.fn() },
     sprint: {
       create: jest.fn(),
       findUnique: jest.fn(),
@@ -39,6 +43,7 @@ describe('SprintService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        PolicyService,
         SprintService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: FirestoreSyncService, useValue: mockFirestoreSync },
@@ -49,6 +54,10 @@ describe('SprintService', () => {
     prisma = module.get<PrismaService>(PrismaService);
 
     jest.clearAllMocks();
+    // Politique : l'appelant est OWNER d'un workspace et voit le projet « p1 »
+    mockPrisma.membership.findMany.mockResolvedValue([{ workspaceId: 'ws-123', role: 'OWNER' }]);
+    mockPrisma.projectMembership.findMany.mockResolvedValue([]);
+    mockPrisma.project.findMany.mockResolvedValue([{ id: 'p1', workspaceId: 'ws-123' }]);
   });
 
   describe('createSprint', () => {
@@ -56,7 +65,7 @@ describe('SprintService', () => {
     const userId = 'user-123';
 
     it('devrait créer un sprint avec succès', async () => {
-      mockPrisma.membership.findFirst.mockResolvedValue({ id: 'mem-1' });
+      mockPrisma.membership.findFirst.mockResolvedValue({ id: 'mem-1', role: 'MEMBER' });
       const sprintData = {
         name: 'Sprint 1',
         startDate: '2026-06-01T00:00:00.000Z',
@@ -101,7 +110,7 @@ describe('SprintService', () => {
     });
 
     it('devrait rejeter si la date de début est après la date de fin', async () => {
-      mockPrisma.membership.findFirst.mockResolvedValue({ id: 'mem-1' });
+      mockPrisma.membership.findFirst.mockResolvedValue({ id: 'mem-1', role: 'MEMBER' });
 
       await expect(
         service.createSprint(workspaceId, userId, {
@@ -127,7 +136,7 @@ describe('SprintService', () => {
         workspaceId: 'ws-123',
       };
       mockPrisma.sprint.findUnique.mockResolvedValue(existingSprint);
-      mockPrisma.membership.findFirst.mockResolvedValue({ id: 'mem-1' });
+      mockPrisma.membership.findFirst.mockResolvedValue({ id: 'mem-1', role: 'MEMBER' });
       mockPrisma.sprint.update.mockResolvedValue({
         ...existingSprint,
         status: SprintStatus.COMPLETED,
@@ -158,7 +167,7 @@ describe('SprintService', () => {
         endDate: new Date('2026-06-14T00:00:00.000Z'),
         workspaceId: 'ws-123',
       });
-      mockPrisma.membership.findFirst.mockResolvedValue({ id: 'mem-1' });
+      mockPrisma.membership.findFirst.mockResolvedValue({ id: 'mem-1', role: 'MEMBER' });
 
       await expect(
         service.updateSprint(sprintId, userId, { startDate: '2026-06-15T00:00:00.000Z' }),
@@ -173,7 +182,7 @@ describe('SprintService', () => {
         endDate: new Date('2026-06-14T00:00:00.000Z'),
         workspaceId: 'ws-123',
       });
-      mockPrisma.membership.findFirst.mockResolvedValue({ id: 'mem-1' });
+      mockPrisma.membership.findFirst.mockResolvedValue({ id: 'mem-1', role: 'MEMBER' });
 
       await expect(
         service.updateSprint(sprintId, userId, { endDate: '2026-05-31T00:00:00.000Z' }),
@@ -190,7 +199,15 @@ describe('SprintService', () => {
     it('devrait associer les tâches avec succès', async () => {
       const sprint = { id: sprintId, workspaceId: 'ws-123' };
       mockPrisma.sprint.findUnique.mockResolvedValue(sprint);
-      mockPrisma.membership.findFirst.mockResolvedValue({ id: 'mem-1' });
+      mockPrisma.membership.findFirst.mockResolvedValue({ id: 'mem-1', role: 'OWNER' });
+      mockPrisma.task.findMany.mockResolvedValue(
+        taskIds.map((id) => ({ id, projectId: 'p1', project: { workspaceId: 'ws-123' } })),
+      );
+      mockPrisma.project.findFirst.mockResolvedValue({
+        id: 'p1',
+        userId: 'autre',
+        workspaceId: 'ws-123',
+      });
 
       await service.associateTasksToSprint(sprintId, taskIds, userId);
 
@@ -211,7 +228,7 @@ describe('SprintService', () => {
     const userId = 'user-123';
 
     it('devrait calculer la vélocité moyenne correctement', async () => {
-      mockPrisma.membership.findFirst.mockResolvedValue({ id: 'mem-1' });
+      mockPrisma.membership.findFirst.mockResolvedValue({ id: 'mem-1', role: 'MEMBER' });
       const completedSprints = [
         {
           id: 'sprint-1',
@@ -231,7 +248,7 @@ describe('SprintService', () => {
     });
 
     it("devrait retourner 0 s'il n'y a pas de sprints complétés", async () => {
-      mockPrisma.membership.findFirst.mockResolvedValue({ id: 'mem-1' });
+      mockPrisma.membership.findFirst.mockResolvedValue({ id: 'mem-1', role: 'MEMBER' });
       mockPrisma.sprint.findMany.mockResolvedValue([]);
 
       const velocity = await service.getAverageVelocity(workspaceId, userId);
@@ -253,7 +270,7 @@ describe('SprintService', () => {
         workspaceId: 'ws-123',
       };
       mockPrisma.sprint.findUnique.mockResolvedValue(sprint);
-      mockPrisma.membership.findFirst.mockResolvedValue({ id: 'mem-1' });
+      mockPrisma.membership.findFirst.mockResolvedValue({ id: 'mem-1', role: 'MEMBER' });
 
       const tasks = [
         {

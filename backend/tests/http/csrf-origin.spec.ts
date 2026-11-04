@@ -1,8 +1,9 @@
-import { Controller, Get, INestApplication, Post, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, INestApplication, Post, Req } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { AuthController } from '../../src/auth/auth.controller';
 import { AuthService } from '../../src/auth/auth.service';
 import { FirebaseIdentityService } from '../../src/auth/firebase-identity.service';
+import { Public } from '../../src/auth/public.decorator';
 import { JwtAuthGuard } from '../../src/auth/jwt.guard';
 import { hashPassword } from '../../src/auth/encryption.util';
 import { PrismaService } from '../../src/prisma/prisma.service';
@@ -17,7 +18,6 @@ import { startHttpTestApp } from './http-test-app';
 jest.setTimeout(30_000);
 
 @Controller('protected')
-@UseGuards(JwtAuthGuard)
 class ProtectedController {
   @Get()
   read() {
@@ -30,6 +30,7 @@ class ProtectedController {
 }
 
 /** Réception libre : webhook GitHub et SCIM sont exemptés (authentifiés par signature ou clé). */
+@Public()
 @Controller()
 class ExemptedController {
   @Post('projects/webhooks/github')

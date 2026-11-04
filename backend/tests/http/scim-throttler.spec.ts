@@ -1,3 +1,4 @@
+import { RealtimeService } from '../../src/realtime/realtime.service';
 import { Controller, INestApplication, Post } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
@@ -48,6 +49,7 @@ describe('S11-a : Débit SCIM par clé et non par IP', () => {
       controllers: [ScimController],
       providers: [
         ScimService,
+        { provide: RealtimeService, useValue: { refreshUserRooms: jest.fn() } },
         ScimAuthGuard,
         JwtAuthGuard,
         TokenService,
@@ -230,6 +232,7 @@ describe('S11-b : le limiteur de débit ne peut pas être contourné par l’URL
       controllers: [ScimController, StubAuthController],
       providers: [
         ScimService,
+        { provide: RealtimeService, useValue: { refreshUserRooms: jest.fn() } },
         ScimAuthGuard,
         JwtAuthGuard,
         TokenService,

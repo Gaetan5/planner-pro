@@ -1,3 +1,5 @@
+import { RealtimeService } from '../../../src/realtime/realtime.service';
+import { PolicyService } from '../../../src/authz/policy.service';
 import { UnauthorizedException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { JwtModule } from '@nestjs/jwt';
@@ -138,6 +140,8 @@ describe('S27 : e-mail d’invitation masqué', () => {
     const module = await Test.createTestingModule({
       providers: [
         InvitationsService,
+        { provide: RealtimeService, useValue: { refreshUserRooms: jest.fn() } },
+        { provide: PolicyService, useValue: {} },
         { provide: PrismaService, useValue: prisma },
         { provide: MailService, useValue: {} },
         { provide: FirestoreSyncService, useValue: {} },

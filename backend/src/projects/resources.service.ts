@@ -1,5 +1,6 @@
 import { Injectable, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { PolicyService } from '../authz/policy.service';
 import { WorkspaceRole } from '@prisma/client';
 import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
 
@@ -8,33 +9,8 @@ export class ResourcesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly firestoreSync: FirestoreSyncService,
+    private readonly policy: PolicyService,
   ) {}
-
-  private async assertWorkspaceMember(workspaceId: string, userId: string) {
-    const membership = await this.prisma.membership.findFirst({
-      where: {
-        workspaceId,
-        userId,
-        workspace: { deletedAt: null },
-      },
-    });
-    if (!membership) {
-      throw new ForbiddenException('Workspace not found or unauthorized');
-    }
-    return membership;
-  }
-
-  private async assertWorkspaceRole(
-    workspaceId: string,
-    userId: string,
-    allowedRoles: WorkspaceRole[],
-  ) {
-    const membership = await this.assertWorkspaceMember(workspaceId, userId);
-    if (!allowedRoles.includes(membership.role)) {
-      throw new ForbiddenException('Unauthorized: insufficient workspace permissions');
-    }
-    return membership;
-  }
 
   private async ensureDefaultWorkspace(userId: string) {
     const existingMembership = await this.prisma.membership.findFirst({
@@ -79,9 +55,20 @@ export class ResourcesService {
     }
   }
 
+  /** Profil de ressource sans les taux de coût et de facturation (S12-e). */
+  private withoutRates<T extends { costRateCents?: unknown; billingRateCents?: unknown }>(
+    profile: T,
+  ): Omit<T, 'costRateCents' | 'billingRateCents'> {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { costRateCents, billingRateCents, ...rest } = profile;
+    return rest;
+  }
+
   async getResourceCapacityReport(userId: string, workspaceId?: string) {
     const workspace = workspaceId ? { id: workspaceId } : await this.ensureDefaultWorkspace(userId);
-    await this.assertWorkspaceMember(workspace.id, userId);
+    const caller = await this.policy.assertWorkspaceMember(workspace.id, userId);
+    // Les taux de coût et de facturation relèvent de `workspace.finances.read` : OWNER/ADMIN (S12-e)
+    const canSeeRates = caller.role === 'OWNER' || caller.role === 'ADMIN';
     await this.ensureResourceProfiles(workspace.id);
 
     const windowStart = new Date();
@@ -166,7 +153,7 @@ export class ResourcesService {
       return {
         user: membership.user,
         role: membership.role,
-        profile,
+        profile: canSeeRates || !profile ? profile : this.withoutRates(profile),
         weeklyCapacityMinutes,
         plannedMinutes,
         estimatedOpenMinutes,
@@ -195,11 +182,11 @@ export class ResourcesService {
     const workspace = workspaceId
       ? { id: workspaceId }
       : await this.ensureDefaultWorkspace(actingUserId);
-    await this.assertWorkspaceRole(workspace.id, actingUserId, [
+    await this.policy.assertWorkspaceRoles(workspace.id, actingUserId, [
       WorkspaceRole.OWNER,
       WorkspaceRole.ADMIN,
     ]);
-    await this.assertWorkspaceMember(workspace.id, memberUserId);
+    await this.policy.assertWorkspaceMember(workspace.id, memberUserId);
 
     return this.prisma.resourceProfile.upsert({
       where: { workspaceId_userId: { workspaceId: workspace.id, userId: memberUserId } },
@@ -230,11 +217,11 @@ export class ResourcesService {
     if (!project || !project.workspaceId) {
       throw new BadRequestException('Project or workspace not found');
     }
-    await this.assertWorkspaceRole(project.workspaceId, actingUserId, [
+    await this.policy.assertWorkspaceRoles(project.workspaceId, actingUserId, [
       WorkspaceRole.OWNER,
       WorkspaceRole.ADMIN,
     ]);
-    await this.assertWorkspaceMember(project.workspaceId, userId);
+    await this.policy.assertWorkspaceMember(project.workspaceId, userId);
 
     return this.prisma.resourceAllocation.create({
       data: {
@@ -249,7 +236,10 @@ export class ResourcesService {
   }
 
   async optimizeWorkspaceResources(workspaceId: string, userId: string) {
-    await this.assertWorkspaceRole(workspaceId, userId, ['OWNER', 'ADMIN'] as WorkspaceRole[]);
+    await this.policy.assertWorkspaceRoles(workspaceId, userId, [
+      'OWNER',
+      'ADMIN',
+    ] as WorkspaceRole[]);
 
     const memberships = await this.prisma.membership.findMany({
       where: { workspaceId },
@@ -321,22 +311,38 @@ export class ResourcesService {
 
     const reallocations: { taskId: string; userId: string }[] = [];
 
+    // Candidats par projet : seuls les membres ayant `task.read` sur le projet (S12-f)
+    const readersByProject = new Map<string, Set<string>>();
+    for (const projectId of new Set(sortedTasks.map((t) => t.projectId))) {
+      const readers = await this.policy.filterUsersWithProjectAction(
+        projectId,
+        memberships.map((m) => m.userId),
+        'task.read',
+      );
+      readersByProject.set(projectId, new Set(readers));
+    }
+
     for (const task of sortedTasks) {
       const taskMinutes = task.estimatedMinutes ?? 120;
+      const readers = readersByProject.get(task.projectId);
 
-      let bestUserId = memberships[0].userId;
+      let bestUserId: string | null = null;
       let lowestLoadRatio = Infinity;
 
       for (const m of memberships) {
+        if (!readers?.has(m.userId)) continue;
         const currentLoad = developerLoads.get(m.userId) || 0;
         const capacity = developerCapacities.get(m.userId) || 2400;
         const ratio = capacity > 0 ? currentLoad / capacity : Infinity;
 
-        if (ratio < lowestLoadRatio) {
+        if (bestUserId === null || ratio < lowestLoadRatio) {
           lowestLoadRatio = ratio;
           bestUserId = m.userId;
         }
       }
+
+      // Aucun candidat autorisé : la tâche n'est pas réassignée
+      if (bestUserId === null) continue;
 
       const isAlreadyAssignedOnlyToBest =
         task.assignees.length === 1 && task.assignees[0].userId === bestUserId;

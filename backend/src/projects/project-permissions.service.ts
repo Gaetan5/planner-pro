@@ -1,11 +1,18 @@
-import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ProjectRole } from '@prisma/client';
+import { PolicyService } from '../authz/policy.service';
+import { RealtimeService } from '../realtime/realtime.service';
 
 @Injectable()
 export class ProjectPermissionsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly policy: PolicyService,
+    private readonly realtime: RealtimeService,
+  ) {}
 
+  /** Délègue à la politique centrale (A2) ; conservé pour les appelants existants. */
   async assertWorkspaceAccess(
     workspaceId: string,
     userId: string,
@@ -16,20 +23,7 @@ export class ProjectPermissionsService {
       'VIEWER',
     ],
   ) {
-    const membership = await this.prisma.membership.findFirst({
-      where: {
-        workspaceId,
-        userId,
-        role: { in: allowedRoles },
-        workspace: { deletedAt: null },
-      },
-    });
-
-    if (!membership) {
-      throw new ForbiddenException('Accès non autorisé au workspace');
-    }
-
-    return membership;
+    return this.policy.assertWorkspaceRoles(workspaceId, userId, allowedRoles);
   }
 
   /**
@@ -73,6 +67,9 @@ export class ProjectPermissionsService {
       role,
     });
 
+    // Les sockets de la personne rejoignent le salon du projet sans reconnexion (S16)
+    await this.realtime.refreshUserRooms(targetUserId);
+
     return membership;
   }
 
@@ -101,6 +98,9 @@ export class ProjectPermissionsService {
       targetUserId,
     });
 
+    // Révocation immédiate du flux temps réel du projet (S16)
+    await this.realtime.refreshUserRooms(targetUserId);
+
     return { success: true };
   }
 
@@ -125,81 +125,16 @@ export class ProjectPermissionsService {
   }
 
   /**
-   * Vérifie si un utilisateur possède l'un des rôles autorisés sur le projet.
-   * L'OWNER ou l'ADMIN du workspace a automatiquement tous les droits ( MANAGER ).
+   * Vérifie si un utilisateur possède l'un des rôles autorisés sur le projet (A2 : délégué à la
+   * politique centrale). L'OWNER ou l'ADMIN du workspace est MANAGER ; un MEMBER sans rôle projet
+   * n'a pas d'accès (S12).
    */
   async assertProjectRole(
     projectId: string,
     userId: string,
     allowedRoles: Array<'MANAGER' | 'CONTRIBUTOR' | 'COMMENTER' | 'CLIENT'>,
   ) {
-    const project = await this.prisma.project.findFirst({
-      where: { id: projectId, deletedAt: null },
-      include: { workspace: true },
-    });
-
-    if (!project) {
-      throw new NotFoundException('Projet introuvable');
-    }
-
-    // 1. Si l'utilisateur est le créateur direct du projet
-    if (project.userId === userId) {
-      return; // A accès total
-    }
-
-    // 2. Si le projet est dans un workspace, vérifier si l'utilisateur est OWNER/ADMIN
-    if (project.workspaceId) {
-      const workspaceMembership = await this.prisma.membership.findFirst({
-        where: {
-          workspaceId: project.workspaceId,
-          userId,
-          workspace: { deletedAt: null },
-        },
-      });
-
-      if (workspaceMembership) {
-        // Un OWNER ou ADMIN du workspace a un contrôle MANAGER par défaut
-        if (workspaceMembership.role === 'OWNER' || workspaceMembership.role === 'ADMIN') {
-          return;
-        }
-      }
-    }
-
-    // 3. Vérifier le rôle au niveau du projet
-    const projectMembership = await this.prisma.projectMembership.findUnique({
-      where: {
-        projectId_userId: { projectId, userId },
-      },
-    });
-
-    if (!projectMembership) {
-      throw new ForbiddenException('Accès non autorisé au projet');
-    }
-
-    // Si MANAGER fait partie des rôles attendus et que l'utilisateur est MANAGER
-    if (allowedRoles.includes(projectMembership.role as ProjectRole)) {
-      return;
-    }
-
-    // Si on cherche d'autres rôles et que l'utilisateur a un rôle suffisant (hiérarchie des rôles)
-    const roleHierarchy = {
-      MANAGER: 4,
-      CONTRIBUTOR: 3,
-      COMMENTER: 2,
-      CLIENT: 1,
-    };
-
-    const userRoleValue = roleHierarchy[projectMembership.role] || 0;
-
-    // Trouver la valeur maximale des rôles autorisés
-    const requiredRoleValues = allowedRoles.map((r) => roleHierarchy[r]);
-    const minRequiredRoleValue = Math.min(...requiredRoleValues);
-
-    if (userRoleValue >= minRequiredRoleValue) {
-      return;
-    }
-
-    throw new ForbiddenException('Permissions de projet insuffisantes');
+    await this.policy.assertProjectRoles(projectId, userId, allowedRoles);
   }
 
   /**

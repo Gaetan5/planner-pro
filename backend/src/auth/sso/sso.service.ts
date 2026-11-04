@@ -66,6 +66,25 @@ function safeEqual(a: string, b: string): boolean {
   );
 }
 
+/**
+ * Motif de journalisation d'un échec de connexion SSO (O3) : une valeur contrôlée, déduite du
+ * seul statut HTTP. Le message de l'exception peut contenir une adresse, un nom ou une valeur
+ * saisie par l'utilisateur : il n'est jamais écrit dans le journal.
+ */
+const FAILURE_REASONS: Record<number, string> = {
+  400: 'REQUETE_INVALIDE',
+  401: 'NON_AUTHENTIFIE',
+  403: 'REFUSE',
+  409: 'CONFLIT',
+  501: 'NON_IMPLEMENTE',
+  503: 'INDISPONIBLE',
+};
+
+function failureReason(error: unknown): string {
+  if (!(error instanceof HttpException)) return 'ERREUR_INTERNE';
+  return FAILURE_REASONS[error.getStatus()] ?? 'AUTRE_REFUS';
+}
+
 export interface SsoDiscoveryResult {
   ssoAvailable: boolean;
   domain?: string;
@@ -171,7 +190,7 @@ export class SsoService {
     try {
       await this.redis.set(
         flowKey(state),
-        JSON.stringify({ domain: ssoConfig.domain, nonce, codeVerifier }),
+        JSON.stringify({ domain: ssoConfig.verifiedDomain, nonce, codeVerifier }),
         SSO_FLOW_TTL_SECONDS,
       );
     } catch {
@@ -217,7 +236,7 @@ export class SsoService {
           event: 'SSO_LOGIN_FAILURE',
           workspaceId: context.workspaceId ?? null,
           status: error instanceof HttpException ? error.getStatus() : 500,
-          reason: error instanceof HttpException ? error.message : 'ERREUR_INTERNE',
+          reason: failureReason(error),
         }),
       );
       throw error;
@@ -304,10 +323,12 @@ export class SsoService {
     }
 
     const claims = await this.verifyIdToken(tokenData.id_token, ssoConfig, endpoints, flow.nonce);
+    // Seul le domaine PROUVÉ fait foi, pour l'adresse comme pour `hd` (S10, O4)
+    const provenDomain = ssoConfig.verifiedDomain ?? '';
     const identity = this.identityFromClaims(claims, ssoConfig);
 
     // Une adresse hors du domaine prouvé n'est jamais acceptée, quel que soit l'IdP (S10)
-    if (this.extractDomain(identity.email) !== ssoConfig.domain) {
+    if (!provenDomain || this.extractDomain(identity.email) !== provenDomain) {
       throw new ConflictException(
         "L'adresse e-mail du compte d'entreprise n'appartient pas au domaine de cette organisation.",
       );
@@ -315,7 +336,7 @@ export class SsoService {
 
     let user = await this.prisma.user.findFirst({ where: { ssoUid: identity.ssoUid } });
     // Un compte lié par ssoUid doit lui aussi appartenir au domaine prouvé (liaisons héritées : S10-d)
-    if (user && this.extractDomain(user.email) !== ssoConfig.verifiedDomain) {
+    if (user && this.extractDomain(user.email) !== provenDomain) {
       throw new ConflictException(
         "Ce compte n'appartient pas au domaine de cette organisation. Contactez votre administrateur.",
       );
@@ -413,7 +434,7 @@ export class SsoService {
 
   private identityFromClaims(
     claims: Record<string, unknown>,
-    config: { provider: SSOProvider; issuer: string | null; domain: string },
+    config: { provider: SSOProvider; issuer: string | null; verifiedDomain: string | null },
   ): { email: string; name: string; ssoUid: string } {
     const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
     let email: string;
@@ -434,7 +455,11 @@ export class SsoService {
       email = (text(claims.email) || text(claims.preferred_username)).toLowerCase();
       ssoUid = `azure-ad:${tid.toLowerCase()}:${oid}`;
     } else {
-      if (claims.email_verified !== true || text(claims.hd).toLowerCase() !== config.domain) {
+      if (
+        claims.email_verified !== true ||
+        !config.verifiedDomain ||
+        text(claims.hd).toLowerCase() !== config.verifiedDomain
+      ) {
         throw new UnauthorizedException(
           "L'adresse Google doit être vérifiée et appartenir au domaine de l'organisation.",
         );

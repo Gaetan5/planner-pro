@@ -9,6 +9,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { IntegrationService } from './integration.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
+import { PolicyService } from '../authz/policy.service';
+import { ProjectAction } from '../authz/permissions';
 
 export type CommentWithRelations = Prisma.CommentGetPayload<{
   include: {
@@ -30,21 +32,19 @@ export class CommentsService {
     private readonly integrationService: IntegrationService,
     private readonly notificationsService: NotificationsService,
     private readonly firestoreSync: FirestoreSyncService,
+    private readonly policy: PolicyService,
   ) {}
 
-  private async assertWorkspaceAccess(workspaceId: string, userId: string) {
-    const membership = await this.prisma.membership.findFirst({
-      where: {
-        workspaceId,
-        userId,
-        workspace: { deletedAt: null },
-      },
-    });
-
-    if (!membership) {
-      throw new ForbiddenException("Vous n'êtes pas membre de cet espace de travail.");
+  /**
+   * Charge la tâche et exige l'action de projet de la matrice (S12) : 404 si elle n'existe pas,
+   * 403 si l'accès au projet est refusé, 400 si le projet n'est pas dans un workspace.
+   */
+  private async loadTask(taskId: string, userId: string, action: ProjectAction) {
+    const task = await this.policy.assertTask(taskId, userId, action);
+    if (!task.project.workspaceId) {
+      throw new BadRequestException("Cette tâche n'est pas liée à un workspace.");
     }
-    return membership;
+    return { ...task, workspaceId: task.project.workspaceId };
   }
 
   async createComment(
@@ -54,21 +54,7 @@ export class CommentsService {
     parentId?: string,
     attachments?: { fileName: string; fileUrl: string; fileType: string; fileSize: number }[],
   ) {
-    const task = await this.prisma.task.findFirst({
-      where: { id: taskId, deletedAt: null },
-      include: { project: true },
-    });
-
-    if (!task) {
-      throw new NotFoundException('Tâche introuvable.');
-    }
-
-    if (!task.project.workspaceId) {
-      throw new BadRequestException("Cette tâche n'est pas liée à un workspace.");
-    }
-
-    // Vérifier l'accès au workspace de la tâche
-    await this.assertWorkspaceAccess(task.project.workspaceId, userId);
+    const task = await this.loadTask(taskId, userId, 'comment.write');
 
     if (parentId) {
       const parent = await this.prisma.comment.findFirst({
@@ -106,7 +92,7 @@ export class CommentsService {
       await this.firestoreSync.enqueue(tx, {
         entityType: 'comment',
         entityId: created.id,
-        workspaceId: task.project.workspaceId!,
+        workspaceId: task.workspaceId,
         operation: 'upsert',
         payload: this.commentSyncPayload(created, task.projectId),
       });
@@ -115,7 +101,7 @@ export class CommentsService {
         await this.firestoreSync.enqueue(tx, {
           entityType: 'attachment',
           entityId: att.id,
-          workspaceId: task.project.workspaceId!,
+          workspaceId: task.workspaceId,
           operation: 'upsert',
           payload: this.attachmentSyncPayload(att, task.projectId),
         });
@@ -125,7 +111,7 @@ export class CommentsService {
     });
 
     // Détecter les mentions
-    const mentionedUserIds = await this.parseMentions(content, task.project.workspaceId);
+    const mentionedUserIds = await this.parseMentions(content, task.workspaceId, task.projectId);
 
     // Envoyer les notifications aux utilisateurs mentionnés (sauf l'auteur)
     const authorName = comment.user.name || comment.user.email;
@@ -145,7 +131,7 @@ export class CommentsService {
 
     // Déclencher le webhook de notification pour un nouveau commentaire
     this.integrationService.sendNotification(
-      task.project.workspaceId,
+      task.workspaceId,
       'Nouveau Commentaire',
       `Un nouveau commentaire a été ajouté par ${comment.user.name || comment.user.email} sur la tâche "${task.title}" : "${content.slice(0, 100)}${content.length > 100 ? '...' : ''}"`,
     );
@@ -157,21 +143,7 @@ export class CommentsService {
   }
 
   async listComments(taskId: string, userId: string) {
-    const task = await this.prisma.task.findFirst({
-      where: { id: taskId, deletedAt: null },
-      include: { project: true },
-    });
-
-    if (!task) {
-      throw new NotFoundException('Tâche introuvable.');
-    }
-
-    if (!task.project.workspaceId) {
-      throw new BadRequestException("Cette tâche n'est pas liée à un workspace.");
-    }
-
-    // Vérifier l'accès
-    await this.assertWorkspaceAccess(task.project.workspaceId, userId);
+    await this.loadTask(taskId, userId, 'comment.read');
 
     const allDbComments = await this.prisma.comment.findMany({
       where: { taskId },
@@ -229,16 +201,13 @@ export class CommentsService {
       throw new BadRequestException("Cette tâche n'est pas liée à un workspace.");
     }
 
-    // Vérifier si l'utilisateur est l'auteur du commentaire
+    // L'auteur doit conserver l'accès en lecture au projet ; sinon seul un MANAGER supprime (S12)
     const isAuthor = comment.userId === userId;
-
-    if (!isAuthor) {
-      // Si ce n'est pas l'auteur, vérifier si c'est un ADMIN ou OWNER du workspace
-      const membership = await this.assertWorkspaceAccess(workspaceId, userId);
-      if (membership.role !== 'OWNER' && membership.role !== 'ADMIN') {
-        throw new ForbiddenException("Vous n'êtes pas autorisé à supprimer ce commentaire.");
-      }
-    }
+    await this.policy.assertProject(
+      comment.task.projectId,
+      userId,
+      isAuthor ? 'comment.read' : 'comment.delete',
+    );
 
     return this.prisma.$transaction(async (tx) => {
       const deleted = await tx.comment.delete({
@@ -283,10 +252,11 @@ export class CommentsService {
       throw new BadRequestException("Cette tâche n'est pas liée à un workspace.");
     }
 
-    // Seul l'auteur a le droit de modifier son propre commentaire
+    // Seul l'auteur a le droit de modifier son propre commentaire, tant qu'il peut commenter (S12)
     if (comment.userId !== userId) {
       throw new ForbiddenException("Vous n'êtes pas autorisé à modifier ce commentaire.");
     }
+    await this.policy.assertProject(comment.task.projectId, userId, 'comment.write');
 
     const updatedComment = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.comment.update({
@@ -309,7 +279,7 @@ export class CommentsService {
     });
 
     // Détecter de nouvelles mentions dans le contenu modifié
-    const mentionedUserIds = await this.parseMentions(content, workspaceId);
+    const mentionedUserIds = await this.parseMentions(content, workspaceId, comment.task.projectId);
 
     // Envoyer les notifications aux utilisateurs mentionnés (sauf l'auteur)
     const authorName = updatedComment.user.name || updatedComment.user.email;
@@ -333,16 +303,28 @@ export class CommentsService {
     };
   }
 
-  async parseMentions(content: string, workspaceId: string): Promise<string[]> {
+  /**
+   * Utilisateurs mentionnés, parmi ceux qui peuvent LIRE les commentaires du projet (S12-c).
+   * Une mention inconnue ou non autorisée est ignorée sans erreur (pas d'oracle).
+   */
+  async parseMentions(content: string, workspaceId: string, projectId: string): Promise<string[]> {
     const mentionRegex = /@([a-zA-Z0-9._@-]+)/g;
     const matches = [...content.matchAll(mentionRegex)];
     if (matches.length === 0) return [];
 
     const mentionedUserIds: string[] = [];
-    const members = await this.prisma.membership.findMany({
+    const workspaceMembers = await this.prisma.membership.findMany({
       where: { workspaceId },
       include: { user: true },
     });
+    const readers = new Set(
+      await this.policy.filterUsersWithProjectAction(
+        projectId,
+        workspaceMembers.map((m) => m.userId),
+        'comment.read',
+      ),
+    );
+    const members = workspaceMembers.filter((m) => readers.has(m.userId));
 
     for (const match of matches) {
       const search = match[1].toLowerCase();
@@ -371,17 +353,7 @@ export class CommentsService {
     fileType: string,
     fileSize: number,
   ) {
-    const task = await this.prisma.task.findFirst({
-      where: { id: taskId, deletedAt: null },
-      include: { project: true },
-    });
-    if (!task) {
-      throw new NotFoundException('Tâche introuvable.');
-    }
-    if (!task.project.workspaceId) {
-      throw new BadRequestException("Cette tâche n'est pas liée à un workspace.");
-    }
-    await this.assertWorkspaceAccess(task.project.workspaceId, userId);
+    const task = await this.loadTask(taskId, userId, 'attachment.write');
 
     return this.prisma.$transaction(async (tx) => {
       const created = await tx.attachment.create({
@@ -391,12 +363,13 @@ export class CommentsService {
           fileType,
           fileSize,
           taskId,
+          uploadedById: userId,
         },
       });
       await this.firestoreSync.enqueue(tx, {
         entityType: 'attachment',
         entityId: created.id,
-        workspaceId: task.project.workspaceId!,
+        workspaceId: task.workspaceId,
         operation: 'upsert',
         payload: this.attachmentSyncPayload(created, task.projectId),
       });
@@ -405,17 +378,7 @@ export class CommentsService {
   }
 
   async getAttachmentsForTask(taskId: string, userId: string) {
-    const task = await this.prisma.task.findFirst({
-      where: { id: taskId, deletedAt: null },
-      include: { project: true },
-    });
-    if (!task) {
-      throw new NotFoundException('Tâche introuvable.');
-    }
-    if (!task.project.workspaceId) {
-      throw new BadRequestException("Cette tâche n'est pas liée à un workspace.");
-    }
-    await this.assertWorkspaceAccess(task.project.workspaceId, userId);
+    await this.loadTask(taskId, userId, 'attachment.read');
 
     return this.prisma.attachment.findMany({
       where: { taskId },
@@ -446,7 +409,14 @@ export class CommentsService {
       );
     }
 
-    await this.assertWorkspaceAccess(workspaceId, userId);
+    // Auteur du dépôt (avec accès en lecture) ou MANAGER du projet ; les pièces jointes sans
+    // auteur connu (antérieures à `uploadedById`) ne sont supprimables que par un MANAGER (S12)
+    const isUploader = !!attachment.uploadedById && attachment.uploadedById === userId;
+    await this.policy.assertProject(
+      attachment.task!.projectId,
+      userId,
+      isUploader ? 'attachment.read' : 'attachment.delete',
+    );
 
     return this.prisma.$transaction(async (tx) => {
       const deleted = await tx.attachment.delete({

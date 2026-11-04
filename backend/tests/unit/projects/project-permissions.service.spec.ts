@@ -1,3 +1,5 @@
+import { RealtimeService } from '../../../src/realtime/realtime.service';
+import { PolicyService } from '../../../src/authz/policy.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ProjectPermissionsService } from '../../../src/projects/project-permissions.service';
 import { PrismaService } from '../../../src/prisma/prisma.service';
@@ -32,7 +34,12 @@ describe('ProjectPermissionsService', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [ProjectPermissionsService, { provide: PrismaService, useValue: mockPrisma }],
+      providers: [
+        ProjectPermissionsService,
+        PolicyService,
+        { provide: RealtimeService, useValue: { refreshUserRooms: jest.fn() } },
+        { provide: PrismaService, useValue: mockPrisma },
+      ],
     }).compile();
 
     service = module.get<ProjectPermissionsService>(ProjectPermissionsService);
@@ -55,10 +62,32 @@ describe('ProjectPermissionsService', () => {
         userId: 'creator-user', // L'utilisateur appelant est le créateur
         workspaceId: 'ws-123',
       });
+      // S12-a : le créateur doit toujours être membre du workspace
+      mockPrisma.membership.findFirst.mockResolvedValue({ userId: 'creator-user', role: 'MEMBER' });
 
       await expect(
         service.assertProjectRole('proj-1', 'creator-user', ['MANAGER']),
       ).resolves.not.toThrow();
+    });
+
+    it("refuse le créateur et le détenteur d'un rôle de projet qui ont perdu leur Membership (S12-a)", async () => {
+      mockPrisma.project.findFirst.mockResolvedValue({
+        id: 'proj-1',
+        userId: 'creator-user',
+        workspaceId: 'ws-123',
+      });
+      mockPrisma.membership.findFirst.mockResolvedValue(null);
+      mockPrisma.projectMembership.findUnique.mockResolvedValue({
+        userId: 'client-user',
+        role: 'CONTRIBUTOR',
+      });
+
+      await expect(
+        service.assertProjectRole('proj-1', 'creator-user', ['MANAGER']),
+      ).rejects.toThrow(ForbiddenException);
+      await expect(service.assertProjectRole('proj-1', 'client-user', ['CLIENT'])).rejects.toThrow(
+        ForbiddenException,
+      );
     });
 
     it('devrait autoriser un OWNER du workspace parent par défaut avec des droits MANAGER', async () => {
@@ -97,7 +126,7 @@ describe('ProjectPermissionsService', () => {
         userId: 'creator-user',
         workspaceId: 'ws-123',
       });
-      mockPrisma.membership.findFirst.mockResolvedValue(null);
+      mockPrisma.membership.findFirst.mockResolvedValue({ userId: 'client-user', role: 'VIEWER' });
       mockPrisma.projectMembership.findUnique.mockResolvedValue({
         userId: 'client-user',
         role: 'CLIENT',
@@ -114,7 +143,7 @@ describe('ProjectPermissionsService', () => {
         userId: 'creator-user',
         workspaceId: 'ws-123',
       });
-      mockPrisma.membership.findFirst.mockResolvedValue(null);
+      mockPrisma.membership.findFirst.mockResolvedValue({ userId: 'client-user', role: 'VIEWER' });
       mockPrisma.projectMembership.findUnique.mockResolvedValue({
         userId: 'client-user',
         role: 'CLIENT',
@@ -131,7 +160,7 @@ describe('ProjectPermissionsService', () => {
         userId: 'creator-user',
         workspaceId: 'ws-123',
       });
-      mockPrisma.membership.findFirst.mockResolvedValue(null);
+      mockPrisma.membership.findFirst.mockResolvedValue({ userId: 'contrib-user', role: 'VIEWER' });
       mockPrisma.projectMembership.findUnique.mockResolvedValue({
         userId: 'contrib-user',
         role: 'CONTRIBUTOR',
@@ -150,6 +179,7 @@ describe('ProjectPermissionsService', () => {
         userId: 'actor-user',
         workspaceId: 'ws-123',
       });
+      mockPrisma.membership.findFirst.mockResolvedValue({ userId: 'actor-user', role: 'MEMBER' });
       mockPrisma.projectMembership.upsert.mockResolvedValue({
         id: 'pm-123',
         projectId: 'proj-1',

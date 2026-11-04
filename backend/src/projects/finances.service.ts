@@ -1,32 +1,15 @@
-import { Injectable, ForbiddenException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { PolicyService } from '../authz/policy.service';
 import { WorkspaceRole } from '@prisma/client';
 import { ProjectFinance, WorkspaceSummary } from './interfaces/finances.interface';
 
 @Injectable()
 export class FinancesService {
-  constructor(private readonly prisma: PrismaService) {}
-
-  private async assertWorkspaceRole(
-    workspaceId: string,
-    userId: string,
-    allowedRoles: WorkspaceRole[],
-  ) {
-    const membership = await this.prisma.membership.findFirst({
-      where: {
-        workspaceId,
-        userId,
-        workspace: { deletedAt: null },
-      },
-    });
-    if (!membership) {
-      throw new ForbiddenException('Workspace not found or unauthorized');
-    }
-    if (!allowedRoles.includes(membership.role)) {
-      throw new ForbiddenException('Unauthorized: insufficient workspace permissions');
-    }
-    return membership;
-  }
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly policy: PolicyService,
+  ) {}
 
   async getProjectFinances(projectId: string, userId: string): Promise<ProjectFinance> {
     const project = await this.prisma.project.findFirst({
@@ -44,7 +27,10 @@ export class FinancesService {
     }
 
     // Valider les droits admin / owner pour accéder aux finances
-    await this.assertWorkspaceRole(workspaceId, userId, [WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
+    await this.policy.assertWorkspaceRoles(workspaceId, userId, [
+      WorkspaceRole.OWNER,
+      WorkspaceRole.ADMIN,
+    ]);
 
     // Récupérer tous les TimeLogs du projet
     const timeLogs = await this.prisma.timeLog.findMany({
@@ -129,7 +115,10 @@ export class FinancesService {
     workspaceId: string,
     userId: string,
   ): Promise<WorkspaceSummary> {
-    await this.assertWorkspaceRole(workspaceId, userId, [WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
+    await this.policy.assertWorkspaceRoles(workspaceId, userId, [
+      WorkspaceRole.OWNER,
+      WorkspaceRole.ADMIN,
+    ]);
 
     const projects = await this.prisma.project.findMany({
       where: { workspaceId, deletedAt: null },

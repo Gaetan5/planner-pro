@@ -4,7 +4,6 @@ import {
   Get,
   Query,
   Body,
-  UseGuards,
   Req,
   HttpCode,
   HttpStatus,
@@ -14,13 +13,12 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Request } from 'express';
-import { JwtAuthGuard } from '../auth/jwt.guard';
 import { AiService, ResolvedAiAction } from './ai.service';
 import { CopilotService } from './copilot.service';
 import { AiCommandDto } from './dto/ai-command.dto';
-import { TrackingGateway } from '../tracking/tracking.gateway';
-import { PrismaService } from '../prisma/prisma.service';
-import { TASK_INCLUDE } from './tasks.service';
+import { RealtimeService } from '../realtime/realtime.service';
+import { ProjectsService } from './projects.service';
+import { ExecuteAiActionsDto } from './dto/execute-ai-actions.dto';
 
 interface AuthenticatedRequest extends Request {
   user: {
@@ -29,13 +27,12 @@ interface AuthenticatedRequest extends Request {
 }
 
 @Controller('projects/ai')
-@UseGuards(JwtAuthGuard)
 export class AiController {
   constructor(
     private readonly aiService: AiService,
     private readonly copilotService: CopilotService,
-    private readonly trackingGateway: TrackingGateway,
-    private readonly prisma: PrismaService,
+    private readonly realtime: RealtimeService,
+    private readonly projectsService: ProjectsService,
   ) {}
 
   /**
@@ -85,44 +82,28 @@ export class AiController {
    */
   @Post('execute')
   @HttpCode(HttpStatus.OK)
-  async executeActions(
-    @Req() req: AuthenticatedRequest,
-    @Body()
-    body: {
-      workspaceId: string;
-      projectId?: string;
-      actions: ResolvedAiAction[];
-    },
-  ) {
+  async executeActions(@Req() req: AuthenticatedRequest, @Body() body: ExecuteAiActionsDto) {
     const result = await this.aiService.executeActions(
       req.user.id,
       body.workspaceId,
       body.projectId || null,
-      body.actions,
+      body.actions as ResolvedAiAction[],
     );
 
-    // Diffuser des notifications WebSocket pour rafraîchir en temps réel chez les autres clients connectés
-    if (result.success && this.trackingGateway.server) {
-      const room = `workspace:${body.workspaceId}`;
-      // Émettre un signal général de mise à jour du projet/workspace
-      this.trackingGateway.server.to(room).emit('project-data-updated', {
+    // Diffusion limitée au workspace vérifié par le service : un signal non sensible, puis les
+    // seules tâches réellement modifiées vers le salon de leur projet (S15, S16)
+    if (result.success && this.realtime.isReady) {
+      this.realtime.emitSignalToWorkspace(body.workspaceId, 'project-data-updated', {
         workspaceId: body.workspaceId,
         projectId: body.projectId || null,
-      });
-
-      // Diffuser individuellement pour les tâches modifiées si nécessaire
-      for (const action of body.actions) {
-        if (action.taskId && typeof action.taskId === 'string') {
-          const dbTask = await this.prisma.task.findUnique({
-            where: { id: action.taskId },
-            include: TASK_INCLUDE,
+      } as { workspaceId: string });
+      if (result.changedTaskIds.length > 0) {
+        const tasks = await this.projectsService.getTasksForBroadcast(result.changedTaskIds);
+        for (const task of tasks) {
+          this.realtime.emitToProject(task.projectId, 'task-status-changed', {
+            taskId: task.id,
+            task,
           });
-          if (dbTask) {
-            this.trackingGateway.server.to(room).emit('task-status-changed', {
-              taskId: action.taskId,
-              task: dbTask,
-            });
-          }
         }
       }
     }

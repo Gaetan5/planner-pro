@@ -4,7 +4,8 @@ import { PrismaService } from '../../../src/prisma/prisma.service';
 import { CopilotService } from '../../../src/projects/copilot.service';
 import { NotificationsService } from '../../../src/notifications/notifications.service';
 import { CalendarSyncService } from '../../../src/projects/calendar-sync.service';
-import { TrackingGateway } from '../../../src/tracking/tracking.gateway';
+import { RealtimeService } from '../../../src/realtime/realtime.service';
+import { PolicyService } from '../../../src/authz/policy.service';
 
 describe('ProactiveSchedulerService', () => {
   let service: ProactiveSchedulerService;
@@ -47,11 +48,10 @@ describe('ProactiveSchedulerService', () => {
     detectCalendarConflicts: jest.fn(),
   };
 
-  const mockTrackingGateway = {
-    server: {
-      to: jest.fn().mockReturnThis(),
-      emit: jest.fn(),
-    },
+  const mockRealtime = { emitSignalToWorkspace: jest.fn() };
+  const mockPolicy = {
+    assertWorkspace: jest.fn().mockResolvedValue({}),
+    listAccessibleProjectIds: jest.fn().mockResolvedValue(['p1']),
   };
 
   beforeEach(async () => {
@@ -62,7 +62,8 @@ describe('ProactiveSchedulerService', () => {
         { provide: CopilotService, useValue: mockCopilotService },
         { provide: NotificationsService, useValue: mockNotificationsService },
         { provide: CalendarSyncService, useValue: mockCalendarSyncService },
-        { provide: TrackingGateway, useValue: mockTrackingGateway },
+        { provide: PolicyService, useValue: mockPolicy },
+        { provide: RealtimeService, useValue: mockRealtime },
       ],
     }).compile();
 

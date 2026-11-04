@@ -19,6 +19,13 @@ import { ProjectPermissionsService } from '../projects/project-permissions.servi
 import { PrismaService } from '../prisma/prisma.service';
 import { SessionService } from '../auth/session.service';
 import { authenticateSocket, stopSessionWatch } from '../auth/ws-auth';
+import { RealtimeService, taskRoom, userRoom } from '../realtime/realtime.service';
+
+/** Limites du flux audio et du débit de messages par socket (S16). */
+export const VOICE_CHUNK_MAX_BYTES = 64 * 1024;
+export const VOICE_SESSION_MAX_BYTES = 10 * 1024 * 1024;
+export const WS_RATE_WINDOW_MS = 10_000;
+export const WS_RATE_MAX_MESSAGES = 300;
 
 @SkipThrottle()
 @WebSocketGateway({
@@ -39,9 +46,32 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
     private readonly aiService: AiService,
     private readonly projectPermissionsService: ProjectPermissionsService,
     private readonly prisma: PrismaService,
+    private readonly realtime: RealtimeService,
   ) {}
 
+  /** Compteur de messages par socket (fenêtre fixe) : true si la limite est dépassée. */
+  private isRateLimited(client: Socket): boolean {
+    const now = Date.now();
+    const state = (client.data.rate ??= { start: now, count: 0 }) as {
+      start: number;
+      count: number;
+    };
+    if (now - state.start >= WS_RATE_WINDOW_MS) {
+      state.start = now;
+      state.count = 0;
+    }
+    state.count += 1;
+    return state.count > WS_RATE_MAX_MESSAGES;
+  }
+
+  private resetAudio(client: Socket) {
+    client.data.audioChunks = [];
+    client.data.audioBytes = 0;
+  }
+
   async afterInit(server: Server) {
+    // Seule gateway du serveur : les services diffusent via RealtimeService (A4)
+    this.realtime.attach(server);
     try {
       const pubClient = createClient({
         url: `redis://${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || 6379}`,
@@ -61,17 +91,13 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
     try {
       // Même vérification que le guard HTTP : jeton d'accès (S3), session active (S7)
       await authenticateSocket(client, this.sessionService);
-      client.join(`user:${client.data.userId}`);
+      client.join(userRoom(client.data.userId));
       console.log(`Client authentifié : ${client.data.userId} (Socket: ${client.id})`);
 
-      // Rejoindre les salons de workspace associés
-      const userWorkspaces = await this.prisma.membership.findMany({
-        where: { userId: client.data.userId },
-        select: { workspaceId: true },
-      });
-      for (const membership of userWorkspaces) {
-        client.join(`workspace:${membership.workspaceId}`);
-        console.log(`Socket ${client.id} a rejoint la room workspace:${membership.workspaceId}`);
+      // Salons de projet selon les droits effectifs (S16) ; workspace : signaux non sensibles
+      const rooms = await this.realtime.roomsForUser(client.data.userId);
+      for (const room of [...rooms.projects, ...rooms.workspaces]) {
+        client.join(room);
       }
 
       const activeTracking = await this.trackingService.getActiveTracking(client.data.userId);
@@ -99,6 +125,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
     if (!userId) {
       return { status: 'error', message: 'Non authentifié.' };
     }
+    if (this.isRateLimited(client)) return { status: 'error', message: 'Trop de messages.' };
     try {
       const log = await this.trackingService.startTracking(userId, data.taskId);
       // Diffuser le nouvel état à TOUS les clients connectés du même utilisateur
@@ -143,6 +170,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
   async handleJoinTask(@MessageBody() data: { taskId: string }, @ConnectedSocket() client: Socket) {
     const userId = client.data.userId;
     if (!userId) return { status: 'error', message: 'Non authentifié.' };
+    if (this.isRateLimited(client)) return { status: 'error', message: 'Trop de messages.' };
 
     const task = await this.prisma.task.findUnique({
       where: { id: data.taskId },
@@ -199,8 +227,14 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
   ) {
     const userId = client.data.userId;
     if (!userId) return { status: 'error', message: 'Non authentifié.' };
+    if (this.isRateLimited(client)) return { status: 'error', message: 'Trop de messages.' };
 
-    client.to(`task:${data.taskId}`).emit('user-typing', {
+    // Seul un socket ayant rejoint la room (donc autorisé sur le projet) peut signaler une saisie
+    if (typeof data?.taskId !== 'string' || !client.rooms.has(taskRoom(data.taskId))) {
+      return { status: 'error', message: 'Tâche non rejointe.' };
+    }
+
+    client.to(taskRoom(data.taskId)).emit('user-typing', {
       taskId: data.taskId,
       userId,
       isTyping: data.isTyping,
@@ -210,18 +244,33 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   @SubscribeMessage('voice-start')
   handleVoiceStart(@ConnectedSocket() client: Socket) {
-    client.data.audioChunks = [];
+    this.resetAudio(client);
     console.log(`Début du flux de streaming voix pour le client ${client.id}`);
     return { status: 'success' };
   }
 
   @SubscribeMessage('voice-chunk')
   handleVoiceChunk(@MessageBody() chunk: Buffer | ArrayBuffer, @ConnectedSocket() client: Socket) {
+    if (this.isRateLimited(client)) {
+      this.resetAudio(client);
+      return { status: 'error', message: 'Trop de messages.' };
+    }
+    // Uniquement des données binaires : jamais de texte ni d'objet arbitraire
+    if (!Buffer.isBuffer(chunk) && !(chunk instanceof ArrayBuffer)) {
+      return { status: 'error', message: 'Format de morceau audio invalide.' };
+    }
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    const total = ((client.data.audioBytes as number | undefined) ?? 0) + buffer.length;
+    if (buffer.length > VOICE_CHUNK_MAX_BYTES || total > VOICE_SESSION_MAX_BYTES) {
+      // Au-delà des limites : purge de la session audio et erreur (pas d'accumulation mémoire)
+      this.resetAudio(client);
+      return { status: 'error', message: 'Flux audio trop volumineux.' };
+    }
     if (!client.data.audioChunks) {
       client.data.audioChunks = [];
     }
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     client.data.audioChunks.push(buffer);
+    client.data.audioBytes = total;
     return { status: 'success', chunksCount: client.data.audioChunks.length };
   }
 
@@ -233,6 +282,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
   ) {
     const userId = client.data.userId;
     if (!userId) return { status: 'error', message: 'Non authentifié.' };
+    if (this.isRateLimited(client)) return { status: 'error', message: 'Trop de messages.' };
 
     const chunks = client.data.audioChunks || [];
     if (chunks.length === 0) {
@@ -241,7 +291,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
 
     console.log(`Fin du flux de streaming voix. Assemblage de ${chunks.length} chunks.`);
     const audioBuffer = Buffer.concat(chunks);
-    client.data.audioChunks = []; // Réinitialiser le buffer
+    this.resetAudio(client); // Réinitialiser le buffer
 
     try {
       const result = await this.aiService.transcribeAndAnalyzeVoice(

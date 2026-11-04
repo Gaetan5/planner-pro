@@ -15,7 +15,11 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { AdminModule } from './admin/admin.module';
 import { FirestoreSyncModule } from './firestore-sync/firestore-sync.module';
 
+import { AuthzModule } from './authz/authz.module';
+import { RealtimeModule } from './realtime/realtime.module';
 import { AppThrottlerGuard } from './common/app-throttler.guard';
+import { FeatureFlagGuard } from './config/feature-flag.guard';
+import { JwtAuthGuard } from './auth/jwt.guard';
 
 @Module({
   imports: [
@@ -27,6 +31,8 @@ import { AppThrottlerGuard } from './common/app-throttler.guard';
       },
     ]),
     PrismaModule,
+    AuthzModule,
+    RealtimeModule,
     ProjectsModule,
     TrackingModule,
     NotesModule,
@@ -43,6 +49,16 @@ import { AppThrottlerGuard } from './common/app-throttler.guard';
     {
       provide: APP_GUARD,
       useClass: AppThrottlerGuard,
+    },
+    // Ordre d'exécution des gardes globaux : débit, drapeau de fonctionnalité (404 avant toute
+    // authentification), puis authentification. Toute route est protégée sauf `@Public()` (A1).
+    {
+      provide: APP_GUARD,
+      useClass: FeatureFlagGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard,
     },
   ],
 })

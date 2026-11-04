@@ -1,3 +1,4 @@
+import { RealtimeService } from '../../realtime/realtime.service';
 import {
   Injectable,
   Logger,
@@ -21,7 +22,10 @@ import * as crypto from 'crypto';
 export class ScimService {
   private readonly logger = new Logger('ScimAudit');
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly realtime: RealtimeService,
+  ) {}
 
   /**
    * Mappe un utilisateur Prisma en ressource SCIM 2.0 User.
@@ -116,6 +120,8 @@ export class ScimService {
       await this.prisma.membership.delete({
         where: { workspaceId_userId: { workspaceId, userId } },
       });
+      // Le flux temps réel du workspace est coupé immédiatement (S16)
+      await this.realtime.refreshUserRooms(userId);
       return false;
     }
 
@@ -123,6 +129,7 @@ export class ScimService {
       await this.prisma.membership.create({
         data: { workspaceId, userId, role: WorkspaceRole.MEMBER },
       });
+      await this.realtime.refreshUserRooms(userId);
       return true;
     }
 

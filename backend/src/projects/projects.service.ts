@@ -15,12 +15,13 @@ import {
   DeliverableStatus,
   DependencyType,
   DeliveryStatus,
-  WorkspaceRole,
 } from '@prisma/client';
 import * as crypto from 'crypto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
+import { PolicyService } from '../authz/policy.service';
+import { RealtimeService } from '../realtime/realtime.service';
 
 /**
  * ProjectsService — Façade d'Orchestration
@@ -44,6 +45,8 @@ export class ProjectsService {
     private readonly financesService: FinancesService,
     private readonly projectPermissionsService: ProjectPermissionsService,
     private readonly firestoreSync: FirestoreSyncService,
+    private readonly policy: PolicyService,
+    private readonly realtime: RealtimeService,
   ) {}
 
   // ═══════════════════════════════════════════════════════════════════
@@ -78,34 +81,6 @@ export class ProjectsService {
     });
   }
 
-  private async assertWorkspaceMember(workspaceId: string, userId: string) {
-    const membership = await this.prisma.membership.findFirst({
-      where: {
-        workspaceId,
-        userId,
-        workspace: { deletedAt: null },
-      },
-    });
-
-    if (!membership) {
-      throw new ForbiddenException('Workspace not found or unauthorized');
-    }
-
-    return membership;
-  }
-
-  private async assertWorkspaceRole(
-    workspaceId: string,
-    userId: string,
-    allowedRoles: WorkspaceRole[],
-  ) {
-    const membership = await this.assertWorkspaceMember(workspaceId, userId);
-    if (!allowedRoles.includes(membership.role)) {
-      throw new ForbiddenException('Unauthorized: insufficient workspace permissions');
-    }
-    return membership;
-  }
-
   async getWorkspaces(userId: string) {
     await this.ensureDefaultWorkspace(userId);
     return this.prisma.workspace.findMany({
@@ -127,7 +102,7 @@ export class ProjectsService {
 
   async getWorkspaceMembers(userId: string, workspaceId?: string) {
     const workspace = workspaceId ? { id: workspaceId } : await this.ensureDefaultWorkspace(userId);
-    await this.assertWorkspaceMember(workspace.id, userId);
+    await this.policy.assertWorkspace(workspace.id, userId, 'workspace.read');
 
     return this.prisma.membership.findMany({
       where: { workspaceId: workspace.id },
@@ -154,10 +129,7 @@ export class ProjectsService {
     billingType?: string,
   ) {
     const workspace = workspaceId ? { id: workspaceId } : await this.ensureDefaultWorkspace(userId);
-    const membership = await this.assertWorkspaceMember(workspace.id, userId);
-    if (membership.role === WorkspaceRole.VIEWER) {
-      throw new ForbiddenException('Unauthorized: read-only access (VIEWER)');
-    }
+    await this.policy.assertWorkspace(workspace.id, userId, 'project.create');
 
     const project = await this.prisma.$transaction(async (tx) => {
       const created = await tx.project.create({
@@ -195,19 +167,20 @@ export class ProjectsService {
       { project },
     );
 
+    // Le créateur et les OWNER/ADMIN connectés rejoignent project:<id> sans se reconnecter (S16-b)
+    await this.realtime.refreshWorkspaceManagersRooms(workspace.id, [userId]);
+
     return project;
   }
 
   async getProjects(userId: string) {
     await this.ensureDefaultWorkspace(userId);
+    // Uniquement les projets où l'appelant a un rôle (S12) : ni tout le workspace, ni VIEWER par défaut
+    const projectIds = await this.policy.listAccessibleProjectIds(userId);
     return this.prisma.project.findMany({
       where: {
         deletedAt: null,
-        OR: [
-          { userId },
-          { workspace: { memberships: { some: { userId } } } },
-          { projectMemberships: { some: { userId } } },
-        ],
+        id: { in: projectIds },
       },
       include: {
         workspace: true,
@@ -456,6 +429,10 @@ export class ProjectsService {
   ) {
     return this.tasksService.createTask(projectId, userId, title, description, priority, options);
   }
+  getTasksForBroadcast(taskIds: string[]) {
+    return this.tasksService.getTasksForBroadcast(taskIds);
+  }
+
   getTasks(projectId: string, userId: string) {
     return this.tasksService.getTasks(projectId, userId);
   }
