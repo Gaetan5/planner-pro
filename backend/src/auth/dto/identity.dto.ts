@@ -27,6 +27,7 @@ export class IdentityReauthDto {
 export class FirebaseLinkDto extends IdentityReauthDto {
   @IsString()
   @MinLength(1)
+  @MaxLength(4096)
   idToken!: string;
 }
 

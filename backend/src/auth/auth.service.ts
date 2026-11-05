@@ -124,6 +124,27 @@ interface GitHubRepoResponse {
   language: string | null;
 }
 
+/**
+ * Reste-t-il un autre moyen de se connecter une fois `provider` délié ? Mot de passe, SSO ou
+ * l'autre identité externe. Règle unique : contrôle de `unlinkIdentity` et `canUnlink` de
+ * `getIdentities` (P9-L-a). L'écriture conditionnelle de `unlinkIdentity` en est le miroir SQL.
+ */
+function hasOtherLoginMethod(
+  account: {
+    passwordHash: string | null;
+    ssoUid: string | null;
+    firebaseUid: string | null;
+    githubId: string | null;
+  },
+  provider: 'firebase' | 'github',
+): boolean {
+  return (
+    Boolean(account.passwordHash) ||
+    Boolean(account.ssoUid) ||
+    Boolean(provider === 'firebase' ? account.githubId : account.firebaseUid)
+  );
+}
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -236,7 +257,7 @@ export class AuthService {
         // Jamais de liaison automatique par e-mail (S8) : un compte créé ailleurs (mot de passe,
         // GitHub, ou provisionné par SCIM) ne doit pas être réclamé par une identité externe.
         throw new ConflictException(
-          'Un compte existe déjà avec cette adresse e-mail. Connectez-vous avec votre méthode habituelle (ou « Mot de passe oublié » si vous n’avez pas finalisé votre inscription), puis liez votre compte Firebase depuis votre profil.',
+          'Un compte existe déjà avec cette adresse e-mail. Connectez-vous avec votre méthode habituelle (ou « Mot de passe oublié » si vous n’avez pas finalisé votre inscription), puis liez votre compte Firebase depuis « Sécurité du compte ».',
         );
       } else {
         await this.assertSsoNotEnforced(email);
@@ -397,7 +418,7 @@ export class AuthService {
       });
       if (existing) {
         throw new ConflictException(
-          'Un compte existe déjà avec cette adresse e-mail. Connectez-vous avec votre méthode habituelle (ou « Mot de passe oublié » si vous n’avez pas finalisé votre inscription), puis liez votre compte GitHub depuis votre profil.',
+          'Un compte existe déjà avec cette adresse e-mail. Connectez-vous avec votre méthode habituelle (ou « Mot de passe oublié » si vous n’avez pas finalisé votre inscription), puis liez votre compte GitHub depuis « Sécurité du compte ».',
         );
       }
       // Aucune création de compte pour un domaine qui impose le SSO : sinon un compte serait
@@ -967,23 +988,35 @@ export class AuthService {
         `Aucun compte ${provider === 'firebase' ? 'Firebase' : 'GitHub'} n'est lié.`,
       );
     }
-    const otherMethods =
-      Boolean(account.passwordHash) ||
-      Boolean(account.ssoUid) ||
-      Boolean(provider === 'firebase' ? account.githubId : account.firebaseUid);
-    if (!otherMethods) {
+    if (!hasOtherLoginMethod(account, provider)) {
       throw new ConflictException(
         'Impossible de retirer la dernière méthode de connexion : définissez un mot de passe ou liez une autre identité.',
       );
     }
 
-    await this.prisma.user.update({
-      where: { id: userId },
+    // Écriture conditionnelle (S31-a) : le contrôle ci-dessus porte sur une lecture, donc deux
+    // déliaisons simultanées pourraient retirer chacune « l'autre » méthode. La condition est
+    // réévaluée par la base au moment de l'écriture ; si elle n'est plus vraie, rien n'est écrit.
+    const { count } = await this.prisma.user.updateMany({
+      where: {
+        id: userId,
+        ...(provider === 'firebase' ? { firebaseUid: { not: null } } : { githubId: { not: null } }),
+        OR: [
+          { passwordHash: { not: null } },
+          { ssoUid: { not: null } },
+          provider === 'firebase' ? { githubId: { not: null } } : { firebaseUid: { not: null } },
+        ],
+      },
       data:
         provider === 'firebase'
           ? { firebaseUid: null, firebaseEmail: null }
           : { githubId: null, githubUsername: null, githubAccessToken: null },
     });
+    if (count === 0) {
+      throw new ConflictException(
+        'Impossible de retirer la dernière méthode de connexion : une autre modification du compte vient d’avoir lieu. Réessayez.',
+      );
+    }
     await this.sessionService.revokeAllForUser(userId, sid);
     await this.recordIdentityChange(
       account,
@@ -1002,6 +1035,11 @@ export class AuthService {
       github: { linked: Boolean(account.githubId), username: account.githubUsername },
       hasPassword: Boolean(account.passwordHash),
       mfaEnabled: account.mfaEnabled,
+      // Règle unique, partagée avec la déliaison : le client ne la recalcule pas (P9-L-a)
+      canUnlink: {
+        firebase: Boolean(account.firebaseUid) && hasOtherLoginMethod(account, 'firebase'),
+        github: Boolean(account.githubId) && hasOtherLoginMethod(account, 'github'),
+      },
     };
   }
 

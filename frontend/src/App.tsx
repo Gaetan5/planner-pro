@@ -16,6 +16,8 @@ import { NotificationInbox } from './components/NotificationInbox';
 import { FinancesView } from './components/FinancesView';
 import { AdminConsole } from './components/AdminConsole';
 import { SecurityPage } from './components/SecurityPage';
+import { IdentitiesSection } from './components/IdentitiesSection';
+import { GitHubLinkConfirm } from './components/GitHubLinkConfirm';
 import { OnboardingModal } from './components/OnboardingModal';
 import {
   LogOut,
@@ -37,7 +39,7 @@ import {
 } from 'lucide-react';
 import { AccountLinkPage } from './components/AccountLinkPage';
 import { isSsoState } from './sso-oauth';
-import { fetchGitHubPurpose, linkGitHub } from './github-oauth';
+import { fetchGitHubPurpose } from './github-oauth';
 import { readAccountLink, type AccountLink } from './account-api';
 import logo from './logo.png';
 import './App.css';
@@ -83,6 +85,13 @@ function AppWithSession() {
   const [oauthError, setOauthError] = useState<string | null>(null);
   const [oauthNotice, setOauthNotice] = useState<string | null>(null);
   const [handlingOAuth, setHandlingOAuth] = useState(false);
+  // Retour GitHub « lier » ou « dépôts » : confirmation (réauthentification) avant l'appel (S31)
+  const [pendingGitHub, setPendingGitHub] = useState<{
+    purpose: 'link' | 'repos';
+    code: string;
+    state: string;
+  } | null>(null);
+  const [linkNotice, setLinkNotice] = useState('');
   const isPlatformAdmin =
     user?.platformRole === 'SUPER_ADMIN' || user?.platformRole === 'PLATFORM_ADMIN';
 
@@ -114,8 +123,8 @@ function AppWithSession() {
     const githubCallback = async () => {
       const purpose = await fetchGitHubPurpose();
       if (purpose === 'login') return login(code!, rawState ?? undefined);
-      await linkGitHub(code!, rawState ?? '');
-      setOauthNotice('Compte GitHub associé.');
+      // Aucune liaison sans réauthentification : l'écran de confirmation demande la preuve (S31)
+      setPendingGitHub({ purpose, code: code!, state: rawState ?? '' });
       return undefined;
     };
     const authPromise = isSso ? ssoLogin(code!, rawState) : githubCallback();
@@ -157,6 +166,21 @@ function AppWithSession() {
     );
   }
 
+  if (pendingGitHub) {
+    return (
+      <GitHubLinkConfirm
+        {...pendingGitHub}
+        accountEmail={user.email}
+        onDone={(message) => {
+          setPendingGitHub(null);
+          setLinkNotice(message);
+          setActiveTab('security');
+        }}
+        onCancel={() => setPendingGitHub(null)}
+      />
+    );
+  }
+
   const renderActiveTab = () => {
     switch (activeTab) {
       case 'kanban':
@@ -180,7 +204,16 @@ function AppWithSession() {
       case 'admin':
         return isPlatformAdmin ? <AdminConsole /> : <DashboardContent />;
       case 'security':
-        return <SecurityPage />;
+        return (
+          <>
+            <SecurityPage />
+            <IdentitiesSection
+              accountEmail={user.email}
+              notice={linkNotice}
+              onNoticeShown={() => setLinkNotice('')}
+            />
+          </>
+        );
       default:
         return <DashboardContent />;
     }

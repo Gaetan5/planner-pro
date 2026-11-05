@@ -57,3 +57,30 @@ export const disableMfa = (factor: { code?: string; recoveryCode?: string }, pas
 
 export const regenerateRecoveryCodes = (code: string, password?: string) =>
   call<{ recoveryCodes: string[] }>('/auth/mfa/recovery-codes', 'POST', clean({ code, password }));
+
+/** Preuve de réauthentification exigée pour lier ou délier une identité (S31). */
+export interface IdentityProof {
+  password?: string;
+  mfaCode?: string;
+  recoveryCode?: string;
+}
+
+export interface Identities {
+  firebase: { linked: boolean; email: string | null };
+  github: { linked: boolean; username: string | null };
+  hasPassword: boolean;
+  mfaEnabled: boolean;
+  /** Calculé par le serveur : identité liée et autre méthode de connexion disponible. */
+  canUnlink: Record<IdentityProvider, boolean>;
+}
+
+export type IdentityProvider = 'firebase' | 'github';
+
+export const getIdentities = () => call<Identities>('/auth/identities', 'GET');
+
+/** Le jeton Firebase ne vit qu'en mémoire, le temps de la confirmation : jamais persisté. */
+export const linkFirebase = (idToken: string, proof: IdentityProof) =>
+  call<{ firebaseEmail: string }>('/auth/firebase/link', 'POST', clean({ idToken, ...proof }));
+
+export const unlinkIdentity = (provider: IdentityProvider, proof: IdentityProof) =>
+  call<Record<string, never>>(`/auth/${provider}/unlink`, 'POST', clean({ ...proof }));

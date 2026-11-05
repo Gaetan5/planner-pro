@@ -38,7 +38,8 @@ function matchValue(actual: unknown, expected: unknown): boolean {
   if (expected instanceof Date && actual instanceof Date) {
     return actual.getTime() === expected.getTime();
   }
-  return actual === expected;
+  // Un champ nullable jamais renseigné est lu `undefined` par le faux, `null` par la base
+  return (actual === undefined && expected === null ? null : actual) === expected;
 }
 
 export function matches(row: Row, where: Row | undefined): boolean {

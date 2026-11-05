@@ -1,3 +1,5 @@
+import { SecurityApiError, type IdentityProof } from './security-api';
+
 const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 export type GitHubPurpose = 'login' | 'link' | 'repos';
@@ -32,16 +34,33 @@ export async function fetchGitHubPurpose(): Promise<GitHubPurpose> {
   return purpose;
 }
 
-/** Liaison d'un compte GitHub au compte connecté (finalités `link` et `repos`). */
-export async function linkGitHub(code: string, state: string): Promise<void> {
+/**
+ * Liaison d'un compte GitHub au compte connecté (finalités `link` et `repos`). S31 : le mot de
+ * passe (ou la connexion récente) et le code MFA sont saisis au retour de GitHub et envoyés avec
+ * `code` et `state` ; ils ne sont jamais conservés.
+ */
+export async function linkGitHub(
+  code: string,
+  state: string,
+  proof: IdentityProof = {},
+): Promise<{ githubUsername: string }> {
   const res = await fetch(`${BACKEND_URL}/auth/github/link`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code, state }),
+    body: JSON.stringify({
+      code,
+      state,
+      ...Object.fromEntries(Object.entries(proof).filter(([, value]) => value)),
+    }),
   });
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string | string[];
+    githubUsername?: string;
+  };
   if (!res.ok) {
-    const data = (await res.json().catch(() => ({}))) as { message?: string };
-    throw new Error(data.message || 'La liaison du compte GitHub a échoué.');
+    const message = Array.isArray(data.message) ? data.message.join(' ') : data.message;
+    throw new SecurityApiError(message || 'La liaison du compte GitHub a échoué.', res.status);
   }
+  return { githubUsername: data.githubUsername ?? '' };
 }

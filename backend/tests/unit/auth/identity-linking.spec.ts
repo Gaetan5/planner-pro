@@ -1,5 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { validate } from 'class-validator';
+import { FirebaseLinkDto } from '../../../src/auth/dto/identity.dto';
 import { JwtModule } from '@nestjs/jwt';
 import { AuthService } from '../../../src/auth/auth.service';
 import { FirebaseIdentityService } from '../../../src/auth/firebase-identity.service';
@@ -242,7 +244,7 @@ describe('S31 : liaison et déliaison d’identités externes', () => {
     it('seule méthode de connexion : 409, aucune écriture', async () => {
       await seed(linkedFields(), false);
       const fresh = await session();
-      const updateSpy = jest.spyOn(prisma.user, 'update');
+      const updateSpy = jest.spyOn(prisma.user, 'updateMany');
       await expect(service.unlinkIdentity('user-1', provider, {}, fresh.sid)).rejects.toThrow(
         ConflictException,
       );
@@ -286,7 +288,7 @@ describe('S31 : liaison et déliaison d’identités externes', () => {
       ['mot de passe faux', 'mauvais'],
     ])('%s : 403, rien n’est modifié', async (_l, password) => {
       await seed(linkedFields());
-      const updateSpy = jest.spyOn(prisma.user, 'update');
+      const updateSpy = jest.spyOn(prisma.user, 'updateMany');
       await expect(service.unlinkIdentity('user-1', provider, { password })).rejects.toThrow(
         ForbiddenException,
       );
@@ -310,6 +312,53 @@ describe('S31 : liaison et déliaison d’identités externes', () => {
     });
   });
 
+  // S31-a : deux déliaisons simultanées ne doivent pas retirer toutes les méthodes de connexion
+  describe('déliaisons simultanées (S31-a)', () => {
+    const both = () => ({
+      firebaseUid: 'fb-uid-1',
+      firebaseEmail: 'perso@example.com',
+      githubId: '4242',
+      githubUsername: 'ada-gh',
+      githubAccessToken: encrypt('gho_secret'),
+    });
+
+    it('sans mot de passe, deux identités : une seule déliaison réussit, l’autre donne 409', async () => {
+      await seed(both(), false);
+      const fresh = await session();
+      const results = await Promise.allSettled([
+        service.unlinkIdentity('user-1', 'firebase', {}, fresh.sid),
+        service.unlinkIdentity('user-1', 'github', {}, fresh.sid),
+      ]);
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      const rejected = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+      expect(rejected.reason).toBeInstanceOf(ConflictException);
+      expect(Boolean(row().firebaseUid) || Boolean(row().githubId)).toBe(true);
+      expect(mail.sendIdentityUnlinkedEmail).toHaveBeenCalledTimes(1);
+    });
+
+    it('avec un mot de passe, les deux déliaisons réussissent', async () => {
+      await seed(both());
+      const fresh = await session();
+      await Promise.all([
+        service.unlinkIdentity('user-1', 'firebase', { password: PASSWORD }, fresh.sid),
+        service.unlinkIdentity('user-1', 'github', { password: PASSWORD }, fresh.sid),
+      ]);
+      expect(row().firebaseUid).toBeNull();
+      expect(row().githubId).toBeNull();
+    });
+
+    it('la même identité déliée deux fois en parallèle : une seule écriture, l’autre 409', async () => {
+      await seed(both());
+      const fresh = await session();
+      const results = await Promise.allSettled([
+        service.unlinkIdentity('user-1', 'github', { password: PASSWORD }, fresh.sid),
+        service.unlinkIdentity('user-1', 'github', { password: PASSWORD }, fresh.sid),
+      ]);
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      expect(mail.sendIdentityUnlinkedEmail).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('getIdentities renvoie l’adresse Firebase et le nom GitHub, sans aucun jeton', async () => {
     await seed({
       firebaseUid: 'fb-uid-1',
@@ -324,7 +373,57 @@ describe('S31 : liaison et déliaison d’identités externes', () => {
       github: { linked: true, username: 'ada-gh' },
       hasPassword: true,
       mfaEnabled: false,
+      canUnlink: { firebase: true, github: true },
     });
-    expect(JSON.stringify(res)).not.toMatch(/gho_|fb-uid/);
+    expect(JSON.stringify(res)).not.toMatch(/gho_|fb-uid|ssoUid/);
+  });
+
+  // P9-L-a : une seule règle « dernière méthode de connexion », pour la lecture et la déliaison
+  describe('canUnlink et ssoUid (P9-L-a)', () => {
+    const gh = { githubId: '4242', githubUsername: 'ada-gh' };
+
+    it('sans mot de passe, avec ssoUid et GitHub : canUnlink vrai et la déliaison réussit', async () => {
+      await seed({ ...gh, ssoUid: 'sso-1' }, false);
+      const res = await service.getIdentities('user-1');
+      expect(res.canUnlink).toEqual({ firebase: false, github: true });
+      expect(res).not.toHaveProperty('ssoUid');
+      const fresh = await session();
+      await service.unlinkIdentity('user-1', 'github', {}, fresh.sid);
+      expect(row().githubId).toBeNull();
+    });
+
+    it('sans mot de passe ni ssoUid, une seule identité : canUnlink faux, déliaison 409', async () => {
+      await seed(gh, false);
+      expect((await service.getIdentities('user-1')).canUnlink).toEqual({
+        firebase: false,
+        github: false,
+      });
+      const fresh = await session();
+      await expect(service.unlinkIdentity('user-1', 'github', {}, fresh.sid)).rejects.toThrow(
+        ConflictException,
+      );
+    });
+
+    it('avec un mot de passe, une identité liée : canUnlink vrai pour elle seule', async () => {
+      await seed(gh);
+      expect((await service.getIdentities('user-1')).canUnlink).toEqual({
+        firebase: false,
+        github: true,
+      });
+    });
+
+    it('deux identités sans mot de passe : chacune est déliable', async () => {
+      await seed({ ...gh, firebaseUid: 'fb-1', firebaseEmail: 'p@e.fr' }, false);
+      expect((await service.getIdentities('user-1')).canUnlink).toEqual({
+        firebase: true,
+        github: true,
+      });
+    });
+  });
+
+  it('FirebaseLinkDto : idToken borné à 4096 caractères', async () => {
+    const make = (idToken: string) => Object.assign(new FirebaseLinkDto(), { idToken });
+    expect(await validate(make('a'.repeat(4096)))).toHaveLength(0);
+    expect(await validate(make('a'.repeat(4097)))).not.toHaveLength(0);
   });
 });

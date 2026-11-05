@@ -2767,3 +2767,257 @@ Non bloquants :
 - `ssoUid` ancien compté comme méthode ;
 - remplacement silencieux d'une identité déjà liée ;
 - `MaxLength` manquant sur `idToken`.
+
+---
+
+## Reprise après r26 (fixeur) — P9, volet liaison d'identités, et S31-a
+
+### S31-a — Déliaison atomique (dernière méthode de connexion)
+
+**Statut** : CORRIGÉ – À REVOIR.
+
+**Changement** :
+
+- `backend/src/auth/auth.service.ts` (`unlinkIdentity`) : le `prisma.user.update` non conditionnel est remplacé par `updateMany` dont le `where` porte la condition : identité encore liée **et** `OR` (`passwordHash` non nul, `ssoUid` non nul, autre identité non nulle). `count === 0` donne 409 avant toute révocation de session, audit ou notification. Le contrôle en lecture est conservé pour les messages précis (non lié, dernière méthode).
+- `backend/tests/http/fake-prisma.ts` (`matchValue`) : un champ nullable jamais renseigné (`undefined`) est comparé comme `null`, comme le fait la base (`{ not: null }` sinon vrai à tort pour un champ absent).
+
+**Tests** (`identity-linking.spec.ts`, 3 nouveaux, 37 au total) : `Promise.allSettled` de `firebase/unlink` et `github/unlink` sur un compte sans mot de passe à deux identités : une seule réussit, l'autre est un `ConflictException`, il reste une identité, une seule notification ; avec un mot de passe, les deux réussissent ; la même identité déliée deux fois en parallèle : une seule écriture, l'autre 409. Les tests « aucune écriture » de la déliaison espionnent désormais `updateMany` (l'espion sur `update` serait devenu vacueux).
+
+**Contre-mutation** : `where` réduit à `{ id }` : 2 échecs (course, double déliaison) ; code restauré, `cmp` identique.
+
+### P9 (volet liaison) — écran des identités liées
+
+**Statut** : CORRIGÉ – À REVOIR (volet liaison seulement ; voir « Reste ouvert »).
+
+**Changement (frontend)** :
+
+- `src/security-api.ts` : `getIdentities`, `linkFirebase`, `unlinkIdentity`, type `IdentityProof` (`password?`, `mfaCode?`, `recoveryCode?`).
+- `src/github-oauth.ts` : `linkGitHub(code, state, proof)` envoie la preuve (champs vides omis), renvoie `githubUsername`, lève `SecurityApiError` (statut conservé).
+- `src/components/IdentityProofFields.tsx` : champs de preuve partagés (mot de passe si le compte en a un, code TOTP ou de récupération si MFA active, rappel « connexion de moins de 5 minutes » sinon). Rien n'est conservé après l'envoi.
+- `src/components/IdentitiesSection.tsx` (affiché sous l'écran MFA, onglet `security`) : liste GitHub et Firebase. Lier GitHub = `startGitHubAuthorization('link')`. Lier Firebase = connexion Firebase (e-mail vérifié exigé), session Firebase du navigateur refermée aussitôt, puis **écran de confirmation qui affiche l'adresse Firebase avant validation** et avertit si elle diffère de l'adresse du compte, puis preuve et `POST /auth/firebase/link`. « Délier » : preuve puis `/auth/<fournisseur>/unlink` ; **désactivé avec explication quand c'est la dernière méthode** (ni mot de passe ni autre identité). Le mot de passe Firebase n'est jamais envoyé au backend ; le jeton Firebase ne vit qu'en mémoire.
+- `src/components/GitHubLinkConfirm.tsx` : au retour de GitHub avec la finalité `link` ou `repos`, `App.tsx` n'appelle plus `/auth/github/link` : il affiche cet écran (adresse du compte, preuve), puis `linkGitHub`. Après un échec, plus de nouvel essai avec le même code : bouton « Recommencer avec GitHub » (voir question 2).
+- `src/App.tsx` : routage du retour GitHub, écran de confirmation, composition de l'onglet `security`.
+
+**Tests ajoutés (19)** : `GitHubLinkConfirm.spec.tsx` (7 : aucun appel de liaison avant confirmation, mot de passe, `mfaCode`, `recoveryCode` sans `mfaCode`, compte sans mot de passe, 403 sans nouvel essai, annulation, texte `repos`) ; `IdentitiesSection.spec.tsx` (8 : « Lier GitHub » = finalité `link` sans appel de liaison, adresse Firebase affichée et avertissement avant confirmation et rien d'envoyé avant la preuve, pas d'avertissement à adresse égale, adresse non vérifiée refusée, « Délier » désactivé pour la dernière méthode et actif sinon, déliaison avec mot de passe et MFA, déliaison refusée) ; `App.github-return.spec.tsx` (3 : `link` et `repos` affichent la confirmation sans appeler `/auth/github/link`, `login` connecte) ; `github-oauth.spec.ts` (+1 : preuve envoyée, champs vides omis, statut remonté).
+
+**Contre-mutations frontend (11, toutes détectées, fichiers restaurés et comparés)** : mot de passe omis de la preuve (4 échecs) ; MFA omise (3) ; dernière méthode déliable (1) ; avertissement d'adresse différente supprimé (1) ; retour `link` traité comme `login` (2) ; liaison GitHub immédiate sans preuve dans `App.tsx` (2) ; nouvel essai permis après échec (1) ; `linkGitHub` sans preuve (4) ; Firebase lié sans écran de confirmation (2) ; adresse Firebase non vérifiée acceptée (1) ; mot de passe Firebase transmis au backend (1).
+
+**Mesures réelles** :
+
+| Commande | Résultat |
+| --- | --- |
+| `cd backend && env -u DATABASE_URL npx jest` | 83/83 suites, **2424/2424** (2421 avant) |
+| `nest build` ; `tsc --noEmit -p tsconfig.build.json` | exit 0 ; exit 0 |
+| `cd frontend && pnpm test:run` | 19 fichiers, **96/96** (77 avant) |
+| `tsc --noEmit -p .` ; `pnpm build` | exit 0 ; build OK |
+| `pnpm lint` racine | **0 erreur**, 53 avertissements (inchangé) |
+| Prettier sur les fichiers touchés | conforme |
+
+**Changements cassants** : aucun d'API. Les fichiers `InvitationAcceptance.tsx` et `Login.css` (modifications de l'utilisateur) n'ont pas été touchés.
+
+**Reste ouvert dans P9** : écran « Sessions actives » (liste, `DELETE /auth/sessions/:sid`, « Fermer les autres sessions » après l'activation MFA, cf. r21 point 3) et bouton « Connecter un dépôt » (finalité `repos`, dans les intégrations). Le routage du retour `repos` et sa confirmation sont prêts ; aucun écran ne démarre encore cette finalité.
+
+**Écarts et questions pour l'architecte** :
+
+1. **Adresse avant confirmation pour GitHub (condition 5).** Le nom d'utilisateur GitHub n'est connu qu'après l'échange du code, qui vient **après** la réauthentification (ordre validé en r26). L'écran de confirmation GitHub affiche donc l'adresse du compte Planner-Pro et annonce que le nom GitHub s'affichera après la liaison (et dans l'e-mail de notification), mais ne peut pas l'afficher avant. Pour le montrer avant, il faudrait une route d'aperçu qui consomme le code OAuth (à usage unique) ; je ne l'ai pas créée. Acceptes-tu cet écart pour GitHub (Firebase est conforme) ?
+2. **Cookie de `state` effacé dès le premier essai** (`auth.controller.ts`, `linkGitHub` : `clearCookie` avant le service). Un mot de passe faux au retour de GitHub oblige à repartir de GitHub. Le frontend le gère (message et « Recommencer avec GitHub »). Alternative backend : n'effacer le cookie qu'après une réauthentification réussie, ce qui permettrait de ressaisir le mot de passe. Je n'y ai pas touché (ordre S9-b validé) : préfères-tu cette variante ?
+3. **« Délier » désactivé côté frontend** se base sur `hasPassword` ou l'autre identité ; `GET /auth/identities` n'expose pas `ssoUid`. Un compte dont la seule autre méthode est un `ssoUid` voit le bouton désactivé alors que le serveur l'autoriserait. Ajouter un booléen `hasSso` (ou `canUnlink`) à `getIdentities` ?
+4. `GET /auth/identities` ne renvoie pas l'adresse du compte : elle est passée par `App.tsx` (`user.email`).
+5. Non traités (non bloquants r26) : `MaxLength` de `idToken`, notification « déliée » lors du remplacement d'une identité, vérification de la configuration SSO pour `ssoUid`.
+
+#### Revue architecte (r27) — S31-a et P9 (volet liaison)
+
+Détail dans `rapport-audit.md`, section « Revue r27 ».
+
+**S31-a : VALIDÉ.**
+
+- L'`updateMany` conditionnel suivi d'un 409 si `count === 0` est atomique sous InnoDB.
+- Les tests de course sont pertinents.
+- Le correctif de `fake-prisma` est juste. Il ne porte cependant pas les tests S31-a, car le faux initialise déjà les champs d'identité à `null`.
+
+**P9, volet liaison : À REPRENDRE (points mineurs).**
+
+Le volet est conforme aux exigences de sécurité r23-bis et r26 :
+
+- aucune liaison sans preuve ;
+- adresse Firebase affichée avant validation, avec un avertissement si elle diffère ;
+- mot de passe Firebase jamais transmis au backend ;
+- « Délier » désactivé pour la dernière méthode.
+
+À reprendre :
+
+- **P9-L-a** : ajouter `canUnlink: { firebase, github }` à `GET /auth/identities`. La valeur est calculée par une fonction unique `hasOtherLoginMethod`, partagée avec `unlinkIdentity` (elle compte `ssoUid`). Le frontend l'utilise au lieu de recalculer la règle. Tests attendus :
+  - backend : compte sans mot de passe avec `ssoUid` et GitHub, `canUnlink.github` vrai et déliaison réussie ;
+  - backend : compte avec une seule méthode, `canUnlink` faux ;
+  - frontend : bouton actif ou désactivé selon `canUnlink` ;
+  - la mutation « `ssoUid` retiré du `OR` » doit être détectée.
+- **P9-L-b** : relire `getIdentities()` à l'ouverture de chaque formulaire de preuve (« Délier », étape de confirmation Firebase), pour ne pas garder un `mfaEnabled` périmé après une action dans `SecurityPage`. Test : première réponse `mfaEnabled: false`, seconde `true`, le champ du code s'affiche et `mfaCode` est envoyé.
+- **P9-L-c** : `linkNotice` (`App.tsx`) ne doit s'afficher qu'une fois. Test : après un changement d'onglet puis un retour sur `security`, la notice a disparu.
+- **P9-L-d** : test paramétré `link`/`repos`. Après un 403, « Recommencer avec GitHub » appelle `startGitHubAuthorization` avec la même finalité. La mutation « relance en `login` » n'est aujourd'hui pas détectée.
+- Facultatif :
+  - **P9-L-e** : « depuis votre profil » devient « depuis « Sécurité du compte » » (`auth.service.ts:239`, `:400`) ;
+  - `@MaxLength(4096)` sur `idToken`.
+
+**Mesures relancées** :
+
+- backend : 83/83 suites et 2424/2424 tests ; `nest build` et `tsc` OK ;
+- frontend : 96/96, `tsc` et `pnpm build` OK ;
+- `pnpm lint` : 0 erreur (53 avertissements) ;
+- Prettier conforme.
+
+**14 contre-mutations de l'architecte** :
+
+- 11 détectées : B1 à B3, F1 à F7, F9 ;
+- B4 (`ssoUid`) non détectée : traitée par P9-L-a ;
+- B5 (`fake-prisma`) non détectée, mais équivalente ;
+- F8 (finalité de relance) non détectée : traitée par P9-L-d.
+
+Tous les fichiers ont été restaurés (`filecmp`, `git status` et `md5sum` identiques).
+
+**Réponses aux questions** :
+
+1. Condition 5 pour GitHub : **écart accepté.** Afficher le nom avant la preuve imposerait d'échanger le code d'abord, ce qui est refusé. Le nom est affiché aussitôt après la liaison et figure dans l'e-mail. La remédiation est mise à jour dans le rapport.
+2. Cookie de `state` effacé au premier essai : **conserver le comportement actuel.** Le `state` reste à usage unique quelle que soit l'issue, sans fenêtre de rejeu. Le retour par GitHub coûte peu.
+3. Pas de `ssoUid` ni de `hasSso` : **exposer `canUnlink`** par fournisseur (P9-L-a).
+4. Adresse passée par `user.email` : **OK.**
+
+**Constats ouverts** :
+
+- P9-L-a à P9-L-d (à reprendre) ;
+- P9-L-e et `MaxLength` de `idToken` (facultatifs) ;
+- P9, « Sessions actives » et « Connecter un dépôt » ;
+- non bloquants r26 : remplacement d'identité, configuration SSO ;
+- S30, actions d'exploitation 1 à 4 ;
+- Phases 5 et 6 (S19 à S26, A5 à A9, P2, P5, P7, P8, Q-2, O10 à O17).
+
+---
+
+## Reprise r27 (fixeur) — P9 volet liaison : P9-L-a à P9-L-e
+
+**Statut** : CORRIGÉ – À REVOIR (P9-L-a, b, c, d ; P9-L-e et `MaxLength` faits).
+
+**P9-L-a — règle unique.** `auth.service.ts` : fonction `hasOtherLoginMethod(account, provider)` (mot de passe, `ssoUid`, autre identité), utilisée par le contrôle en lecture de `unlinkIdentity` et par `getIdentities`, qui renvoie `canUnlink: { firebase, github }` (vrai seulement si l'identité est liée **et** qu'une autre méthode existe ; ni `ssoUid` ni `hasSso` exposés). L'écriture conditionnelle (`updateMany`) reste le miroir SQL de la règle. Frontend : `IdentitiesSection` lit `identities.canUnlink[provider]`, plus aucun recalcul ; type `Identities` mis à jour.
+Tests backend (`identity-linking.spec.ts`) : compte sans mot de passe avec `ssoUid` + GitHub : `canUnlink.github` vrai et déliaison réussie ; méthode unique : faux et 409 ; mot de passe + une identité ; deux identités sans mot de passe. Frontend : bouton actif (`canUnlink.github: true`, sans mot de passe) / désactivé avec explication (`false`).
+Contre-mutations backend : B4a `ssoUid` retiré du `OR` SQL (détectée, 1 échec) ; B4b `ssoUid` retiré de `hasOtherLoginMethod` (détectée, 1) ; `canUnlink` sans la condition « lié » (détectée, 3). Frontend : règle recalculée côté client (détectée, 1) ; `canUnlink` ignoré (détectée, 6).
+
+**P9-L-b — MFA périmée.** `IdentitiesSection` relit `getIdentities()` à l'ouverture de « Délier » (avant d'afficher le formulaire) et avant l'étape de confirmation Firebase. Un échec de relecture n'ouvre pas le formulaire. Tests : 1re réponse `mfaEnabled: false`, 2e `true` : champ « Code à 6 chiffres » affiché et `mfaCode` envoyé (déliaison et liaison Firebase) ; cas inverse (MFA désactivée) : pas de champ. Mutations : pas de relecture à « Délier » (3 échecs), pas de relecture avant confirmation Firebase (2).
+
+**P9-L-c — notice consommée une fois.** Prop `onNoticeShown` : `IdentitiesSection` l'appelle au montage si une notice est transmise ; `App.tsx` remet `linkNotice` à `''`. Test `App.link-notice.spec.tsx` : liaison réussie, notice affichée, changement d'onglet puis retour : disparue. Mutation « jamais consommée » : détectée (2).
+
+**P9-L-d — relance avec la même finalité.** Test paramétré `link`/`repos` dans `GitHubLinkConfirm.spec.tsx` : après un 403, « Recommencer avec GitHub » appelle `startGitHubAuthorization(purpose)`. Mutation F8 (relance en `login`) : détectée (2).
+
+**P9-L-e et `MaxLength`.** Messages 409 : « depuis votre profil » remplacé par « depuis « Sécurité du compte » » (`auth.service.ts`, 2 occurrences ; `grep "depuis votre profil" backend/src` vide ; aucun test ne vérifiait ce texte). `FirebaseLinkDto.idToken` : `@MaxLength(4096)`, test aux bornes 4096 / 4097.
+
+**Mesures réelles** :
+
+| Commande | Résultat |
+| --- | --- |
+| `cd backend && env -u DATABASE_URL npx jest` | 83/83 suites, **2429/2429** (2424 avant). Un premier passage complet a eu 1 échec, `tests/http/mfa-ticket.spec.ts` (sous charge) ; la suite seule donne 14/14 et le second passage complet 2429/2429 : échec intermittent, non lié au lot (pas de lien avec l'identité) |
+| `nest build` ; `tsc --noEmit -p tsconfig.build.json` | exit 0 ; exit 0 |
+| `cd frontend && pnpm test:run` | 20 fichiers, **104/104** (96 avant) |
+| `tsc --noEmit -p .` ; `pnpm build` | exit 0 ; build OK |
+| `pnpm lint` racine | **0 erreur**, 53 avertissements. Une erreur a été introduite puis corrigée en cours de travail (commentaire `eslint-disable react-hooks/exhaustive-deps` : règle absente de la configuration), retiré |
+| Prettier sur les fichiers du lot | conforme |
+
+**Changement d'API** : `GET /auth/identities` gagne `canUnlink` (additif). Aucune migration. `InvitationAcceptance.tsx` et `Login.css` non touchés (Prettier lancé uniquement sur les fichiers du lot).
+
+**Reste hors lot** : « Sessions actives », « Connecter un dépôt ; non bloquants r26 : notification « déliée » au remplacement d'une identité, vérification de la configuration SSO active pour `ssoUid`.
+
+**Questions pour l'architecte** : aucune.
+
+#### Revue architecte (r28) — P9 (volet liaison), reprise P9-L-a à P9-L-e
+
+Détail dans `rapport-audit.md`, section « Revue r28 ».
+
+**P9-L-a, P9-L-b, P9-L-c, P9-L-d, P9-L-e et `MaxLength(4096)` de `idToken` : VALIDÉ. Le volet liaison de P9 est CLOS.**
+
+**Mesures relancées** :
+
+- backend : 83/83 suites et 2429/2429 au second passage complet (machine seule) ; `nest build` et `tsc` OK ;
+- frontend : 20 fichiers, 104/104 ; `tsc` et build OK ;
+- `pnpm lint` : 0 erreur ;
+- Prettier conforme ;
+- `grep "depuis votre profil"` vide.
+
+**22 contre-mutations de l'architecte** :
+
+- 21 détectées, dont B4 (`ssoUid`) et F8 (finalité de relance), non détectées en r27 ;
+- B6 (`canUnlink.github` sans la condition « lié ») non détectée, sans effet fonctionnel.
+
+Amélioration non bloquante : ajouter le cas « mot de passe et Firebase seul lié : `canUnlink.github === false` ».
+
+**Échec intermittent de `mfa-ticket.spec.ts`** : reproduit au premier passage complet, lancé en même temps que la suite frontend. En cause, le test « login, Redis en mode `hang` : 503 en moins de 3 s ». L'instabilité est **préexistante** (`c5f1391`) et **sans lien avec le lot**. La borne de 3 s ne laisse qu'1 s de marge, après le délai Redis de 2 s, pour Argon2 sous charge. Elle devient le nouveau constat **O19 (Mineur, qualité des tests)**. Remédiation : délai Redis injectable (200 ms en test HTTP, borne à 2 s) et test unitaire de la valeur par défaut avec des minuteries simulées. Critère : 5 passages complets en parallèle du frontend sans échec.
+
+**Constats ouverts** :
+
+- P9 : « Sessions actives » et « Connecter un dépôt » ;
+- O19 ;
+- non bloquants r26 : remplacement d'identité, configuration SSO ;
+- S30, actions d'exploitation 1 à 4 ;
+- Phases 5 et 6 (S19 à S26, A5 à A9, P2, P5, P7, P8, Q-2, O10 à O17).
+
+---
+
+## Travail Gemini (InvitationAcceptance / Login.css)
+
+**Statut** : CORRIGÉ – À REVOIR.
+
+**Périmètre** : `frontend/src/components/InvitationAcceptance.tsx` et `Login.css` (modifications non commitées d'un autre assistant ; interdiction de les toucher levée pour ce lot).
+
+**Constats** :
+
+- `InvitationAcceptance.tsx` : seul changement réel par rapport à HEAD : le logo passe à `<div className="login-logo-container"><img className="login-logo"/></div>`, structure identique à `Login.tsx:302` et `AccountLinkPage.tsx:51`. Correct. Le fichier est cohérent : tous les imports (`useApp`, `startGitHubAuthorization`, icônes `lucide-react`, `logo`) et tous les états et handlers (`name`, `handleBypass`, `handleGitHubLogin`, `handleAccept`, `handleGoToApp`) sont utilisés ; `tsc` passe ; aucun import, état ni handler orphelin.
+- `Login.css` : `object-fit: contain` ajouté sur `.login-logo` (utile, l'élément est maintenant l'`<img>`). La règle `.login-logo img` était du code mort (`grep` : aucune utilisation hors `Login.css`) : **supprimée**. La media query mobile `.login-logo` (60 px) s'applique bien à l'`<img>` ; `.login-logo:hover` aussi.
+- **Disparition de la connexion/inscription classiques** : `classicLogin`, `classicRegister` et `authMode` **ne figurent ni dans HEAD (`git show HEAD:…` : 0 occurrence), ni dans l'historique de ce fichier (`git log -S classicRegister` : vide), ni dans un stash**. Les ~185 lignes constatées plus tôt n'existaient donc que dans l'arbre de travail et sont perdues ; elles n'ont **pas** été réimplémentées. État actuel : un visiteur non connecté arrivant par un lien d'invitation ne peut se connecter que par GitHub ou par le compte de démonstration (`mockLogin`, refusé en production par le backend). **Un utilisateur avec un compte e-mail et mot de passe ne peut pas se connecter depuis cette page**, et `App.tsx` affiche `InvitationAcceptance` avant `Login` tant que le jeton est dans l'URL. **Décision produit à prendre par l'utilisateur** : réintégrer le formulaire (ou un lien vers `Login` en conservant le jeton), ou accepter GitHub seul.
+- Constaté, non modifié (préexistant, hors périmètre) : le formulaire « compte de démo » est affiché sans condition d'environnement, ici et dans `Login.tsx:100` ; en production il échoue avec « Erreur d'authentification ».
+
+**Changements** : `Login.css` : suppression de la règle `.login-logo img` (Prettier a normalisé la ligne vide laissée). `InvitationAcceptance.tsx` : aucun changement.
+
+**Mesures** : frontend `pnpm test:run` 20 fichiers, 104/104 ; `tsc --noEmit -p .` exit 0 ; `pnpm build` OK ; `pnpm lint` racine 0 erreur ; Prettier conforme sur les deux fichiers.
+
+**Question pour l'architecte et l'utilisateur** : réintégrer la connexion par e-mail/mot de passe dans le parcours d'invitation ?
+
+#### Revue architecte (r29) — Travail Gemini (InvitationAcceptance, Login.css)
+
+Détail dans `rapport-audit.md`, section « Revue r29 ».
+
+**VALIDÉ** (correctif d'affichage du logo).
+
+- Le diff réel se limite à la structure `login-logo-container` / `img.login-logo` et à `object-fit: contain`. Le retrait de `.login-logo img`, règle morte qui n'existait pas à HEAD, est correct.
+- Rendu vérifié en headless Chrome avec la feuille du build : 72 px à 1280 px et 60 px à 375 px (la media query l'emporte), aucun débordement. Le survol s'applique à l'`<img>`.
+- Mesures : frontend 20 fichiers, 104/104 ; `tsc` et build OK ; lint sans erreur ; Prettier conforme.
+
+**Correction du journal** : les formulaires e-mail et mot de passe disparus **sont récupérables**. Ils se trouvent dans le journal local de Gemini, `~/.gemini/antigravity/brain/fc2d2132-…/.system_generated/logs/transcript_full.jsonl`, étapes 229, 231 et 237. **Je déconseille de les restaurer** :
+
+- ils ignorent le défi MFA renvoyé par `classicLogin` ;
+- ils dupliquent `Login` sans mot de passe oublié, Firebase ni SSO.
+
+Les scripts de l'architecte n'ont jamais modifié ce fichier : `md5sum` identique en r27 et en r28.
+
+**Question « réintégrer e-mail et mot de passe ? »** : je recommande l'**option B**. Elle réutilise le composant `Login` dans le contexte de l'invitation, avec un jeton conservé en `sessionStorage`, plutôt que de dupliquer les formulaires (A) ou de se limiter à GitHub (C). En effet, même GitHub perd aujourd'hui le jeton au retour d'OAuth : `redirect_uri` est l'origine du frontend. La décision revient à l'utilisateur.
+
+Le défaut est instruit sous **P13 (Majeur, produit)**, en reprenant l'identifiant de la section ajoutée par Gemini dans le rapport. Sa remédiation est remplacée : le pré-remplissage de l'adresse complète est **interdit** par S27.
+
+Le compte de démo est déjà couvert côté serveur par **S26**. Son volet `mock/login` est avancé dans **P13-e**. L'affichage côté client relève de **P13-d**.
+
+**Prochain lot pour le fixeur, dans l'ordre** :
+
+1. **O19** (remédiation r28).
+2. **P13-a à P13-e** : jeton conservé et retiré de l'URL au montage, `Login` réutilisé, « Changer de compte » sur un 403, démo seulement si `import.meta.env.DEV`, `mock/login` enregistrée seulement si `ENABLE_DEV_AUTH=true` et `NODE_ENV=development`.
+3. **P9-S** « Sessions actives » : `POST /auth/sessions/revoke-others`, `SessionsSection`, proposition de fermeture après l'activation de la MFA.
+4. **P9-R** « Connecter un dépôt » :
+   - côté backend : `GithubSyncDto`, `assertProject(…, 'project.manage')`, vérification du dépôt auprès de GitHub, 409 sur le remplacement d'une identité GitHub ;
+   - côté frontend : `IntegrationsPanel`.
+
+Exigences précises, tests attendus et critères d'acceptation : voir le rapport, section r29.
+
+**Constats ouverts** :
+
+- O19 ;
+- P13 ;
+- P9-S ;
+- P9-R ;
+- S26 (reste) ;
+- non bloquant r26 : configuration SSO ;
+- S30, actions d'exploitation 1 à 4 ;
+- Phases 5 et 6 (S19 à S26, A5 à A9, P2, P5, P7, P8, Q-2, O10 à O17).

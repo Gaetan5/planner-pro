@@ -70,11 +70,34 @@ describe('routage du retour GitHub selon la finalité (S9-b)', () => {
     await expect(fetchGitHubPurpose()).rejects.toThrow();
   });
 
-  it('linkGitHub appelle /auth/github/link (et non /login) avec code et state', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+  it('linkGitHub appelle /auth/github/link (et non /login) avec code, state et la preuve (S31)', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({ githubUsername: 'ada-gh' }) });
     vi.stubGlobal('fetch', fetchMock);
-    await linkGitHub('c', 's');
+    await expect(linkGitHub('c', 's', { password: 'pw', mfaCode: '123456' })).resolves.toEqual({
+      githubUsername: 'ada-gh',
+    });
     expect(fetchMock.mock.calls[0][0]).toContain('/auth/github/link');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      code: 'c',
+      state: 's',
+      password: 'pw',
+      mfaCode: '123456',
+    });
+  });
+
+  it('linkGitHub omet les champs de preuve vides et remonte le statut HTTP', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: async () => ({ message: 'Le mot de passe est requis.' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(linkGitHub('c', 's', { password: '' })).rejects.toMatchObject({
+      status: 403,
+      message: 'Le mot de passe est requis.',
+    });
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ code: 'c', state: 's' });
   });
 });
