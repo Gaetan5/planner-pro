@@ -295,6 +295,15 @@ export class AuthController {
   }
 
   /**
+   * État MFA du compte connecté (écran « Sécurité du compte »).
+   */
+  @ForbiddenInImpersonation()
+  @Get('mfa/status')
+  async mfaStatus(@Req() req: AuthenticatedUserRequest) {
+    return this.authService.getMfaStatus(req.user.id);
+  }
+
+  /**
    * Endpoint d'initialisation du MFA TOTP (génère la clé et le QR code URI)
    */
   @ForbiddenInImpersonation()

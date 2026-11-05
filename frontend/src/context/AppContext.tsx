@@ -1,3 +1,4 @@
+import { confirmLeaveUnsavedCodes } from '../unsaved-codes';
 import React, {
   createContext,
   useContext,
@@ -229,7 +230,8 @@ interface AppContextType {
     | 'agile'
     | 'gantt'
     | 'finances'
-    | 'admin';
+    | 'admin'
+    | 'security';
   isConnected: boolean;
   login: (code: string, state?: string) => Promise<MfaChallenge | void>;
   classicLogin: (email: string, passwordRaw: string) => Promise<MfaChallenge | void>;
@@ -258,7 +260,8 @@ interface AppContextType {
       | 'agile'
       | 'gantt'
       | 'finances'
-      | 'admin',
+      | 'admin'
+      | 'security',
   ) => void;
   createProject: (
     name: string,
@@ -477,7 +480,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     | 'gantt'
     | 'finances'
     | 'admin'
+    | 'security'
   >('dashboard');
+  // Codes de récupération affichés (P9-MFA-e) : confirmer avant de quitter l'écran
+  const guardedSetActiveTab: typeof setActiveTab = (tab) => {
+    if (!confirmLeaveUnsavedCodes()) return;
+    setActiveTab(tab);
+  };
   const [isConnected, setIsConnected] = useState(false);
   const [socket, setSocket] = useState<Socket | null>(null);
   const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -1935,7 +1944,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         ssoLogin,
         logout,
         mockLogin,
-        setActiveTab,
+        setActiveTab: guardedSetActiveTab,
         createProject,
         deleteProject,
         createTask,

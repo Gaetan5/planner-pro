@@ -15,6 +15,7 @@ import { GanttView } from './components/GanttView';
 import { NotificationInbox } from './components/NotificationInbox';
 import { FinancesView } from './components/FinancesView';
 import { AdminConsole } from './components/AdminConsole';
+import { SecurityPage } from './components/SecurityPage';
 import { OnboardingModal } from './components/OnboardingModal';
 import {
   LogOut,
@@ -178,6 +179,8 @@ function AppWithSession() {
         return <FinancesView />;
       case 'admin':
         return isPlatformAdmin ? <AdminConsole /> : <DashboardContent />;
+      case 'security':
+        return <SecurityPage />;
       default:
         return <DashboardContent />;
     }
@@ -322,6 +325,14 @@ function AppWithSession() {
               <p className="user-info__name">{user.name}</p>
               <p className="user-info__email">{user.email}</p>
             </div>
+            <button
+              onClick={() => setActiveTab('security')}
+              className="btn-icon"
+              title="Sécurité du compte"
+              aria-label="Sécurité du compte"
+            >
+              <ShieldCheck size={16} />
+            </button>
             <button onClick={logout} className="btn-icon btn-icon--danger" title="Se déconnecter">
               <LogOut size={16} />
             </button>

@@ -194,6 +194,9 @@ importers:
       lucide-react:
         specifier: 0.395.0
         version: 0.395.0(react@18.3.1)
+      qrcode-generator:
+        specifier: 2.0.4
+        version: 2.0.4
       react:
         specifier: 18.3.1
         version: 18.3.1
@@ -8865,6 +8868,12 @@ packages:
         integrity: sha512-bVWawvoZoBYpp6yIoQtQXHZjmz35RSVHnUOTefl8Vcjr8snTPY1wnpSPMWekcFwbxI6gtmT7rSYPFvz71ldiOA==,
       }
 
+  qrcode-generator@2.0.4:
+    resolution:
+      {
+        integrity: sha512-mZSiP6RnbHl4xL2Ap5HfkjLnmxfKcPWpWe/c+5XxCuetEenqmNFf1FH/ftXPCtFG5/TDobjsjz6sSNL0Sr8Z9g==,
+      }
+
   qs@6.14.2:
     resolution:
       {
@@ -16772,6 +16781,8 @@ snapshots:
       escape-goat: 2.1.1
 
   pure-rand@6.1.0: {}
+
+  qrcode-generator@2.0.4: {}
 
   qs@6.14.2:
     dependencies:

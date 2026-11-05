@@ -51,6 +51,30 @@ describe('S12 : cloisonnement par projet dans les services', () => {
     return module;
   };
 
+  // O18 : horloge figée sur une semaine sans jour férié (lundi 1er juin 2026). Seule `Date` est
+  // simulée : la capacité hebdomadaire dépend des jours fériés de la fenêtre de 7 jours.
+  beforeEach(() => {
+    jest.useFakeTimers({
+      now: new Date('2026-06-01T09:00:00.000Z'),
+      doNotFake: [
+        'nextTick',
+        'setImmediate',
+        'clearImmediate',
+        'setTimeout',
+        'clearTimeout',
+        'setInterval',
+        'clearInterval',
+        'queueMicrotask',
+        'performance',
+        'hrtime',
+      ],
+    });
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
     prisma = buildRbacPrisma() as any;

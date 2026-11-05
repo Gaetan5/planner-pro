@@ -3035,3 +3035,276 @@ Revue des « Actions de la revue r19 », des « Résultats (r19) » et des « Po
 
 - Phase 1 : P9.
 - Phases 5 et 6 : S19 à S26 ; A5 à A9 ; P2, P5, P7, P8 ; Q-2 ; O10 à O15.
+
+## Revue r21 — P9, volet MFA (P9-MFA) : À REPRENDRE (2026-11-04)
+
+Revue de l'entrée « P9-MFA » du journal (statut « CORRIGÉ – À REVOIR »). Le code et les tests ont été relus et les suites relancées. Une mutation frontend a été jouée puis annulée (sauvegarde, substitution, restauration vérifiée par `cmp`). Aucun commit ; `.claude/` non touché. Hors revue : `backend/src/auth/scim/scim.guard.ts` et la partie du journal antérieure à P9-MFA (modifications de l'utilisateur).
+
+**Verdict : À REPRENDRE.** Le fond est bon : l'écran fait ce que P9 demande pour le volet MFA, aucun secret n'est persisté et la route `status` est correctement bornée. Restent quatre corrections courtes (moins d'une heure en tout) : la CI est rouge en l'état, le diff du lockfile est illisible et le journal contient deux affirmations inexactes.
+
+### Vérifications refaites par l'architecte
+
+| Commande | Résultat |
+| --- | --- |
+| `cd backend && env -u DATABASE_URL npx jest` (suite complète) | **81/81 suites, 2365/2365 tests**, 92 s. Aucun échec de temporisation reproduit |
+| `nest build` ; ESLint et Prettier sur `auth.controller.ts`, `auth.service.ts`, `auth.service.spec.ts` | exit 0 ; 0 erreur ; conforme |
+| `cd frontend && pnpm test:run` | **74/74** (16 fichiers) |
+| `tsc --noEmit -p .` ; `pnpm build` (frontend) | exit 0 ; build OK (avertissement de taille de chunk préexistant) |
+| ESLint sur les fichiers frontend touchés, et à la racine (`pnpm lint`, comme la CI) | **1 erreur** : `frontend/src/context/AppContext.tsx:263:5 Insert ··  prettier/prettier`. `prettier --check` signale le même fichier |
+| `pnpm install --frozen-lockfile --ignore-scripts` sous **Node 20.20.2 et pnpm 9.15.4** (version de `packageManager`), sur une copie isolée des manifestes | OK, avec le lockfile livré **et** avec le lockfile reformaté par Prettier |
+| Diff sémantique du lockfile (YAML parsé, HEAD comparé au fichier livré) | 3 ajouts seulement : `importers/frontend/dependencies/qrcode-generator`, `packages/qrcode-generator@2.0.4`, `snapshots/qrcode-generator@2.0.4`. Aucune autre version modifiée |
+| `git diff --stat pnpm-lock.yaml` | **9081 lignes modifiées** (2510 ajouts, 6736 suppressions), et non « +11 lignes » comme l'annonce le journal. Le fichier livré est au format natif de pnpm alors que HEAD est au format Prettier. Après `prettier` : diff de 11 lignes |
+| Registre npm, `qrcode-generator@2.0.4` | intégrité `sha512-mZSiP6Rn…r8Z9g==`, identique au lockfile ; dépôt `github.com/kazuhikoarase/qrcode-generator` (auteur historique), MIT, **aucune dépendance**, aucun script `install`/`postinstall`, ESM et types fournis. Provenance acceptable |
+
+**Temporisations backend.** Les deux échecs annoncés comme non liés (`mfa-ticket.spec.ts`, `session-lifecycle.spec.ts`) ne se reproduisent pas sur une suite complète sans charge concurrente : le diagnostic « temporisation sous charge » est plausible et accepté. Aucun lien avec le diff (le seul changement backend est une lecture `select`).
+
+### Mutation
+
+| ID | Mutation | Résultat |
+| --- | --- | --- |
+| M1 | `SecurityPage.confirm` : `localStorage.setItem` des codes de secours et du secret TOTP | **Survit (8/8 verts)** : aucun test ne garde l'exigence « aucune persistance » |
+
+### Revue du code
+
+- **Persistance des secrets : conforme.** Le secret, l'`authUri` et les codes ne vivent que dans l'état React. Aucun `localStorage`, `sessionStorage` ou `console.*` dans `SecurityPage.tsx` et `security-api.ts`. Le QR est calculé en local (aucun appel externe : 3 appels `fetch` exactement dans le test d'activation). Le secret disparaît de l'écran dès la confirmation ou l'annulation. Le Blob du téléchargement est construit à la demande et son URL révoquée. Le profil `planner_user` mis en cache n'est pas enrichi.
+- **Backend : conforme.** `getMfaStatus` lit seulement `mfaEnabled` et `passwordHash`, et ne renvoie qu'un booléen dérivé. La route porte `@ForbiddenInImpersonation()`, et le test méta S18.2 (`impersonation-routes.spec.ts`, `^/auth/mfa/`) le garantit pour toute future route `mfa/*`. `PlatformAdminGuard` lit `mfaEnabled` en base : un SUPER_ADMIN qui vient d'activer sa MFA accède à `/admin/*` sans se reconnecter. C'est l'effet attendu pour le déblocage de production (la réserve sur les sessions antérieures relève de O11).
+- **Parcours : conforme au critère de P9.** Activation (réauthentification S6-b, QR et clé en texte, confirmation), codes affichés une seule fois avec une confirmation explicite avant fermeture, téléchargement `.txt`, désactivation par TOTP ou par code de secours, régénération. Les erreurs 400, 403 et compte sans mot de passe sont couvertes. Le lien depuis le 403 de la console d'administration est testé.
+- **Régénération par TOTP seulement** : le rapport P9 dit « code, ou code de secours ». Le DTO backend (`RegenerateRecoveryCodesDto`) n'accepte que le TOTP, et l'écran s'y conforme. **Accepté** : un utilisateur qui a perdu son TOTP passe par la désactivation (code de secours), puis réactive. Remédiation de P9 mise à jour en ce sens.
+
+### Exigences pour lever « À REPRENDRE »
+
+1. **P9-MFA-a (bloquant, CI)** : corriger l'indentation de `frontend/src/context/AppContext.tsx:263` (troisième union de l'onglet, `| 'security'`). **Critère** : `pnpm lint` à la racine donne 0 erreur ; `npx prettier --check frontend/src/context/AppContext.tsx` est conforme.
+2. **P9-MFA-b (bloquant, revue de la chaîne d'approvisionnement)** : remettre `pnpm-lock.yaml` au format de HEAD (`npx prettier --write pnpm-lock.yaml`). Un diff de 9 000 lignes rend invisible toute modification indésirable du lockfile. Je l'ai vérifié sémantiquement cette fois, mais ce contrôle ne doit pas devenir nécessaire à chaque fois. **Critère** : `git diff --stat pnpm-lock.yaml` donne environ 11 insertions et 0 suppression, limitées aux trois entrées `qrcode-generator` ; `pnpm install --frozen-lockfile` passe (vérifié par l'architecte sur le fichier reformaté, sous Node 20 et pnpm 9.15.4).
+3. **P9-MFA-c (bloquant, test manquant)** : ajouter à `SecurityPage.spec.tsx` un test de non-persistance. Espionner `Storage.prototype.setItem` (ce qui couvre `localStorage` et `sessionStorage`) ainsi que `console.log`, `console.info`, `console.warn`, `console.error` et `console.debug`. Dérouler l'activation complète puis la régénération. **Critère** : aucun appel ne contient le secret (`JBSWY3DPEHPK3PXP`), l'`authUri` ou l'un des codes ; après démontage (`unmount`), `document.body` ne contient plus aucun code. La mutation M1 doit faire échouer ce test.
+4. **P9-MFA-d (journal)** : corriger les deux affirmations inexactes de l'entrée P9-MFA. Le lockfile n'était pas à « +11 lignes » et l'ESLint des fichiers frontend touchés n'était pas à « 0 erreur ». Rendre les chiffres réels après correction.
+
+### Points non bloquants (à traiter dans l'itération P9 suivante ou en Phase 5)
+
+- **P9-MFA-e (Amélioration)** : si l'utilisateur change d'onglet avant « Terminer », le composant est démonté, les codes sont perdus et la MFA reste active. Il pourra régénérer ses codes, mais il ne le sait pas. Il faut au minimum une confirmation au changement d'onglet et un `beforeunload` tant que le panneau des codes est affiché.
+- **P9-MFA-f (Amélioration)** : `download()` révoque l'URL du Blob juste après `click()` et n'attache pas le lien au DOM. Sous Safari, le téléchargement peut échouer. Ajouter le lien au DOM, puis appeler `URL.revokeObjectURL` dans un `setTimeout`.
+- **P9-MFA-g (Mineur, texte)** : pour un compte sans mot de passe, les formulaires de désactivation et de régénération affichent « … et votre mot de passe » sans champ correspondant. Adapter le texte à `hasPassword`.
+- Nouveaux constats **O16** et **O17** ci-dessous (Phase 5).
+
+### Réponses aux questions du fixeur
+
+1. **`GET /auth/mfa/status` plutôt que `mfaEnabled` dans `user` : VALIDÉ.** C'est le bon choix : le cache `planner_user` est périmé par construction, et l'état MFA doit être lu à la source au moment de l'affichage. **`hasPassword` : fuite acceptable.** La route ne prend aucun identifiant (pas d'énumération), ne répond qu'au titulaire authentifié, est interdite en impersonation et ne révèle qu'une propriété que l'utilisateur connaît déjà (sa méthode de connexion). Ne jamais l'ajouter à une réponse qui porte sur un autre compte (console d'administration comprise) sans revue.
+2. **QR en `data:` URI : VALIDÉ.** La CSP attendue par S22 prévoit déjà `img-src 'self' data: https:`. Seule exigence : `data:` reste limité à `img-src`, jamais en `default-src` ni en `script-src`. L'option SVG via `dangerouslySetInnerHTML` est moins bonne et est écartée.
+3. **Révocation des autres sessions à la désactivation : VALIDÉ** (comportement S6 existant, message de l'écran exact). L'asymétrie à l'activation (les sessions antérieures restent valides) est déjà portée par **O11**. Le futur écran « Sessions actives » de P9 devra proposer « Fermer les autres sessions » juste après l'activation.
+4. **Réauthentification de moins de 5 min pour un compte sans mot de passe : VALIDÉ**, c'est la règle S6-b et elle ne doit pas être assouplie pour les SUPER_ADMIN. Consigne pour le runbook de déploiement : un SUPER_ADMIN Firebase ou GitHub se reconnecte, puis active sa MFA dans les 5 minutes.
+
+### Mise à jour de la remédiation P9
+
+- Régénération des codes : **code TOTP et mot de passe (ou connexion récente)**. Le code de secours n'est accepté que pour la désactivation (décision r21).
+- Volet MFA : en cours (r21, À REPRENDRE sur P9-MFA-a à d). Volets restants : liaison GitHub et Firebase, sessions actives, « Connecter un dépôt ».
+
+### Nouveaux constats r21
+
+#### O16 : réponses `/auth/*` sans `Cache-Control: no-store`
+
+- **Fichier** : `backend/src/main.ts` (Helmet ne fixe pas `Cache-Control`) ; aucun `no-store` dans `backend/src`.
+- **Cause** : les réponses qui portent le secret TOTP (`POST /auth/mfa/setup`), les codes de secours (`/auth/mfa/confirm`, `/auth/mfa/recovery-codes`) et l'état du compte (`GET /auth/mfa/status`, `/auth/sessions`) ne portent pas d'en-tête d'interdiction de cache. Un `GET` peut être conservé par le navigateur ou par un proxy intermédiaire (avec un ETag Express). Le risque est faible pour les `POST`, mais il n'est pas exclu par contrat.
+- **Sévérité** : Mineur. CVSS 3.1 : 2.5 (AV:L/AC:H/PR:L/UI:N/S:U/C:L/I:N/A:N). ASVS V8.2.1.
+- **Remédiation attendue (Phase 5, avec S22)** : intercepteur ou middleware qui pose `Cache-Control: no-store` et `Pragma: no-cache` sur `/auth/*` et `/admin/*`. **Test** : `session-lifecycle.spec.ts`, `POST /auth/mfa/setup` et `GET /auth/mfa/status` renvoient `Cache-Control: no-store`.
+
+#### O17 : lien « Activer la MFA » de la console d'administration détecté par le texte du message
+
+- **Fichier** : `frontend/src/components/AdminConsole.tsx` (`/deux facteurs/i.test(reason)`) ; `backend/src/admin/platform-admin.guard.ts:42-45`.
+- **Cause** : le frontend reconnaît le 403 « MFA obligatoire » à son libellé français. Une reformulation ou une traduction du message casse silencieusement le parcours de déblocage. Aucun impact de sécurité : le backend refuse dans tous les cas.
+- **Sévérité** : Amélioration.
+- **Remédiation attendue (Phase 5)** : le garde renvoie un code stable (`{ statusCode: 403, code: 'MFA_REQUIRED', message }`) et le frontend teste `code`. **Test** : le cas de `AdminConsole.spec.tsx` utilise `code` ; un message modifié avec `code` conservé mène toujours à l'écran.
+
+### Statut des constats
+
+| ID | Statut r21 |
+| --- | --- |
+| **P9** (volet MFA) | **À REPRENDRE** : P9-MFA-a, b, c et d bloquants ; e, f et g non bloquants |
+| P9 (GitHub et Firebase, sessions, « Connecter un dépôt ») | ouvert |
+| **O16** | Nouveau, Mineur (CVSS 2.5), Phase 5 |
+| **O17** | Nouveau, Amélioration, Phase 5 |
+
+**Constats ouverts à la fin de r21 :**
+
+- Phase 1 : P9 (volet MFA : P9-MFA-a à d ; autres volets).
+- Phases 5 et 6 : S19 à S26 ; A5 à A9 ; P2, P5, P7, P8 ; Q-2 ; O10 à O17.
+
+## Revue r22 — P9, volet MFA (reprise P9-MFA-a à g) : VALIDÉ (2026-11-05)
+
+Revue de la section « Reprise r21 (fixeur) — P9-MFA-a à g » du journal. Le code a été relu et les suites relancées. Cinq mutations frontend ont été jouées par un script hors dépôt : sauvegarde, une seule substitution dont l'unicité est vérifiée, restauration vérifiée par `filecmp`, et `git status` identique avant et après. Aucun commit, aucun `git stash` ; `.claude/` non touché.
+
+**Verdict : P9-MFA VALIDÉ.** Les quatre points bloquants (a à d) sont corrigés, et les trois points non bloquants (e à g) sont traités. Un point résiduel non bloquant (P9-MFA-h). Un nouveau constat hors P9 (**O18**) : il rend la suite backend rouge aujourd'hui, donc la CI du futur commit.
+
+### Vérifications refaites par l'architecte
+
+| Commande | Résultat |
+| --- | --- |
+| `pnpm lint` (racine, comme la CI) | **0 erreur**, 53 avertissements (`no-explicit-any` préexistants) |
+| `prettier --check` sur les 9 fichiers frontend du lot (dont `unsaved-codes.ts` et `SecurityPage.css`) | conforme |
+| `cd frontend && pnpm test:run` | **76/76** (16 fichiers) |
+| `tsc --noEmit -p .` ; `pnpm build` (frontend) | exit 0 ; build OK |
+| `git diff --stat pnpm-lock.yaml` | **11 insertions, 0 suppression**, limitées aux trois entrées `qrcode-generator@2.0.4` (intégrité inchangée, identique au registre) |
+| `pnpm install --frozen-lockfile --ignore-scripts` sous **Node 20.20.2 et pnpm 9.15.4**, sur une copie isolée des manifestes et du lockfile | OK ; lockfile non réécrit (`cmp` identique) |
+| Backend : `git diff --stat backend/` | inchangé depuis r21 (9, 26 et 12 lignes, plus `scim.guard.ts` de l'utilisateur, hors revue) |
+| `cd backend && env -u DATABASE_URL npx jest` ; `nest build` | **80/81 suites, 2363/2365** ; `nest build` exit 0. Les 2 échecs (`rbac-services.spec.ts`, S12-e) sont **sans lien avec P9** : voir O18 |
+
+### Mutations frontend
+
+| ID | Mutation | Résultat |
+| --- | --- | --- |
+| M1 | `confirm` : `localStorage.setItem` des codes de secours (mutation r21) | **Détectée** (1 échec sur 10) ; restaurée |
+| M1b | `startSetup` : `sessionStorage.setItem` du secret TOTP | Détectée ; restaurée |
+| M1c | `regenerate` : `console.debug` de la réponse (nouveaux codes) | Détectée ; restaurée |
+| M3 | `RecoveryCodesPanel` : `setUnsavedCodes(false)` au montage | Détectée ; restaurée |
+| M2 | `AppContext` : `setActiveTab` brut exposé à la place de `guardedSetActiveTab` | **Survit (76/76)** : voir P9-MFA-h |
+
+### Revue des points
+
+- **a : corrigé.** L'indentation est corrigée et `pnpm lint` passe à 0 erreur.
+- **b : corrigé.** Le diff du lockfile fait 11 lignes, et `--frozen-lockfile` passe sous Node 20 et pnpm 9.15.4. La note du journal est exacte : tout `pnpm install` réécrit le fichier au format natif. À retenir : repasser `prettier` sur le lockfile après chaque installation.
+- **c : corrigé.** Le test espionne `Storage.prototype.setItem` et les cinq méthodes de `console`, déroule l'activation puis la régénération, inspecte le contenu des deux stockages, puis vérifie le DOM après démontage. Les trois variantes de fuite (M1, M1b, M1c) sont détectées. Remarque mineure : `vi.restoreAllMocks()` est appelé en fin de test, donc il n'est pas exécuté si une assertion échoue avant. Le déplacer dans un `afterEach`.
+- **d : corrigé.** L'entrée P9-MFA d'origine mentionne maintenant le diff réel du lockfile (+2353/−6728) et l'erreur ESLint manquée. Les chiffres de la reprise sont exacts (76/76, lint, 11 lignes).
+- **e : traité.** Le module `unsaved-codes.ts` lève un drapeau tant que le panneau des codes est monté. Ce drapeau pose un écouteur `beforeunload` et déclenche un `window.confirm` au changement d'onglet. Il est idempotent, donc compatible avec le double montage de `StrictMode`. La limite déclarée par le fixeur (la déconnexion ne demande pas de confirmation) est **acceptée** : c'est une action explicite, et la régénération reste possible.
+- **f : traité.** Le lien est ajouté au DOM puis retiré, et la révocation de l'URL est différée de 1 s.
+- **g : traité.** Le texte des formulaires de désactivation et de régénération dépend maintenant de `hasPassword`.
+
+### Point résiduel (non bloquant)
+
+- **P9-MFA-h (Amélioration)** : le branchement de la garde dans `AppContext` (`setActiveTab: guardedSetActiveTab`) n'est couvert par aucun test, d'où la survie de M2. Le test e appelle `confirmLeaveUnsavedCodes()` directement. **Attendu (à la prochaine itération P9)** : un test qui rend `AppProvider` avec la page de sécurité et les codes affichés, avec `window.confirm` qui renvoie `false`, appelle `setActiveTab('dashboard')` via `useApp()` et vérifie que l'onglet actif reste `security`. M2 doit le faire échouer.
+
+### Nouveau constat r22 (hors P9)
+
+#### O18 : test S12-e dépendant de la date du jour (jours fériés)
+
+- **Fichier** : `backend/tests/unit/authz/rbac-services.spec.ts:410-420` (`expect(report[0].weeklyCapacityMinutes).toBe(2400)`) ; calcul dans `backend/src/projects/resources.service.ts:80-81` (fenêtre `new Date()` + 7 jours) et `:530-578` (`getAdjustedCapacity`, qui retire les jours fériés).
+- **Cause** : le test suppose une capacité pleine (5 jours ouvrés) sur la fenêtre glissante de 7 jours qui commence **aujourd'hui**. Dès que cette fenêtre contient un jour férié français, la capacité tombe à 4/5, soit 1920. Le 2026-11-05, la fenêtre contient le 11 novembre. Je l'ai vérifié en figeant l'horloge (`jest.useFakeTimers({ now })`, `Date` seul) : le 2026-11-04, 72/72 passent ; le 2026-11-05, 2 échecs (`member`, `contributor`). Le code de production est correct.
+- **Impact** : la CI (`pnpm --filter backend test`) est rouge environ 7 jours avant chacun des 11 jours fériés de l'année, donc dès maintenant pour le commit de P9 et de la Phase 4. Aucun impact de sécurité.
+- **Sévérité** : Mineur (qualité des tests), **à traiter en priorité** puisqu'il bloque la CI.
+- **Remédiation attendue** : dans le `describe` S12-e, figer l'horloge sur une semaine sans jour férié (`jest.useFakeTimers({ now: new Date('2026-11-02T08:00:00Z'), doNotFake: [...] })` en `beforeEach`, `jest.useRealTimers()` en `afterEach`), ou bien affirmer seulement que `weeklyCapacityMinutes` est un nombre positif. **Critère** : la suite passe en figeant l'horloge au 2026-11-05 et au 2026-12-21. Chercher les autres tests qui dépendent de `new Date()` dans `resources.service` (capacité, `optimizeWorkspaceResources`) et les traiter de la même façon.
+
+### Statut des constats
+
+| ID | Statut r22 |
+| --- | --- |
+| **P9, volet MFA** | **VALIDÉ** (a à g) ; P9-MFA-h en Amélioration |
+| P9 (GitHub et Firebase, sessions actives, « Connecter un dépôt ») | ouvert |
+| **O18** | Nouveau, Mineur, priorité immédiate (CI rouge) |
+| O16, O17 | inchangés, Phase 5 |
+
+**Le volet MFA de P9 peut partir en production.** Les SUPER_ADMIN pourront l'activer dès le déploiement (runbook : un compte Firebase ou GitHub se reconnecte, puis active sa MFA dans les 5 minutes). Corriger O18 avant le commit, sinon la CI sera rouge.
+
+**Constats ouverts à la fin de r22 :**
+
+- Immédiat : O18.
+- Phase 1 : P9 (liaison GitHub et Firebase, sessions actives, « Connecter un dépôt » ; P9-MFA-h).
+- Phases 5 et 6 : S19 à S26 ; A5 à A9 ; P2, P5, P7, P8 ; Q-2 ; O10 à O17.
+
+### Retour du fixeur après r22 (à relire par l'architecte)
+
+Section ajoutée à la demande de l'utilisateur pour notifier l'architecte. Le détail et les preuves sont dans `journal-corrections.md`, section « Reprise r22 (fixeur) ». Aucun statut n'est modifié ici : seul l'architecte valide.
+
+| ID | Statut proposé par le fixeur | Preuve |
+| --- | --- | --- |
+| **O18** | CORRIGÉ – À REVOIR | Horloge figée au 2026-06-01 (`rbac-services.spec.ts`, `useFakeTimers` limité à `Date`, `useRealTimers` en `afterEach`). Date système simulée au 2026-11-05 : 72/72 ; au 2026-12-21 : 72/72 ; sans le correctif au 2026-11-05 : 2 échecs. |
+| **P9-MFA-h** | CORRIGÉ – À REVOIR | Test via `AppProvider` et `useApp().setActiveTab` (confirm à `false` : l'onglet reste `security`) ; `restoreAllMocks` en `afterEach` ; contre-mutation (`setActiveTab` brut) : échec constaté, puis restauré. |
+
+Mesures après correction : backend `env -u DATABASE_URL npx jest` 81/81 suites, 2365/2365 tests ; frontend `pnpm test:run` 77/77 ; `pnpm build` frontend OK ; `pnpm lint` racine 0 erreur, 53 avertissements. Rien n'est committé.
+
+## Revue r23 — O18 et P9-MFA-h ; verdict final du lot P9-MFA et O18 : VALIDÉ (2026-11-05)
+
+Revue de la section « Reprise r22 (fixeur) — O18 et P9-MFA-h » du journal. Le code a été relu et les suites relancées. Douze dates ont été simulées sur le fichier corrigé, et trois contre-mutations frontend jouées par un script hors dépôt : sauvegarde, une seule substitution dont l'unicité est vérifiée, restauration vérifiée par `filecmp`, et `git status` identique avant et après. Aucun commit, aucun `git stash` ; `.claude/` non touché.
+
+**Verdict final : le lot P9-MFA (volet MFA de P9) et O18 est VALIDÉ, bon pour le commit et le déploiement en production.** Il n'y a pas de point bloquant. Un nouveau constat **Critique**, **S30** (mots de passe par défaut dans le seed d'un dépôt public), est consigné ci-dessous sans correction : il ne bloque pas ce lot, sous les conditions de déploiement indiquées en fin de section.
+
+### Vérifications refaites par l'architecte
+
+| Commande | Résultat |
+| --- | --- |
+| `cd backend && env -u DATABASE_URL npx jest` | **81/81 suites, 2365/2365 tests** |
+| `nest build` ; `tsc --noEmit -p tsconfig.build.json` ; `prettier --check` (`rbac-services.spec.ts`, `src/auth`) | exit 0 ; exit 0 ; conforme |
+| `pnpm lint` (racine, comme la CI) | **0 erreur**, 53 avertissements préexistants |
+| `cd frontend && pnpm test:run` ; `tsc --noEmit -p .` ; `pnpm build` | **77/77** (16 fichiers) ; exit 0 ; build OK |
+| `pnpm-lock.yaml` et `frontend/package.json` | identiques (`cmp`) aux fichiers validés en r22 : `--frozen-lockfile` sous Node 20.20.2 et pnpm 9.15.4 reste acquis ; diff +11/−0 |
+
+### O18 : l'horloge figée ne masque-t-elle rien ?
+
+J'ai fait varier la date figée (`now`) sur 12 valeurs, à la place du 2026-06-01, puis relancé `rbac-services.spec.ts` :
+
+| Date figée | Résultat |
+| --- | --- |
+| 2026-01-01, 2026-04-01, 2026-05-11, 2026-07-10, 2026-11-05, 2026-12-21, 2026-12-31 23:30Z, 2027-03-29 (fenêtres contenant respectivement le 1er janvier, le lundi de Pâques, l'Ascension, le 14 juillet, le 11 novembre, Noël, le 1er janvier 2027 et le lundi de Pâques 2027) | 70/72 : **seuls** les 2 cas S12-e `member` et `contributor` échouent |
+| 2026-08-12, 2028-02-29, 2030-01-07, 2020-01-06 (fenêtres sans jour férié, années bissextiles comprises) | 72/72 |
+
+**Conclusion : conforme.** Dans ce fichier, seul S12-e dépend de la date, et il ne devait pas en dépendre : son objet est l'absence des taux dans la réponse, pas le calendrier. Aucun autre test du fichier ne change de résultat selon la date. Ils utilisent des dates littérales (`2026-01-01` à `2026-01-14` pour les sprints) et des faux Prisma qui renvoient des listes vides pour les absences. La date retenue, le lundi 2026-06-01, est sûre : la Pentecôte 2026 tombe le 25 mai, et la fenêtre du 1er au 7 juin ne contient aucun jour férié. Le calcul des jours fériés reste couvert ailleurs, avec des dates explicites (`tests/unit/projects/resources.service.spec.ts`).
+
+**`doNotFake` : conforme.** Seule `Date` est simulée. Les minuteries réelles sont conservées : `setTimeout`, `setInterval`, `setImmediate`, `nextTick`, `queueMicrotask`, `performance` et `hrtime`. `requestAnimationFrame` et `requestIdleCallback` n'existent pas dans l'environnement `node` de Jest (`testEnvironment: 'node'`). Les minuteries simulées de Jest sont propres à chaque fichier de test, et `afterEach(jest.useRealTimers)` restaure l'horloge à chaque test. Les autres fichiers qui simulent les minuteries (`ws-revalidation.spec.ts`, `tracking.gateway.spec.ts`) ne sont pas touchés, et la suite complète passe.
+
+### P9-MFA-h : contre-mutation
+
+| ID | Mutation | Résultat |
+| --- | --- | --- |
+| M2 | `AppContext` : `setActiveTab` brut exposé à la place de `guardedSetActiveTab` (survivait en r22) | **Détectée** (1 échec sur 11) ; restaurée |
+| M1 | `confirm` : `localStorage.setItem` des codes (non-régression) | Détectée ; restaurée |
+| M3 | `setUnsavedCodes(false)` au montage (non-régression) | Détectée (2 échecs) ; restaurée |
+
+Le nouveau test rend `AppProvider`, active la MFA, puis appelle `useApp().setActiveTab('kanban')`. Avec un refus, l'onglet reste `security` et `confirm` est appelé une fois. Avec un accord, l'onglet passe à `kanban`. `vi.restoreAllMocks()` est maintenant dans un `afterEach`. **Conforme.**
+
+### Statut des constats
+
+| ID | Statut r23 |
+| --- | --- |
+| **O18** | **VALIDÉ** |
+| **P9-MFA-h** | **VALIDÉ** |
+| **P9, volet MFA** (P9-MFA-a à h) | **VALIDÉ, clos** |
+| P9 (liaison GitHub et Firebase, sessions actives, « Connecter un dépôt ») | ouvert |
+| **S30** | **Nouveau, Critique**, mesure d'urgence prise en production le 2026-11-05, correction du code ouverte |
+
+**Conditions du commit et du déploiement de ce lot :**
+
+1. Le commit contient aussi `backend/src/auth/scim/scim.guard.ts`, modifié par l'utilisateur et **hors des revues r21 à r23**. Le committer séparément, ou après une revue dédiée.
+2. Ne pas committer `.claude/`.
+3. Au déploiement : **ne pas exécuter `prisma db seed` ni `pnpm seed`** contre la production tant que S30 n'est pas corrigé (voir plus bas : le seed remettrait le rôle `SUPER_ADMIN` et le mot de passe Firebase connu).
+4. Runbook : les SUPER_ADMIN activent leur MFA depuis l'écran « Sécurité du compte ». Un compte Firebase ou GitHub se reconnecte d'abord, puis l'active dans les 5 minutes.
+
+### Nouveau constat r23
+
+#### S30 : mots de passe par défaut d'un SUPER_ADMIN en clair dans le seed d'un dépôt public
+
+- **Fichier** : `backend/prisma/seed.ts:106-108`.
+  - Mots de passe de repli : `process.env.SEED_ADMIN_PASSWORD || 'Admin123!Secure'`, ainsi que `Manager123!Secure` et `User123!Secure`.
+  - `:140-153` : `upsert` de `admin@planner-pro.com` avec `platformRole: SUPER_ADMIN` dans la branche `create` **et dans la branche `update`**.
+  - `:53-89` (`ensureFirebaseAuthUser`) : remplace le mot de passe du compte Firebase existant par la même valeur et force `emailVerified: true`.
+  - `:350-356` : affiche les mots de passe dans la console.
+  - `:17` : DSN de repli `root:root_password`, déjà relevé dans A7.
+- **Introduit par** : `c5835ef` (2026-10-27). Les valeurs sont dans l'historique Git public : elles sont **compromises définitivement**, quel que soit le correctif.
+- **Cause** : valeurs par défaut sûres en apparence (« fail-open », comme A7). Le seed ne distingue pas les environnements, et son `update` réapplique les privilèges à chaque exécution.
+- **Impact** : avant la mesure d'urgence, n'importe qui pouvait se connecter en production comme `admin@planner-pro.com` (SUPER_ADMIN) avec un mot de passe publié, par mot de passe ou par Firebase. La MFA de S18.3 bloquait `/admin/*` faute de second facteur. Mais un attaquant connecté pouvait **enrôler son propre TOTP** (`/auth/mfa/setup` exige seulement le mot de passe, qu'il connaît), puis administrer la plateforme. Les comptes `manager` et `user` donnaient accès à leurs données de workspace. **Risque résiduel après la mesure** : une nouvelle exécution du seed contre la production remet `SUPER_ADMIN` (branche `update`) et le mot de passe Firebase connu ; les comptes Firebase associés existent peut-être encore avec ces mots de passe.
+- **Sévérité** : **Critique**. CVSS 3.1 avant la mesure : **9.8** (AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H). CWE-798 et CWE-1392. ASVS V2.3.1 et V14.1.
+- **Mesure déjà prise en production (2026-11-05, par l'utilisateur)** : rôle `SUPER_ADMIN` retiré à `admin@planner-pro.com` ; les trois comptes du seed suspendus ; jetons révoqués.
+- **Actions d'exploitation restant à vérifier (sans code)** :
+  1. Firebase Authentication du projet de production : les comptes `admin@`, `manager@` et `user@planner-pro.com` sont désactivés ou supprimés, et leurs jetons de rafraîchissement révoqués (`revokeRefreshTokens`).
+  2. Investigation depuis le 2026-10-27 : connexions réussies de ces trois comptes (journal d'audit et sessions), MFA enrôlée sur `admin@` (`mfaEnabled`, `mfaPendingSecret`), actions d'administration, clés SCIM, intégrations, invitations ou liaisons GitHub et Firebase créées par ces comptes. Tout résultat positif est traité comme un **incident**.
+  3. Vérifier qu'aucun autre environnement (staging, démo) ni aucun compte réel n'utilise ces valeurs.
+  4. Ne pas exécuter le seed contre la production avant la correction ci-dessous.
+- **Remédiation attendue (code, à traiter en priorité, avant toute nouvelle exécution du seed)** :
+  1. **Aucune valeur par défaut** : supprimer les replis `|| '…'`. `SEED_ADMIN_PASSWORD`, `SEED_MANAGER_PASSWORD` et `SEED_USER_PASSWORD` sont **obligatoires**. Si l'une manque, le seed s'arrête avec un code non nul, **avant toute écriture** (base et Firebase).
+  2. **Refus en production sans configuration explicite** : `NODE_ENV` doit être présent (refus s'il est absent, pas de mode dev implicite, cf. A7). Si `NODE_ENV=production`, le seed refuse de s'exécuter, sauf si **toutes** les variables `SEED_*_PASSWORD` sont fournies **et** que `SEED_ALLOW_PRODUCTION=true` est posé explicitement. Dans ce cas, il journalise un avertissement sans aucun secret. `DATABASE_URL` est obligatoire (suppression du repli `root:root_password`, cf. A7).
+  3. **Qualité des valeurs** : refuser un mot de passe de moins de 16 caractères, ou égal à l'une des trois valeurs publiées (liste de refus en dur : `Admin123!Secure`, `Manager123!Secure`, `User123!Secure`), ou identique à un autre mot de passe du seed.
+  4. **Pas d'élévation à la réexécution** : la branche `update` ne modifie jamais `platformRole`, `passwordHash`, `firebaseUid`, ni l'état de suspension. Un compte existant n'est ni promu, ni réactivé, ni réinitialisé. En production, le seed n'attribue **aucun** `platformRole` : la promotion d'un SUPER_ADMIN passe par un script dédié, journalisé dans l'audit et suivi de l'activation de la MFA.
+  5. **Firebase** : ne jamais modifier le mot de passe ni `emailVerified` d'un compte Firebase existant. Désactiver la synchronisation Firebase quand `NODE_ENV=production`, sauf drapeau explicite.
+  6. **Aucun secret dans les journaux** : supprimer les `console.log` des mots de passe (`:350-356`). Afficher seulement les adresses créées.
+  7. **Détection** : ajouter une analyse de secrets à la CI (par exemple `gitleaks` en mode `detect`, avec une liste d'exceptions revue) et une règle qui fait échouer la CI si les trois valeurs publiées réapparaissent.
+- **Tests attendus** (`backend/tests/unit/scripts/seed.spec.ts`, en isolant `main()` du lancement du script) :
+  - variable `SEED_ADMIN_PASSWORD` absente : arrêt non nul, **zéro appel** à `prisma.user.upsert` et à Firebase ;
+  - `NODE_ENV` absent : refus ;
+  - `NODE_ENV=production` avec toutes les variables mais sans `SEED_ALLOW_PRODUCTION=true` : refus sans écriture ; avec le drapeau : exécution, sans aucun `platformRole` attribué ;
+  - mot de passe égal à `Admin123!Secure`, ou de moins de 16 caractères : refus ;
+  - compte existant suspendu et sans rôle : après le seed, toujours suspendu et sans rôle, avec un `passwordHash` inchangé ;
+  - compte Firebase existant : `updateUser` n'est pas appelé avec `password` ;
+  - aucun appel à `console.*` ne contient l'une des valeurs `SEED_*_PASSWORD` ;
+  - le code source de `seed.ts` ne contient plus les trois valeurs publiées.
+- **Critère d'acceptation** : il est impossible d'exécuter le seed sans fournir de secrets, impossible de l'exécuter en production sans un consentement explicite, et une réexécution ne réélève et ne réactive aucun compte.
+
+**Constats ouverts à la fin de r23 :**
+
+- **Immédiat : S30** (Critique ; mesure d'urgence prise ; vérifications d'exploitation 1 à 4 et correction du code à faire).
+- Phase 1 : P9 (liaison GitHub et Firebase, sessions actives, « Connecter un dépôt »).
+- Phases 5 et 6 : S19 à S26 ; A5 à A9 ; P2, P5, P7, P8 ; Q-2 ; O10 à O17.

@@ -247,4 +247,30 @@ describe('AuthService', () => {
       expect(prisma.user.update).not.toHaveBeenCalled();
     });
   });
+
+  describe('getMfaStatus', () => {
+    it("expose l'état MFA et la présence d'un mot de passe, sans aucun secret", async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        mfaEnabled: true,
+        passwordHash: 'hash',
+        mfaSecret: 'secret-chiffre',
+      });
+
+      const result = await service.getMfaStatus('user-1');
+
+      expect(prisma.user.findUnique).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+        select: { mfaEnabled: true, passwordHash: true },
+      });
+      expect(result).toEqual({ mfaEnabled: true, hasPassword: true });
+    });
+
+    it('signale un compte sans mot de passe (Firebase ou GitHub)', async () => {
+      prisma.user.findUnique.mockResolvedValue({ mfaEnabled: false, passwordHash: null });
+      await expect(service.getMfaStatus('user-2')).resolves.toEqual({
+        mfaEnabled: false,
+        hasPassword: false,
+      });
+    });
+  });
 });

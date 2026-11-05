@@ -851,6 +851,18 @@ export class AuthService {
     }
   }
 
+  /** État MFA du compte pour l'écran « Sécurité du compte » (P9). Jamais de secret. */
+  async getMfaStatus(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { mfaEnabled: true, passwordHash: true },
+    });
+    if (!user) {
+      throw new UnauthorizedException('Utilisateur introuvable.');
+    }
+    return { mfaEnabled: user.mfaEnabled, hasPassword: Boolean(user.passwordHash) };
+  }
+
   /**
    * Initialise la configuration MFA TOTP. Refusé (409) si le MFA est déjà actif : changer de
    * facteur passe d'abord par la désactivation (code + mot de passe). Le secret reste « en

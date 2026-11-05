@@ -100,6 +100,29 @@ describe('AdminConsole', () => {
     ).toBeInTheDocument();
   });
 
+  it("renvoie vers l'écran de sécurité quand le 403 exige l'authentification à deux facteurs (P9)", async () => {
+    const setActiveTab = vi.fn();
+    vi.mocked(useApp).mockReturnValue({
+      user: { id: 'admin-1', name: 'Admin', email: 'admin@example.com' },
+      setActiveTab,
+    } as unknown as ReturnType<typeof useApp>);
+    vi.mocked(global.fetch).mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: async () => ({
+        message:
+          "L'authentification à deux facteurs est obligatoire pour administrer la plateforme. Activez-la sur votre compte.",
+      }),
+    } as Response);
+
+    render(<AdminConsole />);
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: "Activer l'authentification à deux facteurs" }),
+    );
+    expect(setActiveTab).toHaveBeenCalledWith('security');
+  });
+
   // S18, étape 0 : bouton d'impersonation masqué tant que le drapeau serveur est désactivé
   describe('bouton Impersonate (FEATURE_IMPERSONATION_ENABLED)', () => {
     const routeFetch = (impersonation: boolean) =>

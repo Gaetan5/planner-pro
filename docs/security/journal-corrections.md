@@ -1109,8 +1109,7 @@ Backend : 58 suites, 612 tests passés ; `pnpm build` OK ; `npx eslint src tests
   - **Après correctif** : 4/4.
 - **Résultats** : backend 59/59 suites, 616/616 tests ; `pnpm build` OK ; `npx eslint src/common/app-throttler.guard.ts tests/http/scim-throttler.spec.ts` : 0 erreur.
 - **Écart par rapport au rapport** : la limite reste 300 req/min **par clé**, et non « par clé ou par IP selon la configuration » : le rapport laissait le choix et le tracker par clé est retenu comme option principale. Le repli par IP sur les routes non SCIM et en l'absence d'`Authorization` est conservatoire (comportement du garde natif).
-- **Questions pour l'architecte** : (a) le hash porte sur l'en-tête `Authorization` complet (y compris le schéma `Bearer `) ; faut-il n'en extraire que la valeur du jeton pour les IdP qui varient le schéma ? (b) la limite 300/min est celle de `@ScimEndpoint()` (S11) ; confirmer qu'elle s'applique bien par tracker et non globalement.
-
+- **Questions pour l'architecte** : (a) le hash porte sur l'en-tête `Authorization` complet (y compris le schéma `Bearer`) ; faut-il n'en extraire que la valeur du jeton pour les IdP qui varient le schéma ? (b) la limite 300/min est celle de `@ScimEndpoint()` (S11) ; confirmer qu'elle s'applique bien par tracker et non globalement.
 
 ---
 
@@ -2161,6 +2160,7 @@ Décisions produit prises par défaut, à faire arbitrer par l'utilisateur :
 ## Revue architecte r17 (2026-11-04) : NON VALIDÉ
 
 Détail dans `rapport-audit.md`, section « Revue r17 ». Les chiffres de « Résultats (Phase 4) » sont exacts et ont été relancés par l'architecte :
+
 - backend : 79/79 suites et 2313/2313 tests ; intégration 4/4 sans handle ouvert ;
 - builds : `tsc` (build) 0 ; TS6059 seule et inchangée ; `nest build` exit 0 (125 `.js`, 0 `*.spec.js`) ;
 - qualité : ESLint 0 erreur et 17 avertissements ; `prettier` et `prisma validate` OK ;
@@ -2203,9 +2203,11 @@ Seule correction : `invitations.service.spec.ts` compte 9 tests, et non 25. 29 m
 - **Limite** : l'acceptation par un utilisateur déjà déprovisionné d'un lien anonyme de projet reste possible (usage unique, projet précis, rôle ≤ CONTRIBUTOR), car aucune adresse ne le lie à l'utilisateur.
 
 ### Correction du journal
+
 `invitations.service.spec.ts` compte 9 tests (et non 25) ; l'entrée S17 est corrigée.
 
 ### Non traités, conformément à la consigne
+
 Rétrogradation d'un MANAGER par un MANAGER (attend la décision de l'utilisateur), O10, O11, P11.
 
 ## Résultats (r17)
@@ -2226,6 +2228,7 @@ Détail des +8 tests : `impersonation-routes.spec.ts` +2 (63), `scim.service.spe
 ## Revue architecte r18 (2026-11-04) : NON VALIDÉ — corrections ciblées restantes
 
 Détail dans `rapport-audit.md`, section « Revue r18 ». Les chiffres de « Résultats (r17) » sont exacts et ont été relancés par l'architecte :
+
 - backend : 79/79 suites, 2321/2321 tests ; intégration 4/4 ;
 - builds et qualité : `tsc` et `nest build` OK ; ESLint 0 erreur et 17 avertissements ; prettier et `prisma validate` OK ;
 - frontend : 61/61.
@@ -2275,6 +2278,7 @@ Décisions de l'utilisateur du 2026-11-04 (déléguées à l'architecte) appliqu
 #### Revue architecte (r19)
 
 **À REPRENDRE.** Le correctif backend est conforme : R1b, R2, R4 et R5 sont détectées, ainsi que les mutations du fixeur. Restent trois compléments, détaillés dans le rapport (« Revue r19 », « Plan d'action r19 ») :
+
 - **P11-a (nouveau, Mineur)** : `GET /projects/resources/:userId/leaves` (`resources.service.ts:438`) laisse un VIEWER lire les absences, avec leur motif, de tout membre d'un workspace commun. Exiger `workspace.directory.read` lorsque la cible n'est pas l'appelant ;
 - **mutation R3 survivante** : la règle P10 de `listVisibleWorkspaceMemberIds` n'est pas testée, car dans la fixture le créateur de P1 est OWNER, donc toujours visible. Ajouter un créateur MEMBER visible et un créateur VIEWER invisible ;
 - **mutation F1 survivante** : aucun test ne vérifie que `AppContext` n'appelle pas `resources/capacity` pour un VIEWER. Test exigé avec le harnais d'`AppContext.session.spec.tsx`.
@@ -2349,6 +2353,7 @@ Nouveaux fichiers de test : `viewer-directory.spec.ts` (14), `creator-role.spec.
 ## Revue architecte r19 (2026-11-04) : NON VALIDÉ — compléments ciblés sur P11
 
 Détail dans `rapport-audit.md`, section « Revue r19 ». Les chiffres de « Résultats (r18) » ont été relancés par l'architecte et sont exacts :
+
 - backend : 81/81 suites, 2355/2355 tests ; intégration 4/4 ;
 - `tsc` (build) exit 0 ; ESLint 0 erreur et 17 avertissements ; prettier conforme ;
 - frontend : 63/63 ; `tsc` exit 0.
@@ -2371,6 +2376,7 @@ Détail dans `rapport-audit.md`, section « Revue r19 ». Les chiffres de « Ré
   - **O14** (Amélioration, Phase 5) : le workspace « par défaut » diffère entre le frontend et le backend.
 
 **Constats encore ouverts pour `fixeur` en Phase 4, dans cet ordre :**
+
 1. P11-a ;
 2. le test R3 ;
 3. le test F1 ;
@@ -2433,6 +2439,7 @@ Une précision pour le journal : le faux Prisma évalue bien `workspace: { membe
 Détail dans `rapport-audit.md`, section « Revue r20 ». Les chiffres de « Résultats (r19) » sont exacts. Le changement visible de P11-a est accepté et doit figurer dans les notes de version.
 
 **Actions restantes (aucune correction de code)** :
+
 1. Fixeur : clôture documentaire, à savoir `GEMINI.md`, DAT § 15.1, liste des fichiers du commit sans `.claude/`, notes de version (P11, P11-a).
 2. Utilisateur : commit de la Phase 4 ; avant le déploiement : migration `20261112000000`, MFA des comptes de plateforme, promotion en MEMBER des VIEWER internes (runbook § 5).
 
@@ -2445,6 +2452,7 @@ Aucun changement de code. Documents mis à jour : `GEMINI.md` (état, rappels de
 ### Fichiers du commit de Phase 4 (61 entrées de `git status`, hors `.claude/`)
 
 Modifiés (48) :
+
 - Schéma : `backend/prisma/schema/workspace.prisma`
 - Admin : `backend/src/admin/{admin.controller.ts, admin.service.spec.ts, admin.service.ts, dto/admin.dto.ts, platform-admin.guard.spec.ts, platform-admin.guard.ts}`
 - Auth : `backend/src/auth/{auth.module.ts, session.service.ts, token.service.ts, scim/scim.controller.ts, scim/scim.service.spec.ts, scim/scim.service.ts, sso/sso.controller.ts}`
@@ -2456,6 +2464,7 @@ Modifiés (48) :
 - Docs : `docs/DOSSIER_ARCHITECTURE_TECHNIQUE.md`, `docs/security/{journal-corrections.md, rapport-audit.md}`, `GEMINI.md`
 
 Nouveaux (13, à ajouter avec `git add`) :
+
 - `backend/prisma/migrations/20261112000000_s17_invitation_project_role/`
 - `backend/src/admin/platform-roles.decorator.ts`, `backend/src/projects/{dto/assign-project-role.dto.ts, invitation-sync-payload.ts, task-sync-payload.ts}`
 - `backend/tests/http/admin-platform-roles.spec.ts`, `backend/tests/unit/auth/impersonation-token.spec.ts`, `backend/tests/unit/authz/{creator-role, viewer-directory}.spec.ts`, `backend/tests/unit/projects/{assign-project-role, invitations-security}.spec.ts`
@@ -2466,6 +2475,7 @@ Nouveaux (13, à ajouter avec `git add`) :
 ### Notes de version (Phase 4)
 
 Changements visibles pour les utilisateurs :
+
 - **P11** : un VIEWER (rôle de workspace) ne voit plus les sprints, la capacité des ressources ni les intégrations, et l'annuaire des membres lui est restreint (permission `workspace.directory.read`, réservée à OWNER, ADMIN et MEMBER). L'interface n'appelle plus la capacité des ressources pour un VIEWER.
 - **P11-a** : un VIEWER ne lit plus les absences d'autrui. Un MEMBER, ADMIN ou OWNER les lit s'il partage un workspace (non supprimé) avec la cible. Chacun garde l'accès à ses propres absences.
 - **P12** : un MANAGER de projet ne peut ni rétrograder ni retirer un autre MANAGER (réservé aux OWNER/ADMIN du workspace) ; le créateur du projet ne peut pas se rétrograder lui-même.
@@ -2474,6 +2484,7 @@ Changements visibles pour les utilisateurs :
 - **Console admin (S18)** : `POST /admin/users/:id/impersonate` exige `{ reason }` ; les comptes `platformRole` sans MFA sont bloqués sur `/admin/*` ; leurs sessions sont plafonnées à 12 h.
 
 Prérequis de déploiement (utilisateur, avant mise en production) :
+
 1. Migration `20261112000000_s17_invitation_project_role` (additive ; deux `UPDATE` sur les invitations en attente seulement), selon `docs/security/runbook-phase4.md`. Non appliquée à ce jour.
 2. Activer le MFA sur tous les comptes de plateforme (sinon blocage de `/admin/*`).
 3. Promouvoir en MEMBER les VIEWER internes qui doivent garder l'annuaire, les sprints, la capacité, les intégrations et les absences (runbook § 5).
@@ -2491,3 +2502,94 @@ workspace.directory.read, reports O7, O8, O9.
 Migration 20261112000000 (non appliquée), runbook-phase4.
 
 ```
+
+---
+
+### P9-MFA — Écran « Sécurité du compte » : volet MFA
+
+**Statut** : CORRIGÉ – À REVOIR (volet MFA uniquement ; P9 reste ouvert pour les autres volets).
+
+**Contexte** : S18.3 exige la MFA sur `/admin/*` ; sans écran d'activation, les SUPER_ADMIN de production (`mfaEnabled=0`) sont bloqués. Le rapport de P9 est suivi (activation avec QR code, affichage unique des 10 codes avec téléchargement, désactivation et régénération).
+
+**Changement** :
+
+- Frontend (nouveaux) : `frontend/src/security-api.ts` (appels `GET /auth/mfa/status`, `POST /auth/mfa/setup|confirm|disable|recovery-codes`, erreur typée avec statut HTTP), `frontend/src/components/SecurityPage.tsx` et `SecurityPage.css`.
+  - Activation : `setup` avec `{ password }` (champ masqué pour un compte sans mot de passe, avec le message « reconnectez-vous puis réessayez » sur 403) ; QR code généré localement depuis `authUri` ET secret en texte ; `confirm` avec `{ code }` ; les codes sont affichés une seule fois (état React uniquement, jamais en localStorage), téléchargement `.txt`, case « J'ai conservé ces codes » obligatoire avant « Terminer ».
+  - Désactivation : code TOTP ou code de secours (bascule), plus mot de passe. Régénération : code TOTP plus mot de passe, nouveaux codes affichés une seule fois.
+- Intégration : `frontend/src/App.tsx` (onglet `security` rendu par `SecurityPage`, bouton bouclier dans le bloc profil de l'en-tête, visible pour tout utilisateur connecté) ; `frontend/src/context/AppContext.tsx` (valeur `'security'` ajoutée aux 3 unions de l'onglet actif).
+- Console d'administration (point 6) : `frontend/src/components/AdminConsole.tsx` lit le corps du 403 ; s'il contient « deux facteurs », il affiche le message serveur et un bouton « Activer l'authentification à deux facteurs » qui ouvre l'écran. Les autres 403 gardent le message générique.
+- Backend (minimal) : l'objet `user` des réponses de connexion n'expose PAS `mfaEnabled` (`auth.service.ts`, `{ id, email, name, platformRole }`), et le profil est mis en cache dans `localStorage` (donc périmé pour les sessions déjà ouvertes, dont celles des SUPER_ADMIN). Plutôt que de grossir ce cache, ajout de `GET /auth/mfa/status` → `{ mfaEnabled, hasPassword }` (`AuthService.getMfaStatus`, `select` limité à `mfaEnabled` et `passwordHash`, aucun secret). La route porte `@ForbiddenInImpersonation()` (règle S18.2 : `/auth/mfa/*`).
+
+**Dépendance ajoutée** : `qrcode-generator` **2.0.4** exact (`frontend/package.json`, `pnpm-lock.yaml`, +11 lignes une fois le fichier repassé par prettier ; livré à tort à +2353/-6728 lors de la première livraison, corrigé à la reprise r21 ; tout `pnpm install`, même `--lockfile-only`, le réécrit au format natif, donc relancer `npx prettier --write pnpm-lock.yaml` ensuite). Justification : génération du QR code côté navigateur, sans aucun appel externe (le secret contenu dans `authUri` ne quitte jamais l'application). Choisie plutôt que `qrcode` (1.5.4) car elle n'a aucune dépendance transitive (le lockfile ne gagne qu'une entrée) et fournit ses types. Le lockfile a été reformaté avec prettier pour garder un diff minimal ; `pnpm install --frozen-lockfile --lockfile-only` passe. Node 20 : bibliothèque sans code natif.
+
+**Tests** :
+
+- Ajoutés : `frontend/src/components/SecurityPage.spec.tsx` (8 tests : activation complète avec QR en `data:image`, secret en texte, 3 appels corrects, codes affichés une seule fois et inaccessibles après fermeture, fermeture bloquée sans confirmation, téléchargement `.txt` ; 403 mot de passe incorrect ; compte sans mot de passe et message de reconnexion ; 400 code invalide ; désactivation par code de secours ; désactivation par TOTP avec erreur 400 ; régénération). `AdminConsole.spec.tsx` (+1 : le 403 « deux facteurs » mène à l'écran). `backend/src/auth/auth.service.spec.ts` (+2 : `getMfaStatus`).
+- Résultats : `pnpm test:run` frontend **74/74** (16 fichiers) ; `pnpm build` frontend OK ; ESLint ciblé sur une liste de fichiers (l'erreur `prettier/prettier` de `AppContext.tsx:263` m'avait échappé car ce fichier a été lancé avant la dernière retouche ; l'affirmation « 0 erreur » était inexacte, `pnpm lint` racine était rouge) ; `nest build` backend OK ; `jest` backend complet : 2362 passés, 3 échecs sur le premier passage : (1) `impersonation-routes.spec.ts` : `/auth/mfa/status` sans `@ForbiddenInImpersonation()` (réel, corrigé) ; (2) `mfa-ticket.spec.ts` (Redis hang, seuil 2,5 s) et (3) `session-lifecycle.spec.ts` (suite de 121 s) : échecs de temporisation sous charge, la relance isolée des 3 suites donne **101/101**.
+- Écart de méthode : le test backend `getMfaStatus` a été écrit avec le code (pas de passage au rouge préalable observé) ; le test de la route `status` a été « rouge » par le garde-fou S18.2 existant.
+
+**Écart par rapport au rapport** : aucun sur le périmètre MFA. Ajout non prévu : la route `GET /auth/mfa/status` (le rapport demande seulement que l'écran connaisse `mfaEnabled`). Hors périmètre de cette itération, donc toujours ouverts dans P9 : liaison GitHub et Firebase, page des sessions actives, bouton « Connecter un dépôt ».
+
+**Questions pour l'architecte** :
+
+1. Valider `GET /auth/mfa/status` plutôt que l'ajout de `mfaEnabled` à l'objet `user` (cache localStorage périmé pour les sessions existantes).
+2. Le QR est servi en `data:` URI : une future CSP (S-en-têtes, Phase 5) devra autoriser `img-src 'self' data:`. Aucune CSP n'est définie à ce jour.
+3. Après désactivation, le backend révoque les autres sessions (comportement existant) ; l'écran l'indique à l'utilisateur.
+4. La première activation d'un SUPER_ADMIN déjà connecté doit encore respecter la réauthentification S6-b : un compte à mot de passe saisit le sien ; un compte Firebase/GitHub doit s'être connecté depuis moins de 5 min.
+
+#### Revue architecte (r21) — P9-MFA
+
+**À REPRENDRE.** Détail dans `rapport-audit.md`, section « Revue r21 ». Suites relancées par l'architecte : backend 81/81 suites et 2365/2365 tests (aucun échec de temporisation reproduit, diagnostic accepté) ; frontend 74/74 ; `tsc`, `vite build` et `nest build` OK ; `pnpm install --frozen-lockfile` OK sous Node 20 et pnpm 9.15.4. Dépendance `qrcode-generator@2.0.4` acceptée : intégrité conforme au registre, aucune dépendance, aucun script d'installation. Aucune persistance des secrets dans le code.
+
+À corriger avant validation :
+
+- **P9-MFA-a** : `frontend/src/context/AppContext.tsx:263`, erreur ESLint/Prettier (la CI `pnpm lint` est rouge).
+- **P9-MFA-b** : `pnpm-lock.yaml` livré au format natif de pnpm : 9081 lignes de diff au lieu de 11. Le repasser par `npx prettier --write pnpm-lock.yaml`.
+- **P9-MFA-c** : test de non-persistance (espion sur `Storage.prototype.setItem` et `console.*`, aucun secret ni code ; plus aucun code dans le DOM après démontage). La mutation « codes en `localStorage` » survit aujourd'hui.
+- **P9-MFA-d** : corriger dans cette entrée les affirmations « +11 lignes » et « ESLint : 0 erreur ».
+
+Non bloquants : P9-MFA-e (codes perdus en cas de changement d'onglet), P9-MFA-f (téléchargement sous Safari), P9-MFA-g (texte « mot de passe » pour un compte sans mot de passe). Réponses aux questions 1 à 4 : toutes VALIDÉES (voir le rapport). Nouveaux constats O16 (`no-store`) et O17 (code d'erreur stable), en Phase 5.
+
+#### Reprise r21 (fixeur) — P9-MFA-a à g : CORRIGÉ – À REVOIR
+
+- **a** : indentation de `| 'security'` corrigée dans `AppContext.tsx`. `pnpm lint` à la racine : 0 erreur, 53 avertissements (`no-explicit-any` préexistants).
+- **b** : `npx prettier --write pnpm-lock.yaml` ; `git diff --stat pnpm-lock.yaml` : 11 insertions, 0 suppression ; `pnpm install --frozen-lockfile --lockfile-only` passe (sans erreur), puis prettier relancé.
+- **c** : test « n'écrit ni secret ni code de secours (stockage, console) et les efface au démontage » dans `SecurityPage.spec.tsx` : espions sur `Storage.prototype.setItem` et `console.log|info|warn|error|debug`, parcours activation puis régénération, contenu de `localStorage`/`sessionStorage`, puis démontage et DOM sans aucun secret ni code. Mutation vérifiée : ajout temporaire de `localStorage.setItem('mut', JSON.stringify(result.recoveryCodes))` dans `confirm` : le test échoue (`expected '[["mut","[\"AAAA-1111\"...' not to contain 'AAAA-1111'`, 1 échec, 9 passés) ; mutation retirée (`grep 'mut'` = 0).
+- **d** : chiffres réels après reprise : frontend `pnpm test:run` **76/76** (16 fichiers, dont +2 tests) ; `pnpm build` frontend OK ; `pnpm lint` racine 0 erreur / 53 avertissements ; lockfile +11 lignes. Backend non touché pendant la reprise.
+- **e** : nouveau `frontend/src/unsaved-codes.ts` ; `RecoveryCodesPanel` active le drapeau tant qu'il est monté (écouteur `beforeunload`) ; le `setActiveTab` exposé par `AppContext` demande `window.confirm` si des codes sont affichés. Test dédié (confirmation refusée, `beforeunload` annulé, plus de demande après démontage). Limite : la déconnexion n'est pas soumise à la confirmation.
+- **f** : lien ajouté au DOM avant `click()` puis retiré ; `URL.revokeObjectURL` différé de 1 s.
+- **g** : les formulaires de désactivation et de régénération n'évoquent plus « votre mot de passe » pour un compte sans mot de passe (« connexion de moins de 5 minutes requise »).
+
+#### Revue architecte (r22) — Reprise P9-MFA-a à g
+
+**VALIDÉ.** Détail dans `rapport-audit.md`, section « Revue r22 ». Relancé par l'architecte : `pnpm lint` racine à 0 erreur (53 avertissements) ; frontend 76/76, `tsc` et build OK ; lockfile à +11/−0 ; `--frozen-lockfile` OK sous Node 20.20.2 et pnpm 9.15.4 ; `nest build` OK. Mutations : M1 (codes en `localStorage`), M1b (secret en `sessionStorage`), M1c (`console.debug` des codes) et M3 (drapeau désactivé) sont toutes détectées. Les chiffres de la reprise sont exacts. La limite « déconnexion non soumise à confirmation » est acceptée.
+
+Reste, non bloquant : **P9-MFA-h**. La mutation M2 (`setActiveTab` brut dans `AppContext`) survit. Ajouter un test qui passe par `AppProvider` et `useApp().setActiveTab` avec `confirm` à `false`. Déplacer aussi `vi.restoreAllMocks()` dans un `afterEach`.
+
+Nouveau constat hors P9 : **O18**. Le test S12-e (`rbac-services.spec.ts`) échoue depuis le 2026-11-05, car la fenêtre de capacité de 7 jours contient le 11 novembre. Backend : 2363/2365. À corriger avant le commit : figer l'horloge dans le `describe`.
+
+#### Reprise r22 (fixeur) — O18 et P9-MFA-h : CORRIGÉ – À REVOIR
+
+- **O18** : `backend/tests/unit/authz/rbac-services.spec.ts` : horloge figée au lundi 2026-06-01 (semaine sans jour férié) par `jest.useFakeTimers({ now, doNotFake: [tous sauf Date] })` dans un `beforeEach` du bloc racine, restaurée par `afterEach(jest.useRealTimers)`. Ce bloc couvre tout le fichier, donc aussi les autres tests (sprints datés, optimisation de charge) qui pouvaient dépendre de la date du jour. Code de production inchangé.
+  - Preuve (`faketime` absent : préchargement `NODE_OPTIONS=-r` d'un décalage de `Date`) : date système simulée au 2026-11-05 → 72/72 ; au 2026-12-21 → 72/72. Contre-épreuve sans le correctif au 2026-11-05 : 2 échecs (`member` et `contributor : aucun taux dans la réponse`), 70 passés.
+- **P9-MFA-h** : test `SecurityPage.spec.tsx` « via AppProvider » : `useApp().setActiveTab('kanban')` avec `window.confirm` → `false` pendant l'affichage des codes laisse l'onglet à `security` (confirm appelé 1 fois) ; avec `true`, l'onglet passe à `kanban`. `vi.restoreAllMocks()` déplacé dans un `afterEach`. Contre-mutation : `setActiveTab` brut exposé dans `AppContext` → échec (`expected "bound " to be called 1 times, but got 0 times`) ; restauré (`grep` = 1).
+- **Mesures** : backend `env -u DATABASE_URL npx jest` : 81/81 suites, 2365/2365 tests ; frontend `pnpm test:run` 77/77 (16 fichiers) ; `pnpm build` frontend OK ; `pnpm lint` racine 0 erreur, 53 avertissements.
+
+#### Revue architecte (r23) — O18 et P9-MFA-h ; verdict final du lot
+
+**VALIDÉ. Le lot P9-MFA (volet MFA de P9, points a à h) et O18 est bon pour le commit et le déploiement en production.** Détail dans `rapport-audit.md`, section « Revue r23 ». Relancé par l'architecte :
+
+- backend : 81/81 suites, 2365/2365 tests ; `nest build` et `tsc` OK ;
+- frontend : 77/77 ; `tsc` et build OK ;
+- `pnpm lint` racine : 0 erreur ;
+- lockfile identique à r22 (`--frozen-lockfile` sous Node 20 et pnpm 9.15.4 reste acquis).
+
+O18 : avec 12 dates figées différentes, seul S12-e réagit à la date, et uniquement quand la fenêtre contient un jour férié. L'horloge figée ne masque donc aucun autre test. `doNotFake` ne simule que `Date`, et l'effet est limité au fichier. P9-MFA-h : la contre-mutation M2 est maintenant détectée, et M1 et M3 le restent. Les chiffres de la reprise sont exacts.
+
+Conditions :
+
+- `scim.guard.ts` (modifié par l'utilisateur, hors revue) est à committer séparément, ou après une revue ;
+- ne pas committer `.claude/` ;
+- ne pas exécuter le seed contre la production avant la correction de **S30**.
+
+Nouveau constat **S30 (Critique)** : mots de passe par défaut dans `backend/prisma/seed.ts:106-108`, dans un dépôt public, et `upsert` qui réattribue `SUPER_ADMIN`. La mesure d'urgence a été prise en production le 2026-11-05. La remédiation du seed est à implémenter en priorité : variables obligatoires, refus en production sans configuration explicite, pas d'élévation à la réexécution, pas de secret dans les journaux, tests `seed.spec.ts`.

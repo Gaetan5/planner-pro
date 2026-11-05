@@ -104,7 +104,7 @@ function formatDate(value: string) {
 }
 
 export function AdminConsole() {
-  const { user } = useApp();
+  const { user, setActiveTab: setAppTab } = useApp();
   const [activeTab, setActiveTab] = useState<TabType>('overview');
 
   // Overview & Health
@@ -131,6 +131,8 @@ export function AdminConsole() {
 
   // Feedback states
   const [error, setError] = useState<string | null>(null);
+  // 403 « deux facteurs obligatoire » : renvoie vers l'écran de sécurité du compte (P9)
+  const [mfaRequired, setMfaRequired] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
@@ -154,8 +156,20 @@ export function AdminConsole() {
         fetch(`${API_URL}/admin/overview`, { headers: getHeaders() }),
         fetch(`${API_URL}/admin/health`, { headers: getHeaders() }),
       ]);
-      if (ovRes.status === 403 || hlRes.status === 403) {
-        setError("Votre compte n'a pas accès à l'administration de la plateforme.");
+      const forbidden = ovRes.status === 403 ? ovRes : hlRes.status === 403 ? hlRes : null;
+      if (forbidden) {
+        let reason = '';
+        try {
+          reason = ((await forbidden.json()) as { message?: string }).message ?? '';
+        } catch {
+          // corps absent ou illisible : message générique
+        }
+        if (/deux facteurs/i.test(reason)) {
+          setMfaRequired(true);
+          setError(reason);
+        } else {
+          setError("Votre compte n'a pas accès à l'administration de la plateforme.");
+        }
         return;
       }
       if (ovRes.ok && hlRes.ok) {
@@ -457,6 +471,11 @@ export function AdminConsole() {
         <div className="admin-console__error" role="alert">
           <AlertTriangle size={18} />
           <span>{error}</span>
+          {mfaRequired && (
+            <button type="button" className="admin-btn" onClick={() => setAppTab('security')}>
+              Activer l'authentification à deux facteurs
+            </button>
+          )}
         </div>
       )}
 
