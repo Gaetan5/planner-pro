@@ -3308,3 +3308,256 @@ Le nouveau test rend `AppProvider`, active la MFA, puis appelle `useApp().setAct
 - **Immédiat : S30** (Critique ; mesure d'urgence prise ; vérifications d'exploitation 1 à 4 et correction du code à faire).
 - Phase 1 : P9 (liaison GitHub et Firebase, sessions actives, « Connecter un dépôt »).
 - Phases 5 et 6 : S19 à S26 ; A5 à A9 ; P2, P5, P7, P8 ; Q-2 ; O10 à O17.
+
+## Ajout r23-bis — liaison d'identités externes (décision de l'utilisateur : option C) (2026-11-05)
+
+**Décision de l'utilisateur** : un compte créé par GitHub (ou par une autre méthode) n'est **jamais** provisionné automatiquement dans Firebase Authentication, ni côté serveur par l'Admin SDK, ni ailleurs. Rattacher une identité externe (Firebase, GitHub) à un compte se fait uniquement par **liaison explicite**, depuis une session authentifiée, via l'écran « Sécurité du compte » (P9, volet liaison). MySQL reste l'annuaire de référence, et Firebase Authentication reste un fournisseur d'identité parmi d'autres (`docs/deployment-production.md:30-38`). La règle S8 « jamais de liaison par e-mail lors d'une connexion non authentifiée » est maintenue (`auth.service.ts:233-240` pour Firebase, `:381-389` pour GitHub).
+
+**Ordre de traitement : S30 d'abord** (Critique, le fixeur y travaille), **puis S31**. S31 doit être livré **avant l'ouverture de l'écran de liaison de P9** : cet écran rendrait le défaut directement exploitable depuis l'interface.
+
+#### S31 : liaison d'une identité Firebase ou GitHub sans réauthentification (porte dérobée persistante après un vol de session)
+
+- **Phase** : 1 (complément, avec P9, volet liaison). **Sévérité** : **Majeur**. **CVSS 3.1 : 6.8** `AV:N/AC:H/PR:L/UI:N/S:U/C:H/I:H/A:N`. Complexité élevée, car il faut d'abord voler une session ; une fois l'identité liée, l'accès au compte est complet et durable. CWE-306 (authentification manquante pour une fonction critique), CWE-620. ASVS V2.5 et V3.7.1.
+- **Localisation** :
+  - `backend/src/auth/auth.service.ts:260-290` (`linkFirebaseAccount`) et `:420-445` (`linkGitHubAccount`) : aucun appel à `assertReauthenticated` (`:831-852`), alors que `setupMfa`, `disableMfa` et `regenerateRecoveryCodes` l'appellent (`:877`, `:947`, `:974`) ;
+  - `backend/src/auth/auth.controller.ts:125-127` (`POST /auth/github/link`) et `:366-371` (`POST /auth/firebase/link`) : protégés par session, `@ForbiddenInImpersonation()` (S18.2) et limitation de débit, mais sans exigence de réauthentification ;
+  - pas de route de déliaison (aucun `unlink` dans `backend/src`) ;
+  - pas de notification au titulaire (`backend/src/mail/mail.service.ts` : aucun modèle « identité liée ou déliée ») ;
+  - `linkFirebaseAccount` ne compare pas l'e-mail Firebase à celui du compte (`:260-279`). Ce n'est pas une faille en soi si la réauthentification est exigée, mais rien ne montre l'adresse liée à l'utilisateur.
+- **Scénario** :
+  1. Un attaquant obtient une session valide de la victime : cookie volé par XSS (cf. S20), poste partagé resté connecté, jeton intercepté.
+  2. Depuis cette session, il appelle `POST /auth/firebase/link` avec le `idToken` d'un compte Firebase **qu'il contrôle** (e-mail vérifié chez Firebase, n'importe quelle adresse). Ou bien `POST /auth/github/link` avec le code OAuth de **son** compte GitHub. Aucune preuve de connaissance du mot de passe, du TOTP ou d'une connexion récente n'est demandée.
+  3. Son identité est désormais rattachée au compte de la victime (`firebaseUid` ou `githubId`). Il se reconnecte quand il veut par Firebase ou GitHub. L'accès **survit** à la révocation des sessions, au changement ou à la réinitialisation du mot de passe, et à l'expiration de la session volée. La victime n'en est pas informée.
+  4. Si la victime a activé la MFA, `completeLogin` l'exige aussi pour la connexion par l'identité liée (S8). L'attaque est alors limitée aux comptes sans MFA, ou à un attaquant qui a aussi le second facteur. La majorité des comptes restent concernés, puisque la MFA n'est obligatoire que pour les comptes de plateforme (S18.3).
+- **Remédiation attendue** (conditions 1 à 5 de l'option C) :
+  1. **Réauthentification récente, obligatoire pour lier.** `linkFirebaseAccount` et `linkGitHubAccount` appellent `assertReauthenticated(user, password, sid)`, comme pour le MFA (S6-b) :
+     - compte avec mot de passe : le mot de passe est fourni dans le corps (`LinkFirebaseDto { idToken, password? }`, `GithubLinkDto { code, state, password? }`) ;
+     - compte sans mot de passe : connexion de moins de 5 minutes (`REAUTH_MAX_AGE_MS`) ;
+     - **en plus**, si `mfaEnabled` est vrai : un code TOTP valide ou un code de secours, vérifié par `verifyCurrentFactor`, ce qui consomme le pas de temps.
+
+     Pour GitHub, l'utilisateur revient de la redirection OAuth sans que le mot de passe ait transité : l'écran le demande au retour, puis l'envoie avec `code` et `state`. Le mot de passe n'est jamais conservé dans `sessionStorage` ni dans le `state`. Autre solution acceptée : une route `POST /auth/reauth` qui pose sur la session (`sid`) un marqueur de réauthentification d'au plus 5 minutes, à usage unique, consommé par la liaison. Dans les deux cas, la vérification se fait **avant** toute écriture et avant l'échange du code GitHub contre un jeton d'accès, ce qui évite de stocker un jeton `repo` si la réauthentification échoue.
+  2. **Notification au titulaire.** Chaque liaison et chaque déliaison envoie un e-mail à l'adresse du compte (nouveau `MailService.sendIdentityLinkedEmail` et `sendIdentityUnlinkedEmail`). Le message indique le fournisseur, l'identifiant affichable (e-mail Firebase lié ou `githubUsername`), la date et le lien vers « Sécurité du compte ». Il ne contient aucun jeton ni secret. L'événement est aussi consigné dans le journal d'audit, avec `userId`, le fournisseur et `sid`.
+  3. **Déliaison et dernière méthode de connexion.**
+     - Nouvelles routes `POST /auth/firebase/unlink` et `POST /auth/github/unlink`, ou `DELETE /auth/identities/:provider`. Elles portent `@ForbiddenInImpersonation()` (à ajouter à la liste S18.2 et au balayage de `impersonation-routes.spec.ts`, dont l'expression `/link$/` ne couvre pas `unlink`), une limitation de débit et la **même réauthentification** qu'au point 1.
+     - **Refus (409) de retirer la dernière méthode de connexion.** Une déliaison n'est permise que s'il reste au moins un autre moyen : `passwordHash` non nul, l'autre identité externe, ou un SSO actif pour le domaine.
+     - La déliaison GitHub efface aussi `githubAccessToken`. Après une déliaison, les autres sessions sont révoquées (`revokeAllForUser(userId, sid)`), comme à la désactivation du MFA.
+  4. **Protections existantes conservées.** 409 si l'identité est déjà liée à un autre compte (`:271-274`, `:425-428`) ; e-mail vérifié exigé par Firebase ; interdiction en impersonation ; aucune liaison par e-mail lors d'une connexion non authentifiée (S8, S9) ; aucun provisionnement Firebase côté serveur (décision ci-dessus).
+  5. **Transparence de l'adresse liée.** L'écran « Sécurité du compte » affiche l'identité liée : e-mail Firebase (à conserver dans un nouveau champ `firebaseEmail`, ou à relire à la demande par l'Admin SDK) et `githubUsername`. L'écran de confirmation de la liaison affiche cette adresse **avant** validation et signale clairement quand elle diffère de l'e-mail du compte. Exiger l'égalité des e-mails n'est **pas** demandé : un utilisateur peut légitimement lier une adresse personnelle.
+- **Tests attendus** :
+  - `auth.service.spec.ts`, tests paramétrés sur `{ firebase, github } × { compte avec mot de passe, compte sans mot de passe }` :
+    - mot de passe absent ou faux : 403, **aucun** `user.update`, et pour GitHub aucun échange `code` vers jeton (fetch non appelé) ;
+    - compte sans mot de passe dont la session date de plus de 5 min : 403 ; de moins de 5 min : liaison effectuée ;
+    - `mfaEnabled` sans code ou avec un code faux : 403 ou 400 et aucune écriture ; code valide : liaison effectuée et pas de temps consommé ;
+    - liaison réussie : un appel à `sendIdentityLinkedEmail` vers l'adresse du compte, et une entrée d'audit.
+  - Déliaison :
+    - compte dont l'identité est la seule méthode (pas de `passwordHash`, une seule identité, pas de SSO) : **409** et aucune écriture ;
+    - avec une autre méthode : 204, champ remis à `null` (et `githubAccessToken` effacé pour GitHub), notification envoyée, autres sessions révoquées, session courante conservée ;
+    - sans réauthentification : 403.
+  - `impersonation-routes.spec.ts` : les routes de déliaison sont dans la liste interdite, et le balayage méta couvre `/unlink$/` (ou `/identities/`).
+  - `session-lifecycle.spec.ts` (HTTP) : `POST /auth/firebase/link` avec une session valide mais sans réauthentification donne 403 ; avec le mot de passe, 2xx.
+  - Frontend (P9, volet liaison) : le retour GitHub avec la finalité `link` demande le mot de passe (ou le code MFA) avant d'appeler `/auth/github/link`. L'adresse liée est affichée avant confirmation. Le bouton « Délier » est désactivé, avec une explication, lorsqu'il s'agit de la dernière méthode de connexion.
+- **Critère d'acceptation** : une session seule, sans preuve récente de connaissance du mot de passe ou d'une connexion de moins de 5 minutes, plus le second facteur si la MFA est active, ne permet ni de lier ni de délier une identité externe. Toute liaison ou déliaison est notifiée au titulaire. Aucun compte ne peut se retrouver sans méthode de connexion.
+
+**Correction documentaire rattachée à S31** (à livrer avec S31 ; la description de l'écran relève de P9) :
+
+- **Fichier** : `docs/deployment-production.md:68-71`. Le texte actuel dit qu'il suffit de s'inscrire dans Firebase avec la même adresse puis de se connecter par l'onglet Firebase, et que « le backend associe alors le UID Firebase au même compte MySQL ». **C'est faux depuis S8** : cette connexion renvoie 409 (`auth.service.ts:233-240`), et aucune liaison par e-mail n'a lieu. Ce texte guide en outre l'exploitation vers un parcours qui ressemble à la liaison automatique interdite.
+- **Texte attendu** : « Un compte existant n'est jamais rattaché automatiquement à une identité Firebase ou GitHub de même adresse : la connexion est refusée (409). Pour ajouter une méthode de connexion, l'utilisateur se connecte avec sa méthode habituelle, ouvre "Sécurité du compte", confirme son identité (mot de passe ou connexion récente, plus le code MFA si elle est active), puis lie son compte Firebase ou GitHub. Une notification est envoyée à chaque liaison ou déliaison. Planner-Pro ne crée jamais de compte Firebase Authentication à la place de l'utilisateur. »
+- **Critère** : `grep -n "associe alors" docs/deployment-production.md` ne renvoie plus rien ; le nouveau texte cite la réauthentification et le 409.
+
+**Mise à jour de P9 (volet liaison)** : l'écran de liaison s'appuie sur S31 (réauthentification, déliaison, notification, affichage de l'adresse liée). **Il ne peut pas être ouvert aux utilisateurs avant que S31 soit VALIDÉ.**
+
+**Constats ouverts après r23-bis :**
+
+- **Immédiat, dans l'ordre : S30** (Critique ; correction en cours par le fixeur ; vérifications d'exploitation 1 à 4), **puis S31** (Majeur, CVSS 6.8, avec la correction de `deployment-production.md:68-71`).
+- Phase 1 : P9 (liaison GitHub et Firebase, qui dépend de S31 ; sessions actives ; « Connecter un dépôt »).
+- Phases 5 et 6 : S19 à S26 ; A5 à A9 ; P2, P5, P7, P8 ; Q-2 ; O10 à O17.
+
+## Revue r24 — S30 (seed sans secret par défaut) : À REPRENDRE (2026-11-05)
+
+Revue de l'entrée « S30 — Mots de passe par défaut du seed » du journal. Le code a été relu et les suites relancées. 11 contre-mutations du seed ont été jouées par un script hors dépôt (sauvegarde, substitutions dont l'unicité est vérifiée, restauration vérifiée par `filecmp`, `git status` identique avant et après). La CLI du seed a été lancée avec un environnement vide (`env -i`), donc sans aucune base. Gitleaks a été exécuté avec l'image épinglée sur une copie de l'arbre (`git ls-files -co --exclude-standard`). Aucun commit ; `.claude/` non touché. Hors revue : `backend/src/auth/scim/scim.guard.ts` (utilisateur) et `README.md`, modifié dans l'arbre de travail mais absent de l'entrée du fixeur.
+
+**Verdict : À REPRENDRE, corrections courtes.** Le défaut critique est **fermé dans le code** : plus de valeur par défaut, refus en production, plus de réélévation du compte, plus de mot de passe dans les journaux, CI de détection en place. Restent trois exigences : une réélévation résiduelle des rôles de workspace par `upsert`, un compte Firebase recréé pour un compte MySQL existant, et deux trous dans le test des journaux.
+
+### Vérifications refaites par l'architecte
+
+| Commande | Résultat |
+| --- | --- |
+| `cd backend && env -u DATABASE_URL npx jest` | **82/82 suites, 2377/2377 tests** |
+| `nest build` ; `tsc --noEmit -p tsconfig.build.json` ; Prettier et ESLint (`seed.ts`, `seed.spec.ts`, `ci.yml`) ; `pnpm lint` racine | exit 0 ; exit 0 ; conforme, 0 problème ; **0 erreur**, 53 avertissements préexistants |
+| `printf '%s' '<valeur publiée>' \| sha256sum` pour les trois valeurs | identiques aux trois empreintes de `PUBLISHED_PASSWORD_SHA256` (`seed.ts:28-32`) |
+| `env -i … npx tsx prisma/seed.ts` (aucune variable) | `NODE_ENV est obligatoire`, exit 1 (le point d'entrée `require.main === module` fonctionne bien sous `tsx`) |
+| Idem avec `NODE_ENV=production` et trois mots de passe valides, sans drapeau | `Refusé en production sans SEED_ALLOW_PRODUCTION=true`, exit 1 |
+| Idem avec `NODE_ENV=development` et `SEED_ADMIN_PASSWORD` égal à une valeur publiée | `valeur publiée dans le dépôt, refusée`, exit 1 |
+| Idem avec des valeurs valides, sans `DATABASE_URL` | `DATABASE_URL est obligatoire`, exit 1, aucune connexion tentée |
+| Registre `ghcr.io/v2/gitleaks/gitleaks/manifests/v8.21.2` | `docker-content-digest: sha256:0e99e882…a7f46`, **identique** à l'empreinte de `ci.yml` |
+| Gitleaks (image épinglée, `detect --no-git -c .gitleaks.toml`) sur la copie de l'arbre | **exit 0, aucune fuite** : le job ne bloque pas à tort |
+| Étape `git grep` de `ci.yml`, lancée telle quelle | exit 1 (rien trouvé) : l'étape passe |
+
+### Contre-mutations du seed
+
+| ID | Mutation | Résultat |
+| --- | --- | --- |
+| A1 | Valeur par défaut rétablie : `SEED_ADMIN_PASSWORD` facultatif, repli sur une valeur fixe | **Détectée** |
+| A2 | Valeur par défaut rétablie, égale à une valeur publiée (écrite par concaténation), contrôle des variables manquantes supprimé | Survit, mais **mutant équivalent** : la liste de refus par empreinte rejette la valeur avant toute écriture (`SEED_ADMIN_PASSWORD : valeur publiée`) |
+| B | `platformRole: SUPER_ADMIN` attribué aussi en production | **Détectée** |
+| B2 | Drapeau `SEED_ALLOW_PRODUCTION` ignoré | **Détectée** |
+| C1 | Compte existant : `prisma.user.update` (rôle et `passwordHash`) | **Détectée** |
+| C2 | Compte existant : retour à un `upsert` qui réattribue le rôle | **Détectée** |
+| C3 | Compte existant : objet renvoyé modifié en place (`isSuspended: false`, rôle) | Survit. Mutant sans écriture réelle, mais il révèle une faiblesse du test : `users[0]` **est** l'objet `existing` (même référence), donc `toEqual(existing)` est toujours vrai |
+| D1 | Mot de passe ajouté au `console.log` de fin | **Détectée** |
+| D2 | `console.warn(err)` dans le `catch` Firebase (l'erreur simulée contient `SEED_USER_PASSWORD`) | **Survit** : `JSON.stringify` d'un `Error` donne `{}`, le message n'est jamais inspecté |
+| D3 | Mots de passe dans l'avertissement de production de `main()` | **Survit** : le test des journaux ne passe que par `runSeed` en développement |
+| F1 | Compte Firebase existant : `updateUser({ password, emailVerified })` et rattachement | **Détectée** |
+
+### Revue de la remédiation S30, point par point
+
+| Point de la remédiation | Statut | Preuve |
+| --- | --- | --- |
+| 1. Aucune valeur par défaut ; arrêt avant toute écriture | **Conforme** | `resolveSeedConfig` (`seed.ts:45-87`) valide tout avant `createPrismaClient` et `initFirebaseAuth` (`main`, `:157-170`) ; A1 détectée |
+| 2. `NODE_ENV` obligatoire ; production seulement avec `SEED_ALLOW_PRODUCTION=true` ; aucun `platformRole` en production ; `DATABASE_URL` obligatoire | **Conforme** | `:46-52`, `:74-79`, `:92-95`, `:235` ; liste fermée de `NODE_ENV` (une faute de frappe est refusée) ; B et B2 détectées ; CLI vérifiée |
+| 3. Au moins 16 caractères, valeurs publiées refusées, valeurs différentes entre elles | **Conforme** | `:58-72` |
+| 4. Pas d'élévation à la réexécution | **Partiel** | Comptes `User` conformes (`findUnique` puis `create`, C1 et C2 détectées). Mais `membership.upsert` (`seed.ts:271-287`) et `projectMembership.upsert` (même section, projet de démonstration) ont des branches `update: { role: OWNER, ADMIN, MEMBER, MANAGER, CONTRIBUTOR }`. Une réexécution **restaure les rôles** des comptes du seed dans le workspace « Planner Pro Entreprise », même si l'exploitation les avait rétrogradés. → **S30-a** |
+| 5. Firebase : aucun compte existant modifié ; synchronisation coupée en production sauf drapeau | **Conforme, avec une réserve** | `:131-160`, `:84` ; F1 détectée. Réserve : `ensureFirebaseAuthUser` est appelé **avant** de savoir si le compte MySQL existe (`:180-198`). Si l'exploitation a supprimé le compte Firebase (action 1 de S30) mais pas le compte MySQL, le seed **recrée** un compte Firebase avec `emailVerified: true`, sans le rattacher. Ce n'est pas exploitable (la connexion Firebase répond 409), mais le seed recrée une identité que l'exploitation a retirée. → **S30-c** |
+| 6. Aucun secret dans les journaux | **Code conforme, test insuffisant** | Aucun journal ne contient de mot de passe, et le `catch` n'affiche plus l'erreur brute (`:156-159`). Mais D2 et D3 survivent. → **S30-b** |
+| 7. Analyse de secrets en CI | **Conforme**, réserves non bloquantes | Voir « Job `secrets-scan` » |
+
+### Les 8 tests attendus
+
+| Test attendu (r23) | Statut |
+| --- | --- |
+| Variable absente : arrêt, aucune écriture en base ni appel Firebase | Présent (`mariaDb` et `getAuth` non appelés) |
+| `NODE_ENV` absent : refus | Présent |
+| Production sans drapeau : refus ; avec drapeau : aucun `platformRole` | Présent (et `firebaseSync=false` vérifié) |
+| Valeur publiée ou moins de 16 caractères : refus | Présent (trois valeurs, deux variables ; plus le cas des valeurs identiques) |
+| Compte existant suspendu et sans rôle : inchangé | Présent mais **faible** (C3, même référence d'objet). → S30-b |
+| Compte Firebase existant : pas de `updateUser` avec mot de passe | Présent |
+| Aucun `console.*` ne contient un `SEED_*_PASSWORD` | Présent mais **incomplet** (D2, D3). → S30-b |
+| `seed.ts` ne contient plus les trois valeurs | Présent (ainsi que l'absence de `root_password` et de `SEED_*_PASSWORD ||`) |
+
+### Job `secrets-scan`
+
+- **Épinglage : conforme.** `actions/checkout` est épinglé par SHA. L'image gitleaks est épinglée par empreinte, et j'ai vérifié sur `ghcr.io` que cette empreinte est celle de l'index multi-architecture `v8.21.2`. `--redact` évite d'afficher un secret dans les journaux de la CI.
+- **Pas de blocage à tort : vérifié.** Sur l'arbre propre, exit 0. Sondes :
+
+| Sonde | Résultat |
+| --- | --- |
+| Valeur publiée dans un fichier ordinaire | exit 7 (bloqué) |
+| Valeur publiée dans un document de `docs/security/` autre que le rapport et le journal | exit 7 (bloqué) |
+| Jeton GitHub factice `ghp_…` dans `backend/src/` | exit 7 (bloqué) |
+| Même jeton dans `backend/tests/` | **exit 0 (non détecté)** |
+| Même jeton dans `.github/workflows/ci.yml` | **exit 0 (non détecté)** |
+
+- **Allowlist trop large (S30-d, non bloquant).** Sans les exceptions `backend/tests/` et `ci.yml`, gitleaks remonte **14 détections**, toutes `generic-api-key`, dans 12 fichiers de tests et dans `ci.yml`. Ces exceptions sont justifiées, mais elles excluent **tout** secret de ces chemins. Or `ci.yml` est précisément un endroit où l'on colle un vrai jeton par erreur.
+- **Limite de `--no-git` (S30-e, non bloquant).** L'analyse ne voit que l'état final de l'arbre. Un secret ajouté puis retiré dans la même PR, qui reste donc dans l'historique public, n'est pas détecté. Acceptable comme premier niveau. À compléter par une analyse de la plage de commits de la PR.
+- **Permissions (S30-f, non bloquant).** Le workflow ne déclare pas `permissions:`. Le `GITHUB_TOKEN` hérite donc des droits par défaut du dépôt. Ajouter `permissions: { contents: read }` au niveau du workflow.
+
+### Exigences pour lever « À REPRENDRE »
+
+1. **S30-a (bloquant, réélévation résiduelle)** : dans `seed.ts`, les `membership.upsert` et `projectMembership.upsert` passent à `update: {}` (ou `findUnique` puis `create`). Une adhésion existante n'est jamais modifiée. **Test** : une adhésion existante d'`admin@` en `VIEWER` reste `VIEWER` après le seed, et aucun `upsert` n'a de branche `update` non vide (vérification sur `mock.calls`).
+2. **S30-b (bloquant, tests)** :
+   - le test des journaux sérialise les arguments avec `util.inspect` (ou `String(arg)` et `arg.message`), et non `JSON.stringify`. La mutation D2 doit le faire échouer ;
+   - ajouter un cas `main({ NODE_ENV: 'production', SEED_ALLOW_PRODUCTION: 'true', … })`, avec `runSeed` ou le client Prisma simulé, qui vérifie que l'avertissement de production ne contient aucun mot de passe. La mutation D3 doit le faire échouer ;
+   - dans le test « compte existant », comparer à une copie profonde prise **avant** l'exécution (`structuredClone(existing)`). La mutation C3 doit le faire échouer.
+3. **S30-c (bloquant, court)** : ne créer un compte Firebase que pour un compte MySQL **créé** dans la même exécution. Un compte MySQL existant ne déclenche aucun appel `createUser`. **Test** : compte MySQL existant et compte Firebase absent (`auth/user-not-found`) : `createUser` n'est pas appelé.
+
+### Points non bloquants
+
+- **S30-d** : remplacer les exceptions par chemin `backend/tests/` et `ci.yml` par des exceptions ciblées : `[allowlist] regexes` sur les valeurs factices réellement utilisées (préfixe commun du type `test-`), ou `.gitleaksignore` par empreinte. **Critère** : un `ghp_…` réaliste ajouté dans `backend/tests/` ou dans `ci.yml` donne exit 7, et l'arbre actuel donne exit 0.
+- **S30-e** : sur `pull_request`, ajouter `gitleaks git --log-opts="<base>..<head>"` (avec `fetch-depth: 0`) pour analyser chaque commit de la PR.
+- **S30-f** : `permissions: { contents: read }` dans `ci.yml`.
+- **Rôle en préproduction (accepté)** : hors production, `staging` compris, `admin@` reçoit `SUPER_ADMIN` à la création. C'est acceptable : mot de passe fourni d'au moins 16 caractères, MFA exigée sur `/admin/*` (S18.3). Si la préproduction est exposée sur Internet, préférer `SEED_GRANT_SUPER_ADMIN=true` explicite (Amélioration).
+- **`README.md`** : modifié dans l'arbre de travail, mais absent de l'entrée S30. À rattacher à son auteur avant le commit, ou à committer à part. Il ne contient aucune des valeurs publiées.
+
+### Réponses aux questions du fixeur
+
+1. **Empreintes SHA-256 : VALIDÉ.** Elles concilient bien la liste de refus et une source sans les valeurs. Une empreinte non salée est suffisante ici, puisque les valeurs sont déjà publiques : l'empreinte ne protège rien, elle évite seulement de republier les valeurs en clair et de déclencher la règle gitleaks. J'ai recalculé les trois empreintes : elles correspondent.
+2. **Docker épinglé par empreinte plutôt que binaire avec somme : VALIDÉ, garder Docker.** L'empreinte d'image est une adresse de contenu, vérifiée par le moteur Docker au téléchargement. Une somme de contrôle téléchargée depuis la même page de version n'apporte pas plus de garantie. Seule condition : quand la version de gitleaks change, mettre à jour l'empreinte et vérifier qu'elle correspond au tag sur `ghcr.io`, dans la même PR.
+3. **Actions d'exploitation : confirmé, elles restent à la charge de l'utilisateur** et aucun code ne peut les couvrir. Liste à jour :
+   - désactiver ou supprimer dans Firebase Authentication de production les comptes `admin@`, `manager@` et `user@planner-pro.com`, et révoquer leurs jetons de rafraîchissement ;
+   - remonter à partir du 2026-10-27 : connexions réussies, MFA enrôlée sur `admin@` (`mfaEnabled`, `mfaPendingSecret`), actions d'administration, clés SCIM, intégrations, invitations, liaisons GitHub ou Firebase. Tout résultat positif est un incident ;
+   - vérifier les autres environnements (préproduction, démo) et les fichiers `.env` des serveurs : aucune des trois valeurs ne doit y figurer ;
+   - ne jamais relancer le seed contre la production. Si un compte de démonstration doit un jour exister en production, le créer par un script dédié et audité, pas par le seed.
+
+### Statut des constats
+
+| ID | Statut r24 |
+| --- | --- |
+| **S30** (code) | **À REPRENDRE** : S30-a, b et c bloquants ; d, e et f non bloquants. Le risque critique est fermé dans le code |
+| S30 (exploitation) | actions 1 à 4 à la charge de l'utilisateur, non confirmées |
+| S31 | ouvert (après S30) |
+
+**Constats ouverts à la fin de r24 :**
+
+- **Immédiat, dans l'ordre : S30** (S30-a à c ; actions d'exploitation), **puis S31**.
+- Phase 1 : P9 (liaison GitHub et Firebase, qui dépend de S31 ; sessions actives ; « Connecter un dépôt »).
+- Phases 5 et 6 : S19 à S26 ; A5 à A9 ; P2, P5, P7, P8 ; Q-2 ; O10 à O17.
+
+## Revue r25 — S30 (reprise S30-a à f) : VALIDÉ (2026-11-05)
+
+Revue de la section « Reprise r24 (fixeur) — S30-a à f » du journal. Le code a été relu et les suites relancées. 12 contre-mutations du seed ont été jouées par un script hors dépôt (sauvegarde, substitutions dont l'unicité est vérifiée, restauration vérifiée par `filecmp`, `git status` identique avant et après). Gitleaks a été exécuté avec l'image épinglée (`v8.21.2`, confirmée par `gitleaks version`), en mode `--no-git` sur une copie de l'arbre, et en mode `git` sur un clone jetable. Dans ce clone, j'ai simulé la PR S30 par un commit des fichiers du lot, puis ajouté des commits de sonde. Aucun commit dans le dépôt ; `.claude/` non touché. Hors revue : `README.md` et `backend/src/auth/scim/scim.guard.ts` (modifications de l'utilisateur).
+
+**Verdict final : S30 VALIDÉ côté code, bon pour le commit.** Il n'y a pas de déploiement : le seed ne tourne pas en production. Les actions d'exploitation 1 à 4 restent à la charge de l'utilisateur.
+
+### Vérifications refaites par l'architecte
+
+| Commande | Résultat |
+| --- | --- |
+| `cd backend && env -u DATABASE_URL npx jest` | **82/82 suites, 2380/2380 tests** |
+| `nest build` ; `tsc --noEmit -p tsconfig.build.json` ; Prettier (`seed.ts`, `seed.spec.ts`, `ci.yml`) ; `pnpm lint` racine | exit 0 ; exit 0 ; conforme ; **0 erreur**, 53 avertissements préexistants |
+| `detect --no-git` sur l'arbre de travail complet (`README.md` et `scim.guard.ts` compris) | exit 0 |
+| Étape `git grep` des valeurs publiées | exit 1 (rien trouvé) : l'étape passe |
+
+### Contre-mutations (15 tests dans `seed.spec.ts`)
+
+| ID | Mutation | Résultat |
+| --- | --- | --- |
+| C3 | Compte existant modifié en place (`isSuspended: false`, rôle) | **Détectée** (copie profonde par `structuredClone`) |
+| D2 | `console.warn(err)` dans le `catch` Firebase | **Détectée** (`util.inspect`) |
+| D2b | `console.error('Firebase', err.message)` | **Détectée** |
+| D3 | Mot de passe dans l'avertissement de production de `main()` | **Détectée** |
+| S30-a (×3) | `update: { role }` rétabli sur l'adhésion OWNER d'`admin@`, MEMBER de `user@`, et l'adhésion de projet MANAGER | **Détectées** (chacune isolément) |
+| S30-c | `ensureFirebaseAuthUser` appelé pour un compte MySQL existant | **Détectée** |
+| S30-c bis | Appel Firebase replacé avant le `findUnique` (ordre de r24) | **Détectée** |
+| Non-régression : A1 (valeur par défaut), B (`SUPER_ADMIN` en production), D1 (mot de passe dans le journal de fin) | — | **Détectées** |
+
+### Nouvel `.gitleaks.toml` (S30-d) : conforme
+
+- Les exceptions par chemin pour `backend/tests/` et `ci.yml` sont supprimées. Il ne reste que le rapport et le journal (documentation de S30). Quatre expressions régulières, ancrées `^…$`, ne visent que les valeurs factices connues.
+- Sondes :
+
+| Sonde | Résultat |
+| --- | --- |
+| Arbre actuel | exit 0 |
+| `ghp_…` réaliste dans `backend/tests/` | **exit 7** |
+| Même jeton dans `.github/workflows/ci.yml` | **exit 7** |
+| Valeur factice `test-secret-…-0123456789…` | exit 0 (admise) |
+| Ligne mêlant une valeur factice et un vrai jeton | **exit 7** : l'ancrage empêche qu'une valeur factice masque un secret voisin |
+
+### Étape `gitleaks git` sur PR (S30-e) : conforme
+
+- **Plage `base..tête`** : sur le clone, la PR S30 simulée (`HEAD~1..HEAD`) donne exit 0. Le commit retire des lignes contenant les valeurs publiées, mais gitleaks n'analyse que les ajouts, et le rapport et le journal sont exclus. Un commit qui ajoute un `ghp_` dans `backend/tests/` donne **exit 7**. Un ajout puis un retrait dans la même PR donne aussi **exit 7**, alors que `--no-git` ne le voit pas : la limite de r24 est couverte. Pour comparaison, l'historique complet (`--all`, 160 commits) donne exit 7 avec 3 détections, toutes dans `c5835ef` (`seed.ts`, 2026-10-27). Cela confirme que limiter la plage est **nécessaire** pour ne pas bloquer toutes les PR.
+- **`fetch-depth: 0`** : nécessaire et suffisant pour que `base.sha` et `head.sha` soient présents, y compris pour une PR venant d'un fork (`head.sha` est un parent de `refs/pull/N/merge`).
+- **`safe.directory`** : l'image tourne en `root` (vérifié avec `id`), alors que l'espace de travail du runner appartient à l'utilisateur `runner`. Sans `safe.directory`, Git refuserait le dépôt (« dubious ownership ») et l'étape échouerait à tort. Le passage par `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_0` et `GIT_CONFIG_VALUE_0` est correct (Git 2.43.5 dans l'image). Je n'ai pas pu reproduire ce refus en local, car le Docker de ce poste fait correspondre `root` à l'utilisateur de l'hôte. **À confirmer à la première PR** : l'étape doit afficher « N commits scanned » et exit 0.
+- **Risque de blocage à tort : faible.** Si `base.sha` est en retard et que la branche a fusionné `main` depuis, la plage inclut des commits de `main` déjà analysés. Ils ne contiennent rien de bloquant aujourd'hui (le seul historique fautif, `c5835ef`, est antérieur à toute base possible). Amélioration possible : `--log-opts="$(git merge-base <base> <tête>)..<tête>"`.
+- **Injection** : `${{ github.event.pull_request.base.sha }}` et `head.sha` sont des empreintes hexadécimales, que l'auteur d'une PR ne peut pas choisir librement. Il n'y a pas d'injection de script. Bonne pratique (Amélioration) : les passer par `env:` plutôt que dans `run:`.
+- **S30-f** : `permissions: { contents: read }` au niveau du workflow. Conforme.
+
+### Points non bloquants restants
+
+- Confirmer l'étape `gitleaks git` à la première PR réelle (voir plus haut).
+- Améliorations : `merge-base` pour la plage, valeurs SHA passées par `env:`, `dir` à la place de `detect --no-git` au prochain changement de version de gitleaks (`detect` est déprécié depuis la v8.19, mais fonctionne en v8.21.2).
+- **Commit** : committer le lot S30 (`backend/prisma/seed.ts`, `backend/tests/unit/scripts/seed.spec.ts`, `.gitleaks.toml`, `.github/workflows/ci.yml`, le rapport et le journal) **sans** `README.md` ni `scim.guard.ts`, qui ne sont pas revus, et sans `.claude/`.
+
+### Statut des constats
+
+| ID | Statut r25 |
+| --- | --- |
+| **S30** (code et CI) | **VALIDÉ** (S30-a à f) |
+| S30 (exploitation) | actions 1 à 4 à la charge de l'utilisateur, non confirmées à ce jour : comptes Firebase de production, investigation depuis le 2026-10-27, autres environnements et fichiers `.env`, ne jamais relancer le seed en production |
+| **S31** | ouvert, **suivant dans l'ordre** |
+
+**Constats ouverts à la fin de r25 :**
+
+- Immédiat : S31 (Majeur, CVSS 6.8, avec la correction de `deployment-production.md:68-71`) ; actions d'exploitation de S30.
+- Phase 1 : P9 (liaison GitHub et Firebase, qui dépend de S31 ; sessions actives ; « Connecter un dépôt »).
+- Phases 5 et 6 : S19 à S26 ; A5 à A9 ; P2, P5, P7, P8 ; Q-2 ; O10 à O17.

@@ -2593,3 +2593,96 @@ Conditions :
 - ne pas exécuter le seed contre la production avant la correction de **S30**.
 
 Nouveau constat **S30 (Critique)** : mots de passe par défaut dans `backend/prisma/seed.ts:106-108`, dans un dépôt public, et `upsert` qui réattribue `SUPER_ADMIN`. La mesure d'urgence a été prise en production le 2026-11-05. La remédiation du seed est à implémenter en priorité : variables obligatoires, refus en production sans configuration explicite, pas d'élévation à la réexécution, pas de secret dans les journaux, tests `seed.spec.ts`.
+
+---
+
+### S30 — Mots de passe par défaut du seed
+
+**Statut** : CORRIGÉ – À REVOIR.
+
+**Changement** :
+
+- `backend/prisma/seed.ts` (réécrit autour de `resolveSeedConfig`, `runSeed`, `main(env)` exportés ; exécution CLI seulement si `require.main === module`) :
+  - plus aucune valeur par défaut : `SEED_ADMIN_PASSWORD`, `SEED_MANAGER_PASSWORD` et `SEED_USER_PASSWORD` obligatoires ; `DATABASE_URL` obligatoire (DSN `root:root_password` supprimé) ; toute la validation précède l'ouverture de la base et de Firebase ;
+  - `NODE_ENV` obligatoire et limité à `development|test|staging|production` (une faute de frappe type `prod` est refusée, pas traitée comme un mode non-production) ; en production, refus sauf `SEED_ALLOW_PRODUCTION=true` (et les trois mots de passe), avec avertissement sans secret, et aucun `platformRole` attribué ;
+  - mots de passe : 16 caractères minimum, différents entre eux, et différents des trois valeurs publiées ;
+  - comptes existants jamais modifiés : `findUnique` puis `create` seulement (plus d'`upsert`) ; rôle, `passwordHash`, `firebaseUid`, `isSuspended` et nom intacts. Hors production, seul `admin@` reçoit `SUPER_ADMIN`, et uniquement à la création ;
+  - Firebase : un compte existant n'est jamais mis à jour (ni mot de passe, ni `emailVerified`) ni rattaché ; synchronisation coupée en production sauf `SEED_ALLOW_FIREBASE_IN_PRODUCTION=true` ; l'erreur brute n'est plus journalisée (seule l'adresse l'est) ;
+  - plus aucun mot de passe dans les journaux : seules les adresses sont affichées.
+- CI : `.gitleaks.toml` (nouveau) et job `secrets-scan` dans `.github/workflows/ci.yml` : gitleaks v8.21.2 (image Docker épinglée par empreinte `sha256:0e99e882…`, aucun paquet npm ajouté) en `detect --no-git`, plus un `git grep` qui échoue si l'une des trois valeurs publiées réapparaît hors `docs/security`.
+
+**Écart par rapport au rapport** (à valider) :
+
+1. Le rapport demande à la fois une liste de refus « en dur » des trois valeurs et un test « `seed.ts` ne contient plus les trois valeurs ». Je concilie les deux par des **empreintes SHA-256** des valeurs publiées : le code source n'a plus les valeurs en clair, et elles restent refusées.
+2. Le test et la règle CI de non-réapparition ignorent `docs/security/` (le rapport cite les valeurs pour documenter S30). `seed.spec.ts` assemble les valeurs par concaténation pour ne pas les écrire en clair.
+3. Allowlist gitleaks (documentée dans le fichier) : `docs/security/{rapport-audit,journal-corrections}.md`, `backend/tests/` et `.github/workflows/ci.yml` (faux secrets de test et variables de test de la CI). L'analyse porte sur l'arbre courant : les valeurs historiques, restées dans Git, ne bloquent pas la CI (pas de base de référence nécessaire). Limite : un secret ajouté puis retiré dans le même PR n'est pas vu ; un secret dans l'historique n'est pas non plus détecté. Version de gitleaks volontairement figée (v8.21.2, syntaxe `[allowlist]`).
+
+**Tests** : `backend/tests/unit/scripts/seed.spec.ts`, 12 tests (les 8 cas du rapport, la valeur publiée testée pour chacune des trois valeurs, longueur et doublons, SUPER_ADMIN hors production). Contre-mutation : `platformRole` réattribué en production et `update` d'un compte existant rétablis → 2 échecs (production, compte existant) ; seed restauré. Vérification gitleaks sur une copie des fichiers suivis (pas de `.env` local) : arbre propre exit 0 ; valeur publiée réintroduite exit 7 ; faux secret `AKIA…` exit 7.
+
+**Mesures** : backend `env -u DATABASE_URL npx jest` : 82/82 suites, 2377/2377 tests ; `pnpm lint` racine : 0 erreur, 53 avertissements ; `nest build` OK. Le seed n'a jamais été exécuté contre une base ; les tests utilisent un Prisma factice.
+
+**Changement cassant / action requise** : `pnpm seed` exige désormais `NODE_ENV`, `DATABASE_URL` et les trois `SEED_*_PASSWORD` (16 caractères minimum). Les comptes déjà présents ne sont plus mis à jour par le seed ; pour ré-élever ou réinitialiser un compte, utiliser un script dédié et audité. Les trois mots de passe publiés restent compromis dans l'historique Git.
+
+**Questions pour l'architecte** :
+
+1. Valides-tu les empreintes SHA-256 pour concilier « liste de refus » et « source sans les valeurs » ?
+2. Le job `secrets-scan` lance Docker sur `ubuntu-latest` (image épinglée par empreinte). Préfères-tu le binaire gitleaks téléchargé avec vérification de somme ?
+3. Les actions d'exploitation 1 à 4 du rapport (Firebase, investigation, autres environnements) restent à la charge de l'utilisateur et ne sont pas couvertes par ce code.
+
+#### Revue architecte (r24) — S30
+
+**À REPRENDRE (corrections courtes).** Détail dans `rapport-audit.md`, section « Revue r24 ». Le risque critique est fermé dans le code.
+
+Relancé par l'architecte :
+
+- backend : 82/82 suites et 2377/2377 tests ; `nest build` et `tsc` OK ; `pnpm lint` à 0 erreur ;
+- CLI `env -i … tsx prisma/seed.ts` : refus sans `NODE_ENV`, en production sans drapeau, avec une valeur publiée, sans `DATABASE_URL` ;
+- empreintes SHA-256 recalculées et conformes ;
+- empreinte de l'image gitleaks identique au tag `v8.21.2` sur `ghcr.io` ;
+- gitleaks sur l'arbre : exit 0 ; étape `git grep` : passe.
+
+Contre-mutations : A1, B, B2, C1, C2, D1 et F1 sont détectées. A2 est un mutant équivalent (refusé par la liste d'empreintes). **C3, D2 et D3 survivent.**
+
+À corriger :
+
+- **S30-a** : `membership.upsert` et `projectMembership.upsert` ont `update: { role }` et restaurent les rôles de workspace à chaque réexécution. Passer à `update: {}`, avec un test.
+- **S30-b** : test des journaux avec `util.inspect` (D2), cas `main()` en production (D3), copie profonde dans le test du compte existant (C3).
+- **S30-c** : ne créer un compte Firebase que pour un compte MySQL créé dans la même exécution, avec un test.
+
+Non bloquants : S30-d (allowlist gitleaks trop large : un vrai jeton dans `backend/tests/` ou `ci.yml` n'est pas détecté, vérifié), S30-e (analyse de la plage de commits de la PR), S30-f (`permissions: contents: read`).
+
+Questions :
+
+1. Empreintes SHA-256 : VALIDÉ.
+2. Docker épinglé par empreinte : VALIDÉ, à garder.
+3. Actions d'exploitation : à la charge de l'utilisateur ; liste à jour dans le rapport.
+
+`README.md` est modifié mais absent de l'entrée : à rattacher à son auteur.
+
+#### Reprise r24 (fixeur) — S30-a à f : CORRIGÉ – À REVOIR
+
+- **S30-a** : `seed.ts` : les 5 `upsert` d'adhésions (3 workspace, 2 projet) passent à `update: {}`. Test : adhésions `VIEWER` existantes toujours `VIEWER` après le seed (fake Prisma à sémantique d'`upsert`), et aucun `upsert` n'a de branche `update` non vide.
+- **S30-b** : journaux sérialisés avec `util.inspect` ; test `main()` en production avec `SEED_ALLOW_PRODUCTION=true` (client Prisma simulé, avertissement vérifié émis et sans mot de passe) ; comparaison du compte existant à `structuredClone` pris avant l'exécution. Contre-mutations constatées : D2 (`console.warn(err)` dans le `catch` Firebase) → échec ; D3 (mot de passe dans l'avertissement de `main()`) → échec ; C3 (compte existant modifié en place) → échec ; S30-a (`update: { role }` rétabli) → échec ; S30-c (appel Firebase pour un compte existant) → échec. Seed restauré après chaque mutation (`cmp` identique).
+- **S30-c** : `ensureFirebaseAuthUser` n'est plus appelé en amont : il l'est dans `ensureUser`, après le `findUnique`, donc seulement pour un compte MySQL créé dans la même exécution. Test : `admin@` et `manager@` existants, Firebase absent : `createUser` appelé 1 fois (pour `user@` seulement), jamais `updateUser`.
+- **S30-d** : `.gitleaks.toml` : exceptions par chemin pour `backend/tests/` et `ci.yml` supprimées ; remplacées par 4 regex sur les valeurs factices (`^test-secret-…-0123456789…$`, `^scim_live_test_key_0123456789$`, `^abcdefghijklmnopqrstuvwxyz123456$`, `^short-1234567$`). Seul le chemin du rapport et du journal reste exclu (ils citent les valeurs publiées). Vérifié sur une copie des fichiers suivis et non suivis non ignorés : arbre actuel exit 0 ; un `ghp_…` réaliste dans `backend/tests/` exit 7 ; dans `ci.yml` exit 7.
+- **S30-f** : `permissions: { contents: read }` au niveau du workflow.
+- **S30-e** (fait, simple) : sur `pull_request`, étape `gitleaks git` limitée à `base..tête` (`fetch-depth: 0`, `safe.directory` passé au conteneur), l'historique antérieur n'est pas rejoué. Vérifié en local sur `HEAD~3..HEAD` (3 commits, aucune fuite) ; non exécuté sur GitHub.
+- `README.md` : modifié dans l'arbre de travail, **pas par moi** (non touché).
+- **Mesures** : backend `env -u DATABASE_URL npx jest` 82/82 suites, 2380/2380 tests (+3) ; `pnpm lint` racine 0 erreur, 53 avertissements ; `nest build` exit 0 ; Prettier conforme sur `ci.yml`, `seed.ts`, `seed.spec.ts`.
+
+#### Revue architecte (r25) — Reprise S30-a à f
+
+**VALIDÉ. S30 est bon pour le commit** (pas de déploiement : le seed ne tourne pas en production). Détail dans `rapport-audit.md`, section « Revue r25 ».
+
+Relancé par l'architecte :
+
+- backend : 82/82 suites et 2380/2380 tests ; `nest build` et `tsc` OK ; `pnpm lint` à 0 erreur ;
+- 12 contre-mutations, **toutes détectées** : C3, D2, D2b, D3, S30-a (trois adhésions, chacune isolément), S30-c (compte existant, et ordre de r24) ; non-régression A1, B, D1 ;
+- gitleaks : arbre exit 0 ; `ghp_` dans `backend/tests/` et dans `ci.yml` exit 7 ; ligne mêlant une valeur factice et un vrai jeton exit 7 ;
+- mode `git` sur un clone : PR S30 simulée exit 0 ; ajout de `ghp_` exit 7 ; ajout puis retrait dans la même PR exit 7. L'historique complet donne exit 7 (3 détections dans `c5835ef`), ce qui confirme que limiter la plage à `base..tête` est nécessaire.
+
+Le fonctionnement de `safe.directory` (image en `root`, runner propriétaire) est à confirmer à la première PR réelle.
+
+Pour le commit : lot S30 seulement, sans `README.md`, `scim.guard.ts` ni `.claude/`.
+
+Suivant : **S31**. Les actions d'exploitation de S30 restent à la charge de l'utilisateur.

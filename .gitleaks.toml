@@ -1,0 +1,33 @@
+# Analyse de secrets (S30). Règles par défaut de gitleaks + une règle sur les mots de passe du
+# seed publiés dans l'historique (compromis définitivement).
+title = "planner-pro"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "planner-pro-published-seed-password"
+description = "Mot de passe du seed publié dans l'historique Git (S30)"
+regex = '''(Admin|Manager|User)123!Secure'''
+tags = ["S30"]
+
+# Allowlist ciblée (S30-d) : AUCUNE exception par chemin pour les tests ni pour ci.yml, afin qu'un
+# vrai secret collé à cet endroit soit détecté. Seules les valeurs factices connues sont admises,
+# par expression régulière sur le secret lui-même. La CI analyse l'arbre courant (--no-git) : les
+# valeurs historiques du seed, restées dans l'historique Git, ne bloquent pas.
+[allowlist]
+description = "Valeurs factices revues (S30-d)"
+regexes = [
+  # JWT_SECRET des tests : préfixe test-secret- et suffixe numérique caractéristique
+  '''^test-secret-[a-z0-9-]+-0123456789[a-z0-9]*$''',
+  # Clé SCIM factice des tests SCIM
+  '''^scim_live_test_key_0123456789$''',
+  # ENCRYPTION_KEY factice de ci.yml (alphabet + 123456)
+  '''^abcdefghijklmnopqrstuvwxyz123456$''',
+  # Mot de passe trop court volontairement, dans seed.spec.ts
+  '''^short-1234567$''',
+]
+# Seul le rapport et le journal citent les valeurs publiées du seed pour documenter S30.
+paths = [
+  '''docs/security/(rapport-audit|journal-corrections)\.md$''',
+]

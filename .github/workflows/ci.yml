@@ -5,7 +5,40 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
+  # S30 : analyse de secrets de l'arbre de travail (--no-git : les valeurs historiques déjà dans
+  # Git ne bloquent pas ; toute réapparition dans un fichier suivi échoue). Configuration et
+  # exceptions revues : .gitleaks.toml. Image épinglée par empreinte (gitleaks v8.21.2).
+  secrets-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+      - name: Gitleaks
+        run: >-
+          docker run --rm -v "$PWD:/repo"
+          ghcr.io/gitleaks/gitleaks@sha256:0e99e8821643ea5b235718642b93bb32486af9c8162c8b8731f7cbdc951a7f46
+          detect --no-git --source /repo -c /repo/.gitleaks.toml --redact --exit-code 7
+      # S30-e : uniquement les commits de la PR (base..tête) ; l'historique antérieur n'est pas rejoué
+      - name: Gitleaks (commits de la PR)
+        if: github.event_name == 'pull_request'
+        run: >-
+          docker run --rm -v "$PWD:/repo"
+          -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*'
+          ghcr.io/gitleaks/gitleaks@sha256:0e99e8821643ea5b235718642b93bb32486af9c8162c8b8731f7cbdc951a7f46
+          git /repo -c /repo/.gitleaks.toml --redact --exit-code 7
+          --log-opts="${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+      - name: Mots de passe du seed publiés
+        run: |
+          if git grep -nE '(Admin|Manager|User)123!Secure' -- . ':!docs/security' ':!.gitleaks.toml'; then
+            echo "Valeur publiée du seed réintroduite (S30)." >&2
+            exit 1
+          fi
+
   build-and-test:
     runs-on: ubuntu-latest
     services:
