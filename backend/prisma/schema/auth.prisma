@@ -6,6 +6,8 @@ model User {
   name              String?
   passwordHash      String?
   firebaseUid       String?        @unique
+  // Adresse du compte Firebase lié, affichée à l'utilisateur avant et après la liaison (S31)
+  firebaseEmail     String?
   githubId          String?        @unique
   githubUsername    String?
   githubAccessToken String?

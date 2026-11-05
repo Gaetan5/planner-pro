@@ -65,10 +65,13 @@ client.
    nouveaux comptes doivent confirmer leur adresse e-mail avant d’accéder à Planner
    Pro.
 
-Les anciens comptes continuent à utiliser leur connexion actuelle. Pour les lier sans
-perdre leurs données, s’inscrire dans Firebase avec la même adresse e-mail, confirmer
-cette adresse, puis se connecter avec l’onglet Firebase. Le backend associe alors le
-UID Firebase au même compte MySQL.
+Les anciens comptes continuent à utiliser leur connexion actuelle. Un compte existant
+n’est jamais rattaché automatiquement à une identité Firebase ou GitHub de même adresse :
+la connexion est refusée (409). Pour ajouter une méthode de connexion, l’utilisateur se
+connecte avec sa méthode habituelle, ouvre « Sécurité du compte », confirme son identité
+(mot de passe ou connexion récente, plus le code MFA si elle est active), puis lie son
+compte Firebase ou GitHub. Une notification est envoyée à chaque liaison ou déliaison.
+Planner-Pro ne crée jamais de compte Firebase Authentication à la place de l’utilisateur.
 
 ## Préparer le VPS
 

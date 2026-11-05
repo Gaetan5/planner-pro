@@ -22,7 +22,11 @@ const mailStub = {
   sendEmailVerificationEmail: jest.fn().mockResolvedValue(true),
   sendPasswordResetEmail: jest.fn().mockResolvedValue(true),
   sendAccountExistsEmail: jest.fn().mockResolvedValue(true),
+  sendIdentityLinkedEmail: jest.fn().mockResolvedValue(true),
+  sendIdentityUnlinkedEmail: jest.fn().mockResolvedValue(true),
 };
+
+const firebaseStub = { verifyIdToken: jest.fn() };
 
 @Controller('protected')
 @UseGuards(JwtAuthGuard)
@@ -58,7 +62,7 @@ describe('A3/S7 : cycle de vie des sessions (HTTP)', () => {
         JwtAuthGuard,
         SessionService, // SESSION
         { provide: PrismaService, useValue: prisma },
-        { provide: FirebaseIdentityService, useValue: {} },
+        { provide: FirebaseIdentityService, useValue: firebaseStub },
         { provide: RedisService, useValue: redis },
       ],
     }));
@@ -117,6 +121,46 @@ describe('A3/S7 : cycle de vie des sessions (HTTP)', () => {
       method: 'POST',
       headers: { Cookie: asHeader(jar), Origin: FRONT_ORIGIN },
     });
+
+  // S31 : une session valide ne suffit pas à lier une identité externe
+  it('POST /auth/firebase/link : 403 sans réauthentification, 2xx avec le mot de passe', async () => {
+    firebaseStub.verifyIdToken.mockResolvedValue({
+      uid: 'fb-uid-1',
+      email: 'perso@example.com',
+      email_verified: true,
+    });
+    const { jar } = await login();
+    const post = (path: string, body: Record<string, string>) =>
+      fetch(`${baseUrl}${path}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Cookie: asHeader(jar),
+          Origin: FRONT_ORIGIN,
+        },
+        body: JSON.stringify(body),
+      });
+
+    const refused = await post('/auth/firebase/link', { idToken: 'tok' });
+    expect(refused.status).toBe(403);
+    const wrong = await post('/auth/firebase/link', { idToken: 'tok', password: 'faux' });
+    expect(wrong.status).toBe(403);
+    expect(prisma.user.rows[0].firebaseUid ?? null).toBeNull();
+    expect(firebaseStub.verifyIdToken).not.toHaveBeenCalled();
+
+    const ok = await post('/auth/firebase/link', { idToken: 'tok', password: 'MotDePasse!2026' });
+    expect(ok.status).toBeLessThan(300);
+    expect(prisma.user.rows[0].firebaseUid).toBe('fb-uid-1');
+    expect(mailStub.sendIdentityLinkedEmail).toHaveBeenCalledWith(
+      'ada@corp.com',
+      expect.objectContaining({ provider: 'Firebase', identifier: 'perso@example.com' }),
+    );
+
+    // Déliaison : 204 avec le mot de passe (une autre méthode existe : le mot de passe)
+    const unlinked = await post('/auth/firebase/unlink', { password: 'MotDePasse!2026' });
+    expect(unlinked.status).toBe(204);
+    expect(prisma.user.rows[0].firebaseUid).toBeNull();
+  });
 
   it('le jeton n’est plus renvoyé dans le corps, mais dans deux cookies httpOnly SameSite=Strict', async () => {
     const { res, body } = await login();

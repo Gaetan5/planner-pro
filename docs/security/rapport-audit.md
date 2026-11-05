@@ -3561,3 +3561,117 @@ Revue de la section « Reprise r24 (fixeur) — S30-a à f » du journal. Le cod
 - Immédiat : S31 (Majeur, CVSS 6.8, avec la correction de `deployment-production.md:68-71`) ; actions d'exploitation de S30.
 - Phase 1 : P9 (liaison GitHub et Firebase, qui dépend de S31 ; sessions actives ; « Connecter un dépôt »).
 - Phases 5 et 6 : S19 à S26 ; A5 à A9 ; P2, P5, P7, P8 ; Q-2 ; O10 à O17.
+
+## Revue r26 — S31 (liaison d'identités avec réauthentification) : VALIDÉ (2026-11-05)
+
+Revue de l'entrée « S31 — Liaison d'identités externes sans réauthentification » du journal (≈ l. 2693). Le rapport chiffré du fixeur ne m'étant pas parvenu, j'ai relancé toutes les mesures moi-même. Le code a été relu. 14 contre-mutations ont été jouées par un script hors dépôt (sauvegarde, substitutions dont l'unicité est vérifiée, restauration vérifiée par `filecmp`, `git status` identique avant et après). La migration a été comparée au différentiel de schéma calculé par Prisma. Aucun commit, aucune base touchée ; `.claude/` non touché. Hors revue : `README.md` et `backend/src/auth/scim/scim.guard.ts` (modifications de l'utilisateur).
+
+**Verdict : S31 VALIDÉ, bon pour le commit et le déploiement en production**, aux conditions indiquées en fin de section. Un constat Mineur non bloquant (**S31-a**), à traiter avec l'écran de liaison de P9.
+
+### Mesures (relancées par l'architecte)
+
+| Commande | Résultat |
+| --- | --- |
+| `cd backend && env -u DATABASE_URL npx jest` | **83/83 suites, 2421/2421 tests** |
+| `nest build` ; `tsc --noEmit -p tsconfig.build.json` ; `prisma validate` | exit 0 ; exit 0 ; schéma valide |
+| Prettier (`src/auth`, `src/mail`, `tests/unit/auth`, `tests/http`, `prisma/schema`) ; `pnpm lint` racine | conforme ; **0 erreur**, 53 avertissements préexistants |
+| `cd frontend && pnpm test:run` ; `tsc --noEmit -p .` ; `pnpm build` | **77/77** ; exit 0 ; build OK |
+| `prisma migrate diff --from-schema <schéma de HEAD> --to-schema prisma/schema --script` | exactement `ALTER TABLE User ADD COLUMN firebaseEmail VARCHAR(191) NULL;`, **identique** à `migration.sql` |
+| `grep -n "associe alors" docs/deployment-production.md` | **vide** (exit 1) |
+
+### Conformité aux conditions 1 à 5 (« Ajout r23-bis »)
+
+| Condition | Statut | Preuve |
+| --- | --- | --- |
+| 1. Réauthentification récente pour lier : mot de passe, ou connexion de moins de 5 min, plus le second facteur si la MFA est active ; avant toute écriture ; pour GitHub, avant l'échange du code | **Conforme** | `assertIdentityReauth` (`auth.service.ts`, après `getMfaStatus`) appelle `assertReauthenticated`, puis `verifyCurrentFactor` si `mfaEnabled`, ce qui consomme le pas de temps. Firebase : avant `verifyIdToken`. GitHub : `verifyGithubOAuthState` (local), puis réauthentification, puis `fetchGitHubIdentity`. Preuve dans le corps (`FirebaseLinkDto`, `GithubLinkDto`, `IdentityReauthDto` ; `mfaCode` distinct du `code` OAuth) |
+| 2. Notification au titulaire et entrée d'audit | **Conforme** | `recordIdentityChange` : `AuditLog` `IDENTITY_LINKED` ou `IDENTITY_UNLINKED` (fournisseur, identifiant affichable, `sid`, aucun secret) ; `sendIdentityLinkedEmail` et `sendIdentityUnlinkedEmail` (identifiant échappé en HTML, aucun jeton) ; envoi au mieux |
+| 3. Déliaison : mêmes protections ; refus de la dernière méthode ; `githubAccessToken` effacé ; autres sessions révoquées | **Conforme**, réserve S31-a | `POST /auth/firebase/unlink` et `/auth/github/unlink` : 204, `@ForbiddenInImpersonation()`, 5/min ; 409 si non lié ; 409 s'il n'existe ni `passwordHash`, ni autre identité, ni `ssoUid` ; `revokeAllForUser(userId, sid)`. Balayage méta S18.2 étendu à `/(un)?link$/` |
+| 4. Protections existantes conservées | **Conforme** | 409 si l'identité est liée ailleurs ; e-mail Firebase vérifié exigé ; aucune liaison par e-mail (`loginWithFirebase` et `loginWithGitHub` inchangés) ; aucun `createUser` Firebase |
+| 5. Adresse liée affichée | **Conforme (côté API)** | `firebaseEmail` est conservé à la liaison et renvoyé par `linkFirebaseAccount` et `GET /auth/identities`. L'affichage avant confirmation relève de l'écran de P9 |
+
+### Contre-mutations
+
+Jouées sur `identity-linking.spec.ts`, `impersonation-routes.spec.ts`, `github-oauth.spec.ts` et `auth.service.spec.ts` (144 tests).
+
+| ID | Mutation | Résultat |
+| --- | --- | --- |
+| M1 | Réauthentification retirée de la liaison Firebase | **Détectée** (6 échecs) |
+| M1b | Réauthentification retirée de la liaison GitHub | **Détectée** (6) |
+| M1c | Réauthentification retirée de la déliaison | **Détectée** (8) |
+| M2 | MFA non exigée (contrôle `mfaEnabled` neutralisé) | **Détectée** (8). Une première forme (`if (false && …)`) ne compilait pas et a été remplacée |
+| M3 | Échange du code GitHub fait **avant** la réauthentification | **Détectée** (5) |
+| M4 | Retrait de la dernière méthode autorisé | **Détectée** (2) |
+| M4b | L'identité à délier compte comme « autre méthode » | **Détectée** (2) |
+| M5 | Sessions non révoquées après une déliaison | **Détectée** (2) |
+| M5b | Session courante révoquée elle aussi | **Détectée** (2) |
+| M6 | `@ForbiddenInImpersonation` retiré de `github/unlink` | **Détectée** (2) |
+| M6b | Idem sur `firebase/unlink` | **Détectée** (2) |
+| M7 | Pas d'audit ni de notification à la liaison Firebase | **Détectée** (1) |
+| M8 | `githubAccessToken` conservé à la déliaison | **Détectée** (1) |
+
+### Migration `20261113000000_s31_firebase_email`
+
+- **Nature** : une seule instruction, `ALTER TABLE User ADD COLUMN firebaseEmail VARCHAR(191) NULL`. Additive, nullable, sans valeur par défaut, sans index ni contrainte. Elle correspond exactement au différentiel de schéma calculé par Prisma.
+- **Impact en production (MySQL 8.0, `docker-compose.prod.yml:5`)** : l'ajout d'une colonne nullable en fin de table est traité en `ALGORITHM=INSTANT` (MySQL ≥ 8.0.12). La table n'est pas reconstruite et aucune ligne n'est réécrite. La durée ne dépend pas de la taille de `User` : de l'ordre de la seconde. Seul effet : un **verrou de métadonnées bref**, qui attend la fin des transactions en cours sur `User`. Une transaction longue, ou une session SQL interactive restée ouverte sur `User`, ferait patienter la migration **et** les requêtes suivantes sur `User` (connexions, sessions). Les données existantes ne sont pas modifiées : les liaisons Firebase existantes ont `firebaseEmail = NULL`, affiché « adresse inconnue » jusqu'à une nouvelle liaison.
+- **Réversibilité** : la migration est réversible, et le retour arrière du code n'exige **pas** de la défaire. L'ancienne image du backend fonctionne avec la colonne présente (son client Prisma ne la connaît pas et ne la sélectionne pas). Pour la supprimer quand même : `ALTER TABLE User DROP COLUMN firebaseEmail` (aussi instantané en 8.0.29 et plus), puis suppression de la ligne correspondante dans `_prisma_migrations`. **Déconseillé** : les adresses liées depuis seraient perdues.
+- **Application** : automatique au démarrage (`docker-compose.prod.yml:50`, `prisma migrate deploy && node dist/main`). **Aucun script de reprise n'est nécessaire.** Un runbook complet n'est pas nécessaire non plus, mais les vérifications avant et après ci-dessous doivent être faites. Remplir `firebaseEmail` par l'Admin SDK pour les liaisons existantes est **facultatif** : simple confort d'affichage, à ne faire qu'en lecture côté Firebase.
+
+### Contrat d'API et frontend
+
+- `frontend/src/github-oauth.ts:36-47` (`linkGitHub`) envoie encore `{ code, state }` seulement, et `App.tsx:113-118` l'appelle au retour de GitHub quand la finalité signée vaut `link` ou `repos`. Avec S31, cet appel renvoie **403** (« Le mot de passe est requis… »), affiché par `setOauthError`.
+- **Pas de régression visible** : aucun écran ne démarre une autorisation `link` ou `repos`. Les seuls appels à `startGitHubAuthorization` (`Login.tsx:90`, `InvitationAcceptance.tsx:57`) utilisent la finalité par défaut `login`, dont le parcours est inchangé. Le frontend n'appelle jamais `/auth/firebase/link`. Ce chemin dormant échoue désormais en refusant, ce qui est le comportement voulu.
+- **Exigence reportée sur P9 (écran de liaison)** :
+  - au retour de GitHub avec la finalité `link` ou `repos`, demander le mot de passe (ou s'appuyer sur la connexion récente), plus `mfaCode` ou `recoveryCode` si la MFA est active, puis appeler `/auth/github/link` avec `{ code, state, password?, mfaCode?, recoveryCode? }` ;
+  - mettre à jour `linkGitHub` et son test.
+
+### Nouveau constat r26
+
+#### S31-a : condition de course entre deux déliaisons simultanées (dernière méthode)
+
+- **Fichier** : `backend/src/auth/auth.service.ts`, `unlinkIdentity` : lecture par `loadIdentityAccount`, contrôle `otherMethods`, puis `prisma.user.update` non conditionnel.
+- **Cause** : le contrôle « il reste une autre méthode de connexion » est fait sur une lecture, puis l'écriture n'est pas conditionnée. Prenons un compte sans mot de passe, lié à Firebase **et** à GitHub, sans MFA, avec une connexion de moins de 5 min. Deux requêtes simultanées `firebase/unlink` et `github/unlink` lisent chacune l'autre identité comme encore liée, et réussissent toutes les deux. Le compte se retrouve sans méthode de connexion, contrairement au critère d'acceptation de S31. Avec la MFA, le pas de temps TOTP consommé fait échouer la seconde requête si elle réutilise le même code.
+- **Impact** : verrouillage du compte par son propre titulaire, ou par un attaquant qui a **déjà** passé la réauthentification. Le compte reste récupérable par « Mot de passe oublié », qui pose un `passwordHash` (`resetPassword`). Aucune élévation possible.
+- **Sévérité** : Mineur. CVSS 3.1 : 2.6 (AV:N/AC:H/PR:L/UI:R/S:U/C:N/I:N/A:L).
+- **Remédiation attendue (avec l'écran de liaison de P9)** : écriture conditionnelle et atomique, par exemple `updateMany({ where: { id, OR: [{ passwordHash: { not: null } }, { ssoUid: { not: null } }, { <autre identité>: { not: null } }] }, data })`. Si `count === 0`, répondre 409 (ou faire la lecture et l'écriture dans une transaction avec `SELECT … FOR UPDATE`). **Test** : deux `unlinkIdentity` lancés par `Promise.all` sur un compte à deux identités et sans mot de passe : une seule réussit, l'autre donne 409, et il reste une identité.
+
+### Points non bloquants
+
+- **`ssoUid` comme « autre méthode »** : un `ssoUid` ancien ne garantit pas que le SSO du domaine est toujours actif. Le risque reste couvert par la récupération par « Mot de passe oublié ». Amélioration : vérifier aussi qu'une configuration SSO active existe pour le domaine.
+- **Remplacement d'une identité déjà liée** : `link` remplace sans prévenir un `firebaseUid` ou un `githubId` déjà lié au même compte. La notification « liée » part, mais pas une notification « déliée » pour l'ancienne identité. Amélioration : envoyer les deux, ou exiger une déliaison préalable (409).
+- **`idToken`** : `FirebaseLinkDto` n'a pas de `MaxLength`. Ajouter `@MaxLength(4096)`, comme pour les autres champs (cohérent avec S23).
+
+### Réponses aux questions du fixeur
+
+1. **Mot de passe dans le corps plutôt que `POST /auth/reauth` : VALIDÉ.** C'est l'une des deux options prévues au rapport. Elle est sans état, atomique et liée à l'action exacte. Le mot de passe ne transite que dans le corps HTTPS de cette requête et n'est jamais stocké côté navigateur. La contrainte d'interface est reportée sur P9 (voir plus haut).
+2. **Ordre GitHub (`state` local, puis réauthentification, puis échange du code) : VALIDÉ.** Un `state` invalide est rejeté sans consommer de code TOTP ni faire d'appel réseau. Contrepartie acceptable : si l'échange du code échoue après une réauthentification réussie, le pas de temps TOTP est consommé, et l'utilisateur attend le code suivant (30 s).
+3. **`GET /auth/identities` : VALIDÉ.** Lecture seule, aucun jeton (`githubAccessToken` et `mfaSecret` ne sont pas renvoyés ; `mfaSecret` est lu pour la réauthentification seulement), réservée au compte connecté. Elle reste accessible en impersonation, comme `GET /auth/sessions`. C'est acceptable, puisque l'administrateur qui impersonne voit déjà le compte. La route est ajoutée à la remédiation de S31 comme source de l'affichage de la condition 5.
+
+### Conditions de déploiement en production
+
+1. **Commit** : lot S31 seulement, à savoir `backend/prisma/schema/auth.prisma`, la migration, `auth.controller.ts`, `auth.service.ts`, `auth.service.spec.ts`, `mail.service.ts`, `dto/identity.dto.ts`, `identity-linking.spec.ts`, `fake-prisma.ts`, `session-lifecycle.spec.ts`, `github-oauth.spec.ts`, `impersonation-routes.spec.ts`, `docs/deployment-production.md`, le rapport et le journal. **Sans** `README.md`, `scim.guard.ts` ni `.claude/`.
+2. **Avant** :
+   - sauvegarde de la base (procédure de sauvegarde existante) ;
+   - vérifier dans `_prisma_migrations` les migrations déjà appliquées. Si `20261112000000_s17_invitation_project_role` (Phase 4) n'y figure pas, elle s'appliquera au même démarrage : suivre d'abord le runbook de la Phase 4 ;
+   - vérifier qu'aucune transaction longue n'est ouverte sur `User` (`SHOW PROCESSLIST`, `information_schema.innodb_trx`).
+3. **Pendant** : la migration s'applique automatiquement au démarrage du conteneur backend, en quelques secondes. Aucune action manuelle.
+4. **Après** :
+   - `SHOW COLUMNS FROM User LIKE 'firebaseEmail'` renvoie une ligne ;
+   - `_prisma_migrations` contient `20261113000000_s31_firebase_email` avec `finished_at` non nul ;
+   - la connexion par mot de passe, Firebase et GitHub fonctionne ;
+   - un appel `POST /auth/firebase/link` sans mot de passe renvoie 403.
+5. **Retour arrière** : redéployer l'image précédente, sans toucher à la colonne.
+6. **SMTP** : les notifications de liaison partent par la configuration d'envoi existante. Un échec d'envoi n'empêche pas l'opération.
+
+### Statut des constats
+
+| ID | Statut r26 |
+| --- | --- |
+| **S31** | **VALIDÉ** |
+| **S31-a** | Nouveau, Mineur (CVSS 2.6), avec l'écran de liaison de P9 |
+| S30 (exploitation) | actions 1 à 4 à la charge de l'utilisateur, non confirmées |
+
+**Constats ouverts à la fin de r26 :**
+
+- Exploitation : actions 1 à 4 de S30.
+- Phase 1 : P9 (liaison GitHub et Firebase, à construire sur le contrat S31 avec S31-a ; sessions actives ; « Connecter un dépôt »).
+- Phases 5 et 6 : S19 à S26 ; A5 à A9 ; P2, P5, P7, P8 ; Q-2 ; O10 à O17.

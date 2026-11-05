@@ -14,6 +14,7 @@ import { encrypt, decrypt, hashPassword, verifyPassword } from './encryption.uti
 import { FirebaseIdentityService } from './firebase-identity.service';
 import { generateTotpSecret, verifyTotpStep, getTotpAuthUri } from './totp.util';
 import { DisableMfaDto, RegenerateRecoveryCodesDto, SetupMfaDto } from './dto/mfa.dto';
+import { IdentityReauthDto } from './dto/identity.dto';
 import { GithubPurpose } from './dto/github.dto';
 import { createGithubOAuthState, verifyGithubOAuthState } from './github-oauth-state';
 import { TokenService, MFA_TICKET_TTL_SECONDS } from './token.service';
@@ -254,10 +255,20 @@ export class AuthService {
   }
 
   /**
-   * Associe de manière vérifiée un UID Firebase à un compte utilisateur existant.
-   * Valide l'e-mail vérifié et prévient les collisions d'identités.
+   * Associe de manière vérifiée un UID Firebase à un compte utilisateur existant (liaison
+   * explicite). S31 : réauthentification (mot de passe ou connexion récente, plus le second
+   * facteur si la MFA est active) AVANT toute lecture du jeton et toute écriture. Aucun compte
+   * Firebase n'est jamais créé côté serveur.
    */
-  async linkFirebaseAccount(userId: string, idToken: string) {
+  async linkFirebaseAccount(
+    userId: string,
+    idToken: string,
+    reauth: IdentityReauthDto = {},
+    sid?: string,
+  ) {
+    const account = await this.loadIdentityAccount(userId);
+    await this.assertIdentityReauth(account, reauth, sid);
+
     const identity = await this.firebaseIdentity.verifyIdToken(idToken);
     const email = identity.email?.toLowerCase().trim();
 
@@ -275,7 +286,7 @@ export class AuthService {
 
     const updated = await this.prisma.user.update({
       where: { id: userId },
-      data: { firebaseUid: identity.uid },
+      data: { firebaseUid: identity.uid, firebaseEmail: email },
       select: {
         id: true,
         email: true,
@@ -284,10 +295,12 @@ export class AuthService {
         platformRole: true,
       },
     });
+    await this.recordIdentityChange(account, 'IDENTITY_LINKED', 'Firebase', email, sid);
 
     return {
       message: 'Compte Firebase associé avec succès.',
       user: updated,
+      firebaseEmail: email,
     };
   }
 
@@ -415,10 +428,21 @@ export class AuthService {
 
   /**
    * Lie un compte GitHub au compte connecté (liaison explicite, S8/S9). Le jeton n'est conservé
-   * que pour la finalité `repos` et si GitHub a bien accordé la portée `repo`.
+   * que pour la finalité `repos` et si GitHub a bien accordé la portée `repo`. S31 : la
+   * réauthentification précède l'échange du code contre un jeton (aucun jeton obtenu ni stocké si
+   * elle échoue).
    */
-  async linkGitHubAccount(userId: string, code: string, oauthState: GithubOAuthState) {
+  async linkGitHubAccount(
+    userId: string,
+    code: string,
+    oauthState: GithubOAuthState,
+    reauth: IdentityReauthDto = {},
+    sid?: string,
+  ) {
     const purpose = verifyGithubOAuthState(oauthState.cookie, oauthState.state, ['link', 'repos']);
+    const account = await this.loadIdentityAccount(userId);
+    await this.assertIdentityReauth(account, reauth, sid);
+
     const { accessToken, scopes, profile } = await this.fetchGitHubIdentity(code);
     const githubId = String(profile.id);
 
@@ -436,6 +460,7 @@ export class AuthService {
         ...(storeToken ? { githubAccessToken: encrypt(accessToken) } : {}),
       },
     });
+    await this.recordIdentityChange(account, 'IDENTITY_LINKED', 'GitHub', profile.login, sid);
     return {
       message: 'Compte GitHub associé avec succès.',
       githubUsername: profile.login,
@@ -849,6 +874,135 @@ export class AuthService {
         'Reconnectez-vous pour effectuer cette action (authentification récente requise).',
       );
     }
+  }
+
+  /** Compte et champs nécessaires à la réauthentification et à la protection de la dernière méthode. */
+  private async loadIdentityAccount(userId: string) {
+    const account = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        passwordHash: true,
+        mfaEnabled: true,
+        mfaSecret: true,
+        firebaseUid: true,
+        firebaseEmail: true,
+        githubId: true,
+        githubUsername: true,
+        ssoUid: true,
+      },
+    });
+    if (!account) {
+      throw new UnauthorizedException('Utilisateur introuvable.');
+    }
+    return account;
+  }
+
+  /**
+   * S31 : lier ou délier une identité exige la preuve récente de l'identité (mot de passe, ou
+   * connexion de moins de 5 minutes) et, si la MFA est active, un code TOTP ou de secours (pas de
+   * temps consommé). Toujours appelée avant la moindre écriture.
+   */
+  private async assertIdentityReauth(
+    account: Awaited<ReturnType<AuthService['loadIdentityAccount']>>,
+    reauth: IdentityReauthDto,
+    sid: string | undefined,
+  ): Promise<void> {
+    await this.assertReauthenticated(account, reauth.password, sid);
+    if (account.mfaEnabled && account.mfaSecret) {
+      await this.verifyCurrentFactor(
+        { id: account.id, mfaSecret: account.mfaSecret },
+        { code: reauth.mfaCode, recoveryCode: reauth.recoveryCode },
+      );
+    }
+  }
+
+  /** Audit et notification d'une liaison ou déliaison (aucun secret). La notification est au mieux. */
+  private async recordIdentityChange(
+    account: { id: string; email: string },
+    action: 'IDENTITY_LINKED' | 'IDENTITY_UNLINKED',
+    provider: 'Firebase' | 'GitHub',
+    identifier: string,
+    sid: string | undefined,
+  ): Promise<void> {
+    await this.prisma.auditLog.create({
+      data: {
+        userId: account.id,
+        action,
+        entityType: 'User',
+        entityId: account.id,
+        changes: { provider, identifier, sid: sid ?? null },
+      },
+    });
+    const details = { provider, identifier, at: new Date() };
+    try {
+      if (action === 'IDENTITY_LINKED') {
+        await this.mail.sendIdentityLinkedEmail(account.email, details);
+      } else {
+        await this.mail.sendIdentityUnlinkedEmail(account.email, details);
+      }
+    } catch {
+      // L'échec d'envoi ne doit pas annuler une opération déjà réalisée
+    }
+  }
+
+  /**
+   * Délie l'identité Firebase ou GitHub (S31). Même réauthentification que la liaison ; refus
+   * (409) si c'est la dernière méthode de connexion ; les autres sessions sont révoquées et le
+   * jeton GitHub effacé.
+   */
+  async unlinkIdentity(
+    userId: string,
+    provider: 'firebase' | 'github',
+    reauth: IdentityReauthDto,
+    sid?: string,
+  ) {
+    const account = await this.loadIdentityAccount(userId);
+    await this.assertIdentityReauth(account, reauth, sid);
+
+    const linked = provider === 'firebase' ? account.firebaseUid : account.githubId;
+    if (!linked) {
+      throw new ConflictException(
+        `Aucun compte ${provider === 'firebase' ? 'Firebase' : 'GitHub'} n'est lié.`,
+      );
+    }
+    const otherMethods =
+      Boolean(account.passwordHash) ||
+      Boolean(account.ssoUid) ||
+      Boolean(provider === 'firebase' ? account.githubId : account.firebaseUid);
+    if (!otherMethods) {
+      throw new ConflictException(
+        'Impossible de retirer la dernière méthode de connexion : définissez un mot de passe ou liez une autre identité.',
+      );
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data:
+        provider === 'firebase'
+          ? { firebaseUid: null, firebaseEmail: null }
+          : { githubId: null, githubUsername: null, githubAccessToken: null },
+    });
+    await this.sessionService.revokeAllForUser(userId, sid);
+    await this.recordIdentityChange(
+      account,
+      'IDENTITY_UNLINKED',
+      provider === 'firebase' ? 'Firebase' : 'GitHub',
+      (provider === 'firebase' ? account.firebaseEmail : account.githubUsername) ?? 'inconnu',
+      sid,
+    );
+  }
+
+  /** Identités liées du compte connecté, pour l'écran « Sécurité du compte » (S31, point 5). */
+  async getIdentities(userId: string) {
+    const account = await this.loadIdentityAccount(userId);
+    return {
+      firebase: { linked: Boolean(account.firebaseUid), email: account.firebaseEmail },
+      github: { linked: Boolean(account.githubId), username: account.githubUsername },
+      hasPassword: Boolean(account.passwordHash),
+      mfaEnabled: account.mfaEnabled,
+    };
   }
 
   /** État MFA du compte pour l'écran « Sécurité du compte » (P9). Jamais de secret. */

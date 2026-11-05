@@ -6,7 +6,9 @@ import { FirebaseIdentityService } from '../../../src/auth/firebase-identity.ser
 import { MailService } from '../../../src/mail/mail.service';
 import { SessionService } from '../../../src/auth/session.service';
 import { TokenService } from '../../../src/auth/token.service';
-import { decrypt, encrypt } from '../../../src/auth/encryption.util';
+import { decrypt, encrypt, hashPassword } from '../../../src/auth/encryption.util';
+
+const PASSWORD = 'MotDePasse!2026';
 import {
   createGithubOAuthState,
   readGithubOAuthPurpose,
@@ -198,49 +200,91 @@ describe('S9 : OAuth GitHub', () => {
 
   describe('liaison depuis une session authentifiée', () => {
     it('lie le compte GitHub au compte connecté', async () => {
-      await prisma.user.create({ data: { id: 'u-1', email: 'ada@corp.com', name: 'Ada' } });
+      await prisma.user.create({
+        data: {
+          id: 'u-1',
+          email: 'ada@corp.com',
+          name: 'Ada',
+          passwordHash: await hashPassword(PASSWORD),
+        },
+      });
       mockGitHub();
-      await service.linkGitHubAccount('u-1', 'code', oauth('link'));
+      await service.linkGitHubAccount('u-1', 'code', oauth('link'), { password: PASSWORD });
       expect(prisma.user.rows[0].githubId).toBe('4242');
     });
 
     it('refuse un compte GitHub déjà lié à un autre utilisateur (409)', async () => {
-      await prisma.user.create({ data: { id: 'u-1', email: 'ada@corp.com', name: 'Ada' } });
+      await prisma.user.create({
+        data: {
+          id: 'u-1',
+          email: 'ada@corp.com',
+          name: 'Ada',
+          passwordHash: await hashPassword(PASSWORD),
+        },
+      });
       await prisma.user.create({
         data: { id: 'u-2', email: 'autre@corp.com', name: 'Autre', githubId: '4242' },
       });
       mockGitHub();
-      await expect(service.linkGitHubAccount('u-1', 'code', oauth('link'))).rejects.toThrow(
-        ConflictException,
-      );
+      await expect(
+        service.linkGitHubAccount('u-1', 'code', oauth('link'), { password: PASSWORD }),
+      ).rejects.toThrow(ConflictException);
       expect(prisma.user.rows[0].githubId).toBeNull();
     });
 
     it('S9-a : liaison simple (finalité link) : githubId posé, aucun jeton persisté', async () => {
-      await prisma.user.create({ data: { id: 'u-1', email: 'ada@corp.com', name: 'Ada' } });
+      await prisma.user.create({
+        data: {
+          id: 'u-1',
+          email: 'ada@corp.com',
+          name: 'Ada',
+          passwordHash: await hashPassword(PASSWORD),
+        },
+      });
       mockGitHub();
-      await service.linkGitHubAccount('u-1', 'code', oauth('link'));
+      await service.linkGitHubAccount('u-1', 'code', oauth('link'), { password: PASSWORD });
       expect(prisma.user.rows[0].githubAccessToken ?? null).toBeNull();
     });
 
     it('S9-a : finalité repos avec la portée repo accordée : jeton stocké chiffré', async () => {
-      await prisma.user.create({ data: { id: 'u-1', email: 'ada@corp.com', name: 'Ada' } });
+      await prisma.user.create({
+        data: {
+          id: 'u-1',
+          email: 'ada@corp.com',
+          name: 'Ada',
+          passwordHash: await hashPassword(PASSWORD),
+        },
+      });
       mockGitHub({
         token: { body: { access_token: 'gho_repo', scope: 'read:user,user:email,repo' } },
       });
-      await service.linkGitHubAccount('u-1', 'code', oauth('repos'));
+      await service.linkGitHubAccount('u-1', 'code', oauth('repos'), { password: PASSWORD });
       expect(decrypt(prisma.user.rows[0].githubAccessToken as string)).toBe('gho_repo');
     });
 
     it('S9-a : finalité repos mais portée repo refusée par l’utilisateur : jeton non stocké', async () => {
-      await prisma.user.create({ data: { id: 'u-1', email: 'ada@corp.com', name: 'Ada' } });
+      await prisma.user.create({
+        data: {
+          id: 'u-1',
+          email: 'ada@corp.com',
+          name: 'Ada',
+          passwordHash: await hashPassword(PASSWORD),
+        },
+      });
       mockGitHub({ token: { body: { access_token: 'gho_ro', scope: 'read:user,user:email' } } });
-      await service.linkGitHubAccount('u-1', 'code', oauth('repos'));
+      await service.linkGitHubAccount('u-1', 'code', oauth('repos'), { password: PASSWORD });
       expect(prisma.user.rows[0].githubAccessToken ?? null).toBeNull();
     });
 
     it('exige aussi un state valide', async () => {
-      await prisma.user.create({ data: { id: 'u-1', email: 'ada@corp.com', name: 'Ada' } });
+      await prisma.user.create({
+        data: {
+          id: 'u-1',
+          email: 'ada@corp.com',
+          name: 'Ada',
+          passwordHash: await hashPassword(PASSWORD),
+        },
+      });
       mockGitHub();
       await expect(
         service.linkGitHubAccount('u-1', 'code', { state: 'x', cookie: oauth('link').cookie }),
@@ -286,9 +330,9 @@ describe('S9 : OAuth GitHub', () => {
     it('un state émis pour login présenté à la liaison : 401, aucun appel à GitHub', async () => {
       await prisma.user.create({ data: { id: 'u-1', email: 'ada@corp.com', name: 'Ada' } });
       mockGitHub();
-      await expect(service.linkGitHubAccount('u-1', 'code', oauth('login'))).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(
+        service.linkGitHubAccount('u-1', 'code', oauth('login'), { password: PASSWORD }),
+      ).rejects.toThrow(UnauthorizedException);
       expect(fetchSpy).not.toHaveBeenCalled();
     });
 

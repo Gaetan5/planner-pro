@@ -22,15 +22,18 @@ describe('AuthService', () => {
   const prisma = {
     user: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
     authToken: { updateMany: jest.fn(), create: jest.fn() },
+    auditLog: { create: jest.fn() },
     $transaction: jest.fn(),
   };
   const sessionService = {
     issue: jest.fn().mockResolvedValue({ sid: 'sid-1', accessToken: 'signed-token' }),
+    getAuthenticatedAt: jest.fn(),
   };
   const firebaseIdentity = { verifyIdToken: jest.fn() };
   const mail = {
     sendEmailVerificationEmail: jest.fn().mockResolvedValue(true),
     sendAccountExistsEmail: jest.fn().mockResolvedValue(true),
+    sendIdentityLinkedEmail: jest.fn().mockResolvedValue(true),
   };
 
   beforeEach(async () => {
@@ -192,13 +195,31 @@ describe('AuthService', () => {
   });
 
   describe('linkFirebaseAccount', () => {
+    // Compte sans mot de passe dont la connexion date de moins de 5 min (S31) : la
+    // réauthentification est couverte en détail dans tests/unit/auth/identity-linking.spec.ts
+    const account = {
+      id: 'user-1',
+      email: 'ada@example.com',
+      passwordHash: null,
+      mfaEnabled: false,
+      mfaSecret: null,
+    };
+    const lookup = (owner: unknown = null) =>
+      prisma.user.findUnique.mockImplementation(
+        async ({ where }: { where: Record<string, string> }) => (where.id ? account : owner),
+      );
+
+    beforeEach(() => {
+      sessionService.getAuthenticatedAt.mockResolvedValue(new Date());
+    });
+
     it('associe de manière vérifiée un UID Firebase à un compte utilisateur existant', async () => {
       firebaseIdentity.verifyIdToken.mockResolvedValue({
         uid: 'firebase-linked-1',
         email: 'ada@example.com',
         email_verified: true,
       });
-      prisma.user.findUnique.mockResolvedValue(null); // aucun autre utilisateur avec cet UID
+      lookup(null); // aucun autre utilisateur avec cet UID
       prisma.user.update.mockResolvedValue({
         id: 'user-1',
         email: 'ada@example.com',
@@ -207,26 +228,27 @@ describe('AuthService', () => {
         platformRole: 'USER',
       });
 
-      const res = await service.linkFirebaseAccount('user-1', 'valid-firebase-token');
+      const res = await service.linkFirebaseAccount('user-1', 'valid-firebase-token', {}, 'sid-1');
 
       expect(prisma.user.update).toHaveBeenCalledWith({
         where: { id: 'user-1' },
-        data: { firebaseUid: 'firebase-linked-1' },
+        data: { firebaseUid: 'firebase-linked-1', firebaseEmail: 'ada@example.com' },
         select: expect.any(Object),
       });
       expect(res.user.firebaseUid).toBe('firebase-linked-1');
     });
 
     it('refuse si l’adresse email Firebase n’est pas vérifiée', async () => {
+      lookup(null);
       firebaseIdentity.verifyIdToken.mockResolvedValue({
         uid: 'firebase-linked-1',
         email: 'ada@example.com',
         email_verified: false,
       });
 
-      await expect(service.linkFirebaseAccount('user-1', 'unverified-token')).rejects.toThrow(
-        'Une adresse e-mail Firebase vérifiée est requise.',
-      );
+      await expect(
+        service.linkFirebaseAccount('user-1', 'unverified-token', {}, 'sid-1'),
+      ).rejects.toThrow('Une adresse e-mail Firebase vérifiée est requise.');
       expect(prisma.user.update).not.toHaveBeenCalled();
     });
 
@@ -236,14 +258,11 @@ describe('AuthService', () => {
         email: 'other@example.com',
         email_verified: true,
       });
-      prisma.user.findUnique.mockResolvedValue({
-        id: 'other-user-99',
-        firebaseUid: 'firebase-linked-1',
-      });
+      lookup({ id: 'other-user-99', firebaseUid: 'firebase-linked-1' });
 
-      await expect(service.linkFirebaseAccount('user-1', 'conflict-token')).rejects.toThrow(
-        'Cet identifiant Firebase est déjà lié à un autre compte.',
-      );
+      await expect(
+        service.linkFirebaseAccount('user-1', 'conflict-token', {}, 'sid-1'),
+      ).rejects.toThrow('Cet identifiant Firebase est déjà lié à un autre compte.');
       expect(prisma.user.update).not.toHaveBeenCalled();
     });
   });

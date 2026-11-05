@@ -2686,3 +2686,84 @@ Le fonctionnement de `safe.directory` (image en `root`, runner propriétaire) es
 Pour le commit : lot S30 seulement, sans `README.md`, `scim.guard.ts` ni `.claude/`.
 
 Suivant : **S31**. Les actions d'exploitation de S30 restent à la charge de l'utilisateur.
+
+---
+
+### S31 — Liaison d'identités externes sans réauthentification
+
+**Statut** : CORRIGÉ – À REVOIR.
+
+**Changement** :
+
+- `backend/src/auth/auth.service.ts` :
+  - `linkFirebaseAccount(userId, idToken, reauth, sid)` et `linkGitHubAccount(userId, code, state, reauth, sid)` appellent d'abord `assertIdentityReauth` : `assertReauthenticated` (mot de passe, ou connexion de moins de 5 min pour un compte sans mot de passe) puis, si la MFA est active, `verifyCurrentFactor` (code TOTP ou code de secours, pas de temps consommé). Firebase : avant la lecture du jeton ; GitHub : après la vérification locale du `state` et **avant** l'échange du code (aucun appel réseau, aucun jeton si la réauthentification échoue). Toujours avant toute écriture.
+  - Nouvelles `unlinkIdentity(userId, 'firebase'|'github', reauth, sid)` (même réauthentification ; 409 si l'identité n'est pas liée ; 409 si aucune autre méthode de connexion : `passwordHash`, autre identité externe ou `ssoUid` ; champs remis à `null`, `githubAccessToken` effacé ; `revokeAllForUser(userId, sid)`) et `getIdentities` (adresse Firebase, nom GitHub, sans jeton).
+  - `recordIdentityChange` : entrée `AuditLog` (`IDENTITY_LINKED` / `IDENTITY_UNLINKED`, `changes` = fournisseur, identifiant affichable, `sid`, aucun secret) et e-mail au titulaire, au mieux (un échec d'envoi n'annule pas l'opération).
+  - Protections conservées : 409 si l'identité est liée ailleurs, e-mail Firebase vérifié exigé, aucune liaison par e-mail, aucune création de compte Firebase.
+- `backend/src/auth/auth.controller.ts` : `POST /auth/firebase/link` et `/auth/github/link` transmettent la preuve (`FirebaseLinkDto`, `GithubLinkDto`) et le `sid` ; nouvelles `POST /auth/firebase/unlink` et `/auth/github/unlink` (204, `@ForbiddenInImpersonation()`, limitées à 5/min) ; `GET /auth/identities`.
+- `backend/src/auth/dto/identity.dto.ts` (nouveau) : `password?`, `mfaCode?` (6 chiffres), `recoveryCode?` ; `mfaCode` et non `code` pour ne pas entrer en collision avec le `code` OAuth de GitHub.
+- `backend/src/mail/mail.service.ts` : `sendIdentityLinkedEmail`, `sendIdentityUnlinkedEmail` (fournisseur, identifiant, date, lien vers l'application ; aucun jeton).
+- Schéma : `User.firebaseEmail String?` et migration `backend/prisma/migrations/20261113000000_s31_firebase_email/migration.sql` (additive, nullable). Point 5 du rapport : l'adresse liée est conservée plutôt que relue par l'Admin SDK.
+- Doc : `docs/deployment-production.md:68-71` remplacé par le texte du rapport ; `grep -n "associe alors" docs/deployment-production.md` ne renvoie plus rien.
+
+**Choix : mot de passe dans le corps, pas de `POST /auth/reauth`.** Le mot de passe (et le code MFA) est envoyé avec `code`/`state` au retour de la redirection. Raisons : aucun état serveur supplémentaire (pas de marqueur de session à poser, à expirer et à consommer, donc pas de condition de course ni de marqueur oublié exploitable), même mécanisme que `setupMfa`/`disableMfa` (`assertReauthenticated`), une seule requête atomique, preuve liée à l'action exacte. Le mot de passe n'est jamais conservé côté navigateur ni dans le `state`. Contrepartie : l'écran de P9 doit demander le mot de passe au retour de GitHub (déjà prévu au rapport).
+
+**Tests** :
+
+- Nouveau `backend/tests/unit/auth/identity-linking.spec.ts` (34 tests, FakePrisma + vrai `SessionService`) : paramétré `{firebase, github}` × `{mot de passe, sans mot de passe}` : mot de passe absent/faux = 403, aucun `user.update`, aucun `verifyIdToken`, aucun `fetch` ; sans mot de passe, connexion de plus de 5 min = 403, de moins = liaison ; MFA sans code ou code faux = 400 et aucune écriture, code valide = liaison et pas de temps consommé (rejeu refusé) ; notification vers l'adresse du compte, entrée d'audit sans secret ; adresse liée renvoyée ; 409 si liée ailleurs ; e-mail Firebase non vérifié refusé. Déliaison : seule méthode = 409 sans écriture ; avec une autre méthode (mot de passe, ou l'autre identité) = champs à `null`, `githubAccessToken` effacé, notification, audit, autres sessions révoquées et session courante conservée ; sans réauthentification ou MFA sans code = rien modifié ; identité non liée = 409 ; `getIdentities` sans jeton.
+- `impersonation-routes.spec.ts` : `unlinkGitHub` et `unlinkFirebase` dans la liste interdite, balayage méta étendu à `/(un)?link$/` et routes `unlink` attendues.
+- `session-lifecycle.spec.ts` (HTTP) : `POST /auth/firebase/link` avec session valide sans mot de passe = 403 (et avec un mot de passe faux), aucune lecture du jeton ; avec le mot de passe = 2xx, e-mail envoyé ; `unlink` = 204.
+- Adaptés : `auth.service.spec.ts` (link Firebase avec compte et session récente), `github-oauth.spec.ts` (liaisons avec mot de passe), `fake-prisma.ts` (table `auditLog`).
+- Contre-mutations (échecs constatés, code restauré, `cmp` identique) : M1 liaison Firebase sans réauthentification (6 échecs) ; M2 GitHub, réauthentification après l'échange du code (5) ; M3 MFA ignorée (8) ; M4 dernière méthode non protégée (2) ; M5 sessions non révoquées (2) ; M6 jeton GitHub non effacé (1) ; M7 `@ForbiddenInImpersonation` retiré de `unlinkGitHub` (2).
+
+**Mesures** : voir le rapport de remise (suite backend complète, `pnpm lint`, `nest build`).
+
+**Changements cassants / reprise** :
+
+- `POST /auth/github/link` et `/auth/firebase/link` exigent désormais la preuve de réauthentification : le frontend actuel (`frontend/src/github-oauth.ts`, `linkGitHub`) envoie seulement `{ code, state }` et recevra un 403 pour un compte à mot de passe. Aucun écran n'appelle aujourd'hui ces routes (écran de liaison de P9, hors périmètre, à construire sur ce contrat) ; le frontend n'est pas modifié.
+- Migration `20261113000000_s31_firebase_email` (additive) à appliquer par `prisma migrate deploy` avant le déploiement : sans la colonne, `loadIdentityAccount` échoue. Les liaisons Firebase existantes ont `firebaseEmail = NULL` jusqu'à une nouvelle liaison (affichage « adresse inconnue »).
+
+**Questions pour l'architecte** :
+
+1. Valides-tu le choix « mot de passe dans le corps » plutôt que `POST /auth/reauth` ?
+2. L'ordre pour GitHub est : état OAuth (local) puis réauthentification puis échange du code. Un `state` invalide ne consomme donc pas de code TOTP.
+3. `getIdentities` (`GET /auth/identities`) est ajouté pour le futur écran ; il n'est pas listé au rapport.
+
+#### Revue architecte (r26) — S31
+
+**VALIDÉ. Bon pour le commit et le déploiement en production**, aux conditions listées dans `rapport-audit.md`, section « Revue r26 ».
+
+Mesures relancées par l'architecte :
+
+- backend : 83/83 suites et 2421/2421 tests ; `nest build`, `tsc` et `prisma validate` OK ;
+- `pnpm lint` racine : 0 erreur ;
+- frontend : 77/77, `tsc` et build OK ;
+- la migration est identique au différentiel de schéma calculé par Prisma ;
+- `grep "associe alors"` est vide.
+
+14 contre-mutations, toutes détectées :
+
+- réauthentification retirée (liaison Firebase, liaison GitHub, déliaison) ;
+- MFA non exigée ;
+- échange du code GitHub avant la réauthentification ;
+- dernière méthode de connexion autorisée (deux variantes) ;
+- sessions non révoquées, ou session courante révoquée ;
+- `@ForbiddenInImpersonation` retiré de chaque route `unlink` ;
+- audit et notification supprimés ;
+- jeton GitHub conservé.
+
+Questions :
+
+1. Mot de passe dans le corps : VALIDÉ.
+2. Ordre `state`, puis réauthentification, puis échange du code : VALIDÉ.
+3. `GET /auth/identities` : VALIDÉ.
+
+Le frontend `linkGitHub` (`{ code, state }`) est dormant : aucun écran ne lance la finalité `link` ni `repos`. Il donnera 403 tant que P9 ne l'aura pas adapté, sans régression visible.
+
+Nouveau constat **S31-a (Mineur)** : deux déliaisons simultanées peuvent retirer la dernière méthode de connexion. Rendre l'écriture conditionnelle, avec l'écran de liaison de P9.
+
+Non bloquants :
+
+- `ssoUid` ancien compté comme méthode ;
+- remplacement silencieux d'une identité déjà liée ;
+- `MaxLength` manquant sur `idToken`.

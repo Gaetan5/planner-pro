@@ -22,6 +22,7 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { EmailOnlyDto, ResetPasswordDto, VerifyEmailDto } from './dto/password-reset.dto';
 import { FirebaseLoginDto } from './dto/firebase-login.dto';
+import { FirebaseLinkDto, GithubLinkDto, IdentityUnlinkDto } from './dto/identity.dto';
 import { GithubAuthorizeQueryDto, GithubLoginDto } from './dto/github.dto';
 import {
   GITHUB_STATE_COOKIE,
@@ -121,21 +122,49 @@ export class AuthController {
 
   /**
    * Liaison d'un compte GitHub au compte connecté (liaison explicite, jamais automatique).
+   * S31 : mot de passe (ou connexion récente) et code MFA si actif, dans le corps.
    */
   @ForbiddenInImpersonation()
   @Post('github/link')
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async linkGitHub(
-    @Body() body: GithubLoginDto,
+    @Body() body: GithubLinkDto,
     @Req() req: Request & AuthenticatedUserRequest,
     @Res({ passthrough: true }) res: Response,
   ) {
     const cookie = req.cookies?.[GITHUB_STATE_COOKIE];
     res.clearCookie(GITHUB_STATE_COOKIE, { path: GITHUB_STATE_COOKIE_PATH });
-    return this.authService.linkGitHubAccount(req.user.id, body.code, {
-      state: body.state,
-      cookie,
-    });
+    return this.authService.linkGitHubAccount(
+      req.user.id,
+      body.code,
+      { state: body.state, cookie },
+      body,
+      req.user.sid,
+    );
+  }
+
+  /** Délie le compte GitHub (S31) : réauthentification, jamais la dernière méthode de connexion. */
+  @ForbiddenInImpersonation()
+  @Post('github/unlink')
+  @HttpCode(204)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  async unlinkGitHub(@Body() body: IdentityUnlinkDto, @Req() req: AuthenticatedUserRequest) {
+    await this.authService.unlinkIdentity(req.user.id, 'github', body, req.user.sid);
+  }
+
+  /** Délie le compte Firebase (S31). */
+  @ForbiddenInImpersonation()
+  @Post('firebase/unlink')
+  @HttpCode(204)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  async unlinkFirebase(@Body() body: IdentityUnlinkDto, @Req() req: AuthenticatedUserRequest) {
+    await this.authService.unlinkIdentity(req.user.id, 'firebase', body, req.user.sid);
+  }
+
+  /** Identités liées (adresse Firebase, nom GitHub) du compte connecté. */
+  @Get('identities')
+  async identities(@Req() req: AuthenticatedUserRequest) {
+    return this.authService.getIdentities(req.user.id);
   }
 
   /**
@@ -366,8 +395,8 @@ export class AuthController {
   @ForbiddenInImpersonation()
   @Post('firebase/link')
   @Throttle({ default: { limit: 5, ttl: 60000 } })
-  async linkFirebase(@Body() body: FirebaseLoginDto, @Req() req: AuthenticatedUserRequest) {
-    return this.authService.linkFirebaseAccount(req.user.id, body.idToken);
+  async linkFirebase(@Body() body: FirebaseLinkDto, @Req() req: AuthenticatedUserRequest) {
+    return this.authService.linkFirebaseAccount(req.user.id, body.idToken, body, req.user.sid);
   }
 
   /**

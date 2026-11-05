@@ -217,6 +217,7 @@ export class FakePrisma {
     () => ({ revokedAt: null, expiresAt: null, lastUsedAt: null }),
     ['id', 'tokenHash'],
   );
+  auditLog = new FakeTable();
   membership = new FakeTable();
   workspace = new FakeTable();
   project = new FakeTable();

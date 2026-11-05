@@ -371,6 +371,45 @@ export class MailService {
     return this.sendMail(to, subject, text, html);
   }
 
+  /**
+   * Notification de liaison d'une identité externe (S31). Aucun jeton ni secret : fournisseur,
+   * identifiant affichable et date uniquement.
+   */
+  async sendIdentityLinkedEmail(
+    to: string,
+    details: { provider: string; identifier: string; at: Date },
+  ): Promise<boolean> {
+    return this.sendIdentityChangeEmail(to, 'liée', details);
+  }
+
+  /** Notification de déliaison d'une identité externe (S31). */
+  async sendIdentityUnlinkedEmail(
+    to: string,
+    details: { provider: string; identifier: string; at: Date },
+  ): Promise<boolean> {
+    return this.sendIdentityChangeEmail(to, 'déliée', details);
+  }
+
+  private async sendIdentityChangeEmail(
+    to: string,
+    action: 'liée' | 'déliée',
+    details: { provider: string; identifier: string; at: Date },
+  ): Promise<boolean> {
+    const link = `${this.frontendUrl}/`;
+    const when = details.at.toISOString();
+    const subject = `Une identité ${details.provider} a été ${action} à votre compte Planner-Pro`;
+    const html = this.simpleMailHtml(
+      subject,
+      `<p>Identité : <strong>${escapeHtml(details.provider)}</strong> (${escapeHtml(details.identifier)}), le ${escapeHtml(when)}.</p><p>Si vous n’êtes pas à l’origine de cette action, changez votre mot de passe et vérifiez la section « Sécurité du compte » sans attendre.</p>`,
+      'Ouvrir Planner-Pro',
+      link,
+    );
+    const text = `Une identité ${details.provider} (${details.identifier}) a été ${action} à votre compte Planner-Pro, le ${when}.
+
+Si vous n'êtes pas à l'origine de cette action, changez votre mot de passe et vérifiez « Sécurité du compte » : ${link}`;
+    return this.sendMail(to, subject, text, html);
+  }
+
   private simpleMailHtml(title: string, bodyHtml: string, buttonLabel: string, link: string) {
     const safeLink = escapeHtml(link);
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head>

@@ -51,6 +51,8 @@ describe('S18.2 : routes interdites en session d’impersonation', () => {
   const forbidden: Array<[{ prototype: object }, string]> = [
     [AuthController, 'linkGitHub'],
     [AuthController, 'linkFirebase'],
+    [AuthController, 'unlinkGitHub'],
+    [AuthController, 'unlinkFirebase'],
     [AuthController, 'setupMfa'],
     [AuthController, 'confirmMfa'],
     [AuthController, 'disableMfa'],
@@ -94,7 +96,12 @@ describe('S18.2 : routes interdites en session d’impersonation', () => {
   // sessions (DELETE) et de l'administration doit porter le décorateur : ajouter une route
   // sensible sans lui fait échouer ce test.
   describe('méta : chaque route sensible porte le décorateur', () => {
-    const SENSITIVE = [/^\/auth\/mfa\//i, /\/link$/i, /^\/auth\/sessions\//i, /^\/admin(\/|$)/i];
+    const SENSITIVE = [
+      /^\/auth\/mfa\//i,
+      /\/(un)?link$/i,
+      /^\/auth\/sessions\//i,
+      /^\/admin(\/|$)/i,
+    ];
 
     const routesOf = (controller: { prototype: object }) => {
       const base = String(Reflect.getMetadata(PATH_METADATA, controller) ?? '');
@@ -174,6 +181,8 @@ describe('S18.2 : routes interdites en session d’impersonation', () => {
           '/auth/mfa/recovery-codes',
           '/auth/github/link',
           '/auth/firebase/link',
+          '/auth/github/unlink',
+          '/auth/firebase/unlink',
           '/auth/sessions/:sid',
           '/admin/overview',
           '/projects/workspaces/:workspaceId/invitations',
