@@ -204,8 +204,8 @@ export const InvitationAcceptance: React.FC<InvitationAcceptanceProps> = ({ toke
     <div className="login-page">
       <div className="glass-panel login-card">
         {/* App Logo */}
-        <div className="login-logo">
-          <img src={logo} alt="Planner-Pro Logo" />
+        <div className="login-logo-container">
+          <img src={logo} alt="Planner-Pro Logo" className="login-logo" />
         </div>
 
         <div>
