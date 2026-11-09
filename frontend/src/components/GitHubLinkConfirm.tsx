@@ -77,9 +77,11 @@ export const GitHubLinkConfirm: React.FC<Props> = ({
         <p>
           Le compte GitHub que vous venez d'autoriser sera lié au compte Planner-Pro{' '}
           <strong>{accountEmail}</strong>
-          {purpose === 'repos' ? ", avec l'accès à vos dépôts" : ''}. Son nom d'utilisateur
-          s'affichera dans « Sécurité du compte » une fois la liaison faite, et il pourra alors se
-          connecter à ce compte.
+          {purpose === 'repos'
+            ? ", avec l'accès à vos dépôts, y compris privés (portée « repo »)"
+            : ''}
+          . Son nom d'utilisateur s'affichera dans « Sécurité du compte » une fois la liaison faite,
+          et il pourra alors se connecter à ce compte.
         </p>
         <p className="security-hint">
           Si vous n'êtes pas à l'origine de cette demande, annulez : rien n'a été lié.

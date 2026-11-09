@@ -20,8 +20,10 @@ describe('délai Redis du parcours MFA (O19)', () => {
           {} as never,
           {} as never,
           {} as never,
+          {} as never,
         )
       : new AuthService(
+          {} as never,
           {} as never,
           {} as never,
           {} as never,

@@ -1,3 +1,4 @@
+import { PolicyService } from '../../../src/authz/policy.service';
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { JwtModule } from '@nestjs/jwt';
@@ -44,6 +45,7 @@ describe('S6 : cycle de vie du MFA', () => {
         { provide: RedisService, useValue: new FakeRedisService() },
         { provide: FirebaseIdentityService, useValue: {} },
         { provide: MailService, useValue: {} },
+        { provide: PolicyService, useValue: {} },
       ],
     }).compile();
     service = module.get(AuthService);

@@ -1,3 +1,4 @@
+import { PolicyService } from '../../../src/authz/policy.service';
 import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { JwtModule } from '@nestjs/jwt';
@@ -44,6 +45,7 @@ describe('S8 : politique de connexion uniforme', () => {
         { provide: RedisService, useValue: redis },
         { provide: FirebaseIdentityService, useValue: firebase },
         { provide: MailService, useValue: {} },
+        { provide: PolicyService, useValue: {} },
       ],
     }).compile();
     service = module.get(AuthService);

@@ -1,3 +1,4 @@
+import { PolicyService } from '../../src/authz/policy.service';
 import { INestApplication } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { AuthController } from '../../src/auth/auth.controller';
@@ -33,6 +34,7 @@ describe('S18.2 : contournement par la casse du chemin (HTTP)', () => {
       providers: [
         AuthService,
         { provide: MailService, useValue: {} },
+        { provide: PolicyService, useValue: {} },
         JwtAuthGuard,
         SessionService,
         { provide: PrismaService, useValue: prisma },

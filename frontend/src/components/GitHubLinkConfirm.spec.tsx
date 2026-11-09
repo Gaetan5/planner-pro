@@ -145,7 +145,7 @@ describe('GitHubLinkConfirm : retour GitHub avec la finalité link (P9, S31)', (
     reply({ body: identities() });
     renderConfirm('repos');
     await screen.findByLabelText('Mot de passe Planner-Pro');
-    expect(screen.getByText(/accès à vos dépôts/)).toBeInTheDocument();
+    expect(screen.getByText(/accès à vos dépôts, y compris privés/)).toBeInTheDocument();
   });
 
   it.each(['link', 'repos'] as const)(

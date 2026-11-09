@@ -1,3 +1,4 @@
+import { PolicyService } from '../../src/authz/policy.service';
 import { Controller, Get, INestApplication, UseGuards } from '@nestjs/common';
 import { JwtModule, JwtService } from '@nestjs/jwt';
 import { AuthController } from '../../src/auth/auth.controller';
@@ -71,6 +72,7 @@ describe('S3 : séparation ticket MFA / jeton d’accès (HTTP)', () => {
       providers: [
         AuthService,
         { provide: MailService, useValue: mailStub },
+        { provide: PolicyService, useValue: {} },
         JwtAuthGuard,
         SessionService,
         { provide: PrismaService, useValue: prisma },

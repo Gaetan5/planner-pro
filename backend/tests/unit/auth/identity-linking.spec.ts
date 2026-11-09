@@ -1,3 +1,4 @@
+import { PolicyService } from '../../../src/authz/policy.service';
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { validate } from 'class-validator';
@@ -8,7 +9,7 @@ import { FirebaseIdentityService } from '../../../src/auth/firebase-identity.ser
 import { MailService } from '../../../src/mail/mail.service';
 import { SessionService } from '../../../src/auth/session.service';
 import { TokenService } from '../../../src/auth/token.service';
-import { encrypt, hashPassword } from '../../../src/auth/encryption.util';
+import { decrypt, encrypt, hashPassword } from '../../../src/auth/encryption.util';
 import { createGithubOAuthState } from '../../../src/auth/github-oauth-state';
 import { generateTotpCode, generateTotpSecret } from '../../../src/auth/totp.util';
 import { PrismaService } from '../../../src/prisma/prisma.service';
@@ -71,6 +72,7 @@ describe('S31 : liaison et déliaison d’identités externes', () => {
         { provide: RedisService, useValue: new FakeRedisService() },
         { provide: FirebaseIdentityService, useValue: firebase },
         { provide: MailService, useValue: mail },
+        { provide: PolicyService, useValue: {} },
       ],
     }).compile();
     service = module.get(AuthService);
@@ -221,7 +223,46 @@ describe('S31 : liaison et déliaison d’identités externes', () => {
         await expect(link(provider, { password: PASSWORD })).rejects.toThrow(ConflictException);
         expect(updateSpy).not.toHaveBeenCalled();
       });
+
+      it('compte déjà lié à une autre identité : 409 sans écriture ni jeton conservé (P9-R)', async () => {
+        const previous =
+          provider === 'firebase' ? { firebaseUid: 'fb-ancien' } : { githubId: '1111' };
+        await seed({ ...previous, githubAccessToken: encrypt('gho_ancien') });
+        const before = { ...row() };
+        const updateSpy = jest.spyOn(prisma.user, 'update');
+        await expect(link(provider, { password: PASSWORD })).rejects.toThrow(ConflictException);
+        expect(updateSpy).not.toHaveBeenCalled();
+        expect(row()).toEqual(before);
+        expect(decrypt(row().githubAccessToken as string)).toBe('gho_ancien');
+      });
+
+      it('relier la même identité reste permis (renouvellement)', async () => {
+        const same = provider === 'firebase' ? { firebaseUid: 'fb-uid-1' } : { githubId: '4242' };
+        await seed(same);
+        await expect(link(provider, { password: PASSWORD })).resolves.toBeDefined();
+        expect(linked(provider)).toBe(provider === 'firebase' ? 'fb-uid-1' : '4242');
+      });
     });
+  });
+
+  it('finalité repos vers un autre githubId : 409, le jeton obtenu n’est pas conservé (P9-R)', async () => {
+    await seed({
+      githubId: '1111',
+      githubUsername: 'ancien',
+      githubAccessToken: encrypt('gho_ancien'),
+    });
+    const { state, cookieValue } = createGithubOAuthState('repos');
+    await expect(
+      service.linkGitHubAccount(
+        'user-1',
+        'oauth-code',
+        { state, cookie: cookieValue },
+        { password: PASSWORD },
+      ),
+    ).rejects.toThrow(ConflictException);
+    expect(row().githubId).toBe('1111');
+    expect(row().githubUsername).toBe('ancien');
+    expect(decrypt(row().githubAccessToken as string)).toBe('gho_ancien');
   });
 
   it('Firebase : e-mail non vérifié refusé, aucune écriture', async () => {

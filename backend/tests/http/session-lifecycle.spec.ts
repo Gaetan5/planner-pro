@@ -1,3 +1,4 @@
+import { PolicyService } from '../../src/authz/policy.service';
 import { Controller, Get, INestApplication, Req, UseGuards } from '@nestjs/common';
 import { JwtModule, JwtService } from '@nestjs/jwt';
 import { createHash } from 'crypto';
@@ -59,6 +60,7 @@ describe('A3/S7 : cycle de vie des sessions (HTTP)', () => {
       providers: [
         AuthService,
         { provide: MailService, useValue: mailStub },
+        { provide: PolicyService, useValue: {} },
         JwtAuthGuard,
         SessionService, // SESSION
         { provide: PrismaService, useValue: prisma },
@@ -497,6 +499,23 @@ describe('A3/S7 : cycle de vie des sessions (HTTP)', () => {
         }),
       );
       expect(JSON.stringify(logs)).not.toMatch(/accessToken|refreshToken|hashedToken/);
+    });
+
+    it('revoke-others : ne compte pas les sessions expirées non révoquées (P9-S-a)', async () => {
+      const mine = await login();
+      await login();
+      const expired = await login();
+      const expiredSid = sidOf(expired.jar);
+      for (const row of prisma.refreshToken.rows.filter((r) => r.familyId === expiredSid)) {
+        row.expiresAt = new Date(Date.now() - 60_000);
+      }
+
+      const res = await call('POST', '/auth/sessions/revoke-others', mine.jar);
+      expect(await res.json()).toEqual({ revoked: 1 });
+      const logs = prisma.auditLog.rows.filter((r) => r.action === 'SESSIONS_REVOKED');
+      expect(logs[0]).toEqual(
+        expect.objectContaining({ changes: { count: 1, sid: sidOf(mine.jar) } }),
+      );
     });
 
     it('GET /auth/sessions : n’expose jamais les sessions d’un autre utilisateur', async () => {

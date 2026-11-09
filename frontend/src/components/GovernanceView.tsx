@@ -20,7 +20,16 @@ import { ProjectMembersPanel } from './ProjectMembersPanel';
 import { ProjectAuditLogPanel } from './ProjectAuditLogPanel';
 import './GovernanceView.css';
 
-export const GovernanceView: React.FC = () => {
+interface GovernanceViewProps {
+  /** Retour de GitHub (P9-R) : projet dont le sélecteur de dépôts doit s'ouvrir. */
+  resumeRepoProjectId?: string | null;
+  onResumeRepoHandled?: () => void;
+}
+
+export const GovernanceView: React.FC<GovernanceViewProps> = ({
+  resumeRepoProjectId = null,
+  onResumeRepoHandled,
+}) => {
   const {
     projects,
     workspaces,
@@ -69,6 +78,20 @@ export const GovernanceView: React.FC = () => {
     (project) => (project.workspaceId || project.workspace?.id) === activeWorkspaceId,
   );
   const activeProject = workspaceProjects.find((project) => project.id === selectedProjId);
+  // Indication d'ergonomie : OWNER et ADMIN sont MANAGER de tous les projets (le serveur décide)
+  const workspaceRole = getWorkspaceRole?.(activeWorkspaceId);
+  const canManageActiveProject = workspaceRole === 'OWNER' || workspaceRole === 'ADMIN';
+
+  // Retour de GitHub (finalité `repos`) : se placer sur le projet en attente, onglet Intégrations
+  useEffect(() => {
+    if (!resumeRepoProjectId) return;
+    const target = projects.find((project) => project.id === resumeRepoProjectId);
+    if (!target) return;
+    const workspaceId = target.workspaceId || target.workspace?.id;
+    if (workspaceId) setActiveWorkspaceId(workspaceId);
+    setSelectedProjId(target.id);
+    setActiveSubTab('integrations');
+  }, [resumeRepoProjectId, projects]);
 
   useEffect(() => {
     if (workspaceProjects.some((project) => project.id === selectedProjId)) return;
@@ -888,7 +911,15 @@ export const GovernanceView: React.FC = () => {
             )}
 
             {activeSubTab === 'integrations' && canSeeIntegrations && activeWorkspace && (
-              <IntegrationsPanel workspaceId={activeWorkspace.id} />
+              <IntegrationsPanel
+                workspaceId={activeWorkspace.id}
+                project={activeProject}
+                canManageProject={canManageActiveProject}
+                autoOpenRepoPicker={Boolean(
+                  activeProject && resumeRepoProjectId === activeProject.id,
+                )}
+                onRepoPickerOpened={onResumeRepoHandled}
+              />
             )}
           </main>
         </div>

@@ -1,3 +1,4 @@
+import { PolicyService } from '../../src/authz/policy.service';
 import { Controller, Get, INestApplication, Post, Req } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { AuthController } from '../../src/auth/auth.controller';
@@ -72,6 +73,7 @@ describe('S29 : contrôle d’Origin sur les méthodes à effet', () => {
       providers: [
         AuthService,
         { provide: MailService, useValue: {} },
+        { provide: PolicyService, useValue: {} },
         JwtAuthGuard,
         SessionService,
         { provide: PrismaService, useValue: prisma },

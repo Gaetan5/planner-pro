@@ -1,3 +1,4 @@
+import { PolicyService } from '../../../src/authz/policy.service';
 import { BadRequestException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { JwtModule } from '@nestjs/jwt';
@@ -52,6 +53,7 @@ describe('P6 : parcours de compte', () => {
         { provide: RedisService, useValue: new FakeRedisService() },
         { provide: FirebaseIdentityService, useValue: {} },
         { provide: MailService, useValue: mail },
+        { provide: PolicyService, useValue: {} },
       ],
     }).compile();
     service = module.get(AuthService);

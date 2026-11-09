@@ -248,10 +248,13 @@ export class SessionService {
     await this.redisBestEffort(() => this.redis.del(this.cacheKey(sid)));
   }
 
-  /** Révoque toutes les sessions actives d'un compte (suspension, administration, mot de passe). */
+  /**
+   * Révoque toutes les sessions actives d'un compte (suspension, administration, mot de passe).
+   * Une session expirée est déjà inerte : elle n'est ni révoquée ni comptée.
+   */
   async revokeAllForUser(userId: string, exceptSid?: string): Promise<number> {
     const active = (await this.prisma.refreshToken.findMany({
-      where: { userId, revokedAt: null },
+      where: { userId, revokedAt: null, expiresAt: { gt: new Date() } },
       select: { familyId: true },
     })) as Array<{ familyId: string }>;
     const sids = [...new Set(active.map((r) => r.familyId))].filter((sid) => sid !== exceptSid);

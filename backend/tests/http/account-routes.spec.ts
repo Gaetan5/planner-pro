@@ -1,3 +1,4 @@
+import { PolicyService } from '../../src/authz/policy.service';
 import { INestApplication } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { AuthController } from '../../src/auth/auth.controller';
@@ -38,6 +39,7 @@ describe('P6/S27 : routes de compte (HTTP)', () => {
       providers: [
         AuthService,
         { provide: MailService, useValue: mail },
+        { provide: PolicyService, useValue: {} },
         JwtAuthGuard,
         SessionService,
         { provide: PrismaService, useValue: prisma },

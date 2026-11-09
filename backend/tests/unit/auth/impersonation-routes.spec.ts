@@ -101,6 +101,7 @@ describe('S18.2 : routes interdites en session d’impersonation', () => {
       /^\/auth\/mfa\//i,
       /\/(un)?link$/i,
       /^\/auth\/sessions\//i,
+      /^\/auth\/github\/(repos|sync)$/i,
       /^\/admin(\/|$)/i,
     ];
 
@@ -186,6 +187,8 @@ describe('S18.2 : routes interdites en session d’impersonation', () => {
           '/auth/firebase/unlink',
           '/auth/sessions/:sid',
           '/auth/sessions/revoke-others',
+          '/auth/github/repos',
+          '/auth/github/sync',
           '/admin/overview',
           '/projects/workspaces/:workspaceId/invitations',
           '/projects/:id/members',

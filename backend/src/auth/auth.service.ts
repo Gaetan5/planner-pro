@@ -17,7 +17,7 @@ import { FirebaseIdentityService } from './firebase-identity.service';
 import { generateTotpSecret, verifyTotpStep, getTotpAuthUri } from './totp.util';
 import { DisableMfaDto, RegenerateRecoveryCodesDto, SetupMfaDto } from './dto/mfa.dto';
 import { IdentityReauthDto } from './dto/identity.dto';
-import { GithubPurpose } from './dto/github.dto';
+import { GITHUB_REPO_FULL_NAME, GithubPurpose } from './dto/github.dto';
 import { createGithubOAuthState, verifyGithubOAuthState } from './github-oauth-state';
 import { TokenService, MFA_TICKET_TTL_SECONDS } from './token.service';
 import { SessionService } from './session.service';
@@ -26,6 +26,7 @@ import { isFeatureEnabled } from '../config/features';
 import { isDevAuthEnabled } from './dev-auth-flag';
 import { RedisService } from '../redis/redis.service';
 import { MailService } from '../mail/mail.service';
+import { PolicyService } from '../authz/policy.service';
 
 /** Format d'un secret chiffré par `encrypt()` (iv:tag:data) ; un secret base32 en clair n'a jamais de « : ». */
 const ENCRYPTED_FORMAT = /^[0-9a-f]+:[0-9a-f]+:[0-9a-f]+$/;
@@ -59,6 +60,8 @@ const getDummyPasswordHash = () =>
 
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 
+/** Délai maximal d'un appel à l'API GitHub pour les dépôts (P9-R). */
+const GITHUB_API_TIMEOUT_MS = 5000;
 /** Nombre maximal d'essais de code par ticket MFA (S3). */
 const MFA_TICKET_MAX_ATTEMPTS = 5;
 /** Délai maximal d'un appel Redis du parcours MFA : au-delà, 503 plutôt qu'une requête bloquée. */
@@ -161,6 +164,7 @@ export class AuthService {
     private readonly redis: RedisService,
     private readonly sessionService: SessionService,
     private readonly mail: MailService,
+    private readonly policy: PolicyService,
     @Optional()
     @Inject(MFA_REDIS_TIMEOUT_TOKEN)
     private readonly redisTimeoutMs: number = MFA_REDIS_TIMEOUT_MS,
@@ -311,6 +315,9 @@ export class AuthService {
 
     if (existingWithUid && existingWithUid.id !== userId) {
       throw new ConflictException('Cet identifiant Firebase est déjà lié à un autre compte.');
+    }
+    if (account.firebaseUid && account.firebaseUid !== identity.uid) {
+      throw new ConflictException('Déliez d’abord le compte Firebase actuel.');
     }
 
     const updated = await this.prisma.user.update({
@@ -479,6 +486,11 @@ export class AuthService {
     if (owner && owner.id !== userId) {
       throw new ConflictException('Ce compte GitHub est déjà lié à un autre utilisateur.');
     }
+    // Jamais de remplacement silencieux : changer d'identité GitHub exige une déliaison préalable.
+    // Rien n'est écrit et le jeton obtenu n'est pas conservé.
+    if (account.githubId && account.githubId !== githubId) {
+      throw new ConflictException('Déliez d’abord le compte GitHub actuel.');
+    }
 
     const storeToken = purpose === 'repos' && scopes.includes('repo');
     await this.prisma.user.update({
@@ -533,17 +545,27 @@ export class AuthService {
 
     const decryptedToken = decrypt(user.githubAccessToken);
 
-    const response = await fetch('https://api.github.com/user/repos?per_page=100&sort=updated', {
-      headers: {
-        Authorization: `Bearer ${decryptedToken}`,
-        'User-Agent': 'Planner-Pro-App',
-      },
-    });
+    let response: Response;
+    try {
+      response = await fetch('https://api.github.com/user/repos?per_page=100&sort=updated', {
+        headers: {
+          Authorization: `Bearer ${decryptedToken}`,
+          'User-Agent': 'Planner-Pro-App',
+        },
+        signal: AbortSignal.timeout(GITHUB_API_TIMEOUT_MS),
+      });
+    } catch {
+      throw new ServiceUnavailableException('GitHub est injoignable, réessayez plus tard.');
+    }
 
-    if (!response.ok) {
-      throw new UnauthorizedException(
-        "Impossible de récupérer les dépôts GitHub. Le jeton d'accès a peut-être expiré.",
-      );
+    // Un 401 de cette route ne doit jamais signifier « session Planner-Pro expirée » (P9-R-a) :
+    // jeton GitHub invalide -> 403 (le client relance l'autorisation) ; autre échec de GitHub
+    // (5xx, limite de débit) -> 503, sans détour d'autorisation.
+    if (response.status === 401) {
+      throw new ForbiddenException('Jeton GitHub invalide ou révoqué.');
+    }
+    if (response.status !== 200) {
+      throw new ServiceUnavailableException('GitHub est indisponible, réessayez plus tard.');
     }
 
     const repos = (await response.json()) as GitHubRepoResponse[];
@@ -560,23 +582,49 @@ export class AuthService {
   }
 
   /**
-   * Associe un dépôt GitHub à un projet Planner-Pro.
+   * Associe un dépôt GitHub à un projet Planner-Pro (P9-R). Droit `project.manage` (politique
+   * centrale), puis vérification chez GitHub, avec le jeton de l'utilisateur, que le dépôt existe
+   * et lui est accessible. Le nom enregistré est le `full_name` canonique renvoyé par GitHub ;
+   * aucune écriture si la vérification échoue ou dépasse le délai.
    */
   async syncRepositoryToProject(userId: string, projectId: string, repoFullName: string) {
-    // Vérifier si le projet appartient à l'utilisateur
-    const project = await this.prisma.project.findFirst({
-      where: { id: projectId, userId },
-    });
+    await this.policy.assertProject(projectId, userId, 'project.manage');
 
-    if (!project) {
-      throw new BadRequestException("Projet introuvable ou vous n'avez pas les droits d'accès.");
+    if (!GITHUB_REPO_FULL_NAME.test(repoFullName)) {
+      throw new BadRequestException('Nom de dépôt invalide.');
+    }
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !user.githubAccessToken) {
+      throw new BadRequestException('Aucun compte GitHub connecté pour cet utilisateur.');
+    }
+
+    const [owner, repo] = repoFullName.split('/');
+    let response: Response;
+    try {
+      response = await fetch(
+        `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
+        {
+          headers: {
+            Authorization: `Bearer ${decrypt(user.githubAccessToken)}`,
+            'User-Agent': 'Planner-Pro-App',
+          },
+          signal: AbortSignal.timeout(GITHUB_API_TIMEOUT_MS),
+        },
+      );
+    } catch {
+      throw new ServiceUnavailableException('GitHub est injoignable, réessayez plus tard.');
+    }
+    if (response.status !== 200) {
+      throw new BadRequestException('Dépôt introuvable ou inaccessible avec votre compte GitHub.');
+    }
+    const canonical = ((await response.json()) as { full_name?: unknown }).full_name;
+    if (typeof canonical !== 'string' || !GITHUB_REPO_FULL_NAME.test(canonical)) {
+      throw new BadRequestException('Réponse GitHub inattendue.');
     }
 
     return this.prisma.project.update({
       where: { id: projectId },
-      data: {
-        githubRepo: repoFullName,
-      },
+      data: { githubRepo: canonical },
     });
   }
 

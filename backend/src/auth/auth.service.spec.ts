@@ -6,6 +6,7 @@ import { FirebaseIdentityService } from './firebase-identity.service';
 import { TokenService } from './token.service';
 import { SessionService } from './session.service';
 import { MailService } from '../mail/mail.service';
+import { PolicyService } from '../authz/policy.service';
 import { RedisService } from '../redis/redis.service';
 
 describe('AuthService', () => {
@@ -45,6 +46,7 @@ describe('AuthService', () => {
         { provide: TokenService, useValue: {} },
         { provide: SessionService, useValue: sessionService },
         { provide: MailService, useValue: mail },
+        { provide: PolicyService, useValue: {} },
         { provide: RedisService, useValue: { get: jest.fn(), set: jest.fn(), del: jest.fn() } },
       ],
     }).compile();

@@ -9,8 +9,23 @@ vi.mock('../context/AppContext', () => ({
 }));
 
 vi.mock('./IntegrationsPanel', () => ({
-  IntegrationsPanel: ({ workspaceId }: { workspaceId: string }) => (
-    <div data-testid="integrations-workspace">{workspaceId}</div>
+  IntegrationsPanel: ({
+    workspaceId,
+    project,
+    canManageProject,
+    autoOpenRepoPicker,
+  }: {
+    workspaceId: string;
+    project?: { id: string };
+    canManageProject?: boolean;
+    autoOpenRepoPicker?: boolean;
+  }) => (
+    <div data-testid="integrations-workspace">
+      {workspaceId}
+      <span data-testid="integrations-project">{project?.id ?? ''}</span>
+      <span data-testid="integrations-manage">{String(canManageProject)}</span>
+      <span data-testid="integrations-auto">{String(autoOpenRepoPicker)}</span>
+    </div>
   ),
 }));
 
@@ -145,6 +160,59 @@ describe('GovernanceView', () => {
     } as unknown as ReturnType<typeof useApp>);
     render(<GovernanceView />);
     expect(!!screen.queryByText(/Intégrations & Sync/)).toBe(visible);
+    expect(screen.queryByTestId('integrations-workspace')).toBeNull();
+  });
+
+  // P9-R : « Connecter un dépôt » depuis l'onglet Intégrations du projet
+  const withProjects = (role: string, activeWorkspaceId = 'workspace-1') => {
+    const base = { tasks: [], milestones: [], deliverables: [], deliveries: [], status: 'ACTIVE' };
+    vi.mocked(useApp).mockReturnValue({
+      projects: [
+        { ...base, id: 'project-1', workspaceId: 'workspace-1', name: 'Projet 1' },
+        { ...base, id: 'project-2', workspaceId: 'workspace-2', name: 'Projet 2' },
+        { ...base, id: 'project-3', workspaceId: 'workspace-1', name: 'Projet 3' },
+      ],
+      workspaces: [
+        { id: 'workspace-1', name: 'Workspace 1', ownerId: 'owner-1' },
+        { id: 'workspace-2', name: 'Workspace 2', ownerId: 'owner-2' },
+      ],
+      activeWorkspaceId,
+      setActiveWorkspaceId: vi.fn(),
+      getWorkspaceMembers,
+      getWorkspaceRole: vi.fn(() => role),
+      createMilestone: vi.fn(),
+      completeMilestone: vi.fn(),
+      createDeliverable: vi.fn(),
+      updateDeliverableStatus: vi.fn(),
+      createDelivery: vi.fn(),
+      updateDeliveryStatus: vi.fn(),
+      toggleDeliveryChecklistItem: vi.fn(),
+    } as unknown as ReturnType<typeof useApp>);
+  };
+
+  it.each([
+    ['OWNER', 'true'],
+    ['ADMIN', 'true'],
+    ['MEMBER', 'false'],
+  ])('rôle %s : droit de connecter un dépôt transmis = %s', (role, expected) => {
+    withProjects(role);
+    render(<GovernanceView />);
+    fireEvent.click(screen.getByText(/Intégrations & Sync/));
+    expect(screen.getByTestId('integrations-project')).toHaveTextContent('project-1');
+    expect(screen.getByTestId('integrations-manage')).toHaveTextContent(expected);
+    expect(screen.getByTestId('integrations-auto')).toHaveTextContent('false');
+  });
+
+  it('retour de GitHub : ouvre l’onglet Intégrations du projet en attente et demande le sélecteur', async () => {
+    withProjects('OWNER');
+    render(<GovernanceView resumeRepoProjectId="project-3" />);
+    expect(await screen.findByTestId('integrations-project')).toHaveTextContent('project-3');
+    expect(screen.getByTestId('integrations-auto')).toHaveTextContent('true');
+  });
+
+  it('projet en attente inconnu : l’onglet reste sur le projet, sans sélecteur', () => {
+    withProjects('OWNER');
+    render(<GovernanceView resumeRepoProjectId="inconnu" />);
     expect(screen.queryByTestId('integrations-workspace')).toBeNull();
   });
 });

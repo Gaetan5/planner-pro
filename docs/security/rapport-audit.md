@@ -4488,3 +4488,197 @@ Fichiers exécutés : backend `tests/http/session-lifecycle.spec.ts` et `tests/u
    - non bloquant r30 : jeton d'invitation dans le corps de `check`/`accept` ;
    - S30, actions d'exploitation 1 à 4 ;
    - Phases 4 à 6 : S18 (avec les compléments r32), S19 à S26 (hors volet `mock/login`), A5 à A9, P2, P5, P7, P8, Q-2, O10 à O17.
+
+
+## Revue r33 — P9-S-a et O20 : VALIDÉ ; P9-R « Connecter un dépôt » : À REPRENDRE, points mineurs (2026-11-09)
+
+Revue de la section « Lot r32 (fixeur) » du journal (working tree, rien de commité). Exigences de référence : P9-R (r4), r29, r30, r31 (segments encodés, valeurs lues validées), non bloquant r26 « remplacement silencieux ». J'ai relu le code (`git diff`), relancé les mesures et joué 29 contre-mutations hors dépôt. Fichier restauré et `md5sum` vérifié après chaque essai, puis `md5sum` de l'ensemble des fichiers modifiés ou ajoutés identiques avant et après. Le dossier d'agent local et les fichiers `.env*` n'ont pas été touchés.
+
+**Verdict** :
+
+- **P9-S-a : VALIDÉ.**
+- **O20 : VALIDÉ** (essai sous charge rejoué, voir ci-dessous).
+- **P9-R : À REPRENDRE.** La sécurité est conforme (droit, vérification chez GitHub, nom canonique, 409, corps validé, jeton sans fuite). Il reste un défaut de comportement (P9-R-a) et deux trous de test (P9-R-b).
+
+### Mesures (relancées par l'architecte)
+
+| Commande | Résultat |
+| --- | --- |
+| `cd backend && env -u DATABASE_URL npx jest` et `cd frontend && pnpm test:run`, **lancés ensemble** | **86/86 suites, 2495/2495** ; **28 fichiers, 195/195** |
+| Mêmes deux suites ensemble, **2 essais avec 8 processus de charge** (charge de la machine de 15 à 17 sur 4 cœurs) | **Verts les deux fois** (86/86, 2495/2495 ; 28 fichiers, 195/195). Les essais de r32 échouaient 3 fois sur 3 dans des conditions comparables |
+| `nest build` ; `tsc --noEmit -p tests/tsconfig.json` | exit 0 ; exit 0 |
+| `cd frontend && tsc --noEmit -p .` ; `pnpm build` | exit 0 ; build OK |
+| `grep -l -e "mock/login" -e "Simuler une session" frontend/dist/assets/*.js` | vide (exit 1) |
+| `pnpm lint` racine ; Prettier sur tous les fichiers modifiés ou ajoutés | 0 erreur (53 avertissements préexistants) ; conforme |
+
+### Contre-mutations de l'architecte
+
+Backend : `github-repos.spec.ts`, `identity-linking.spec.ts`, `session-lifecycle.spec.ts`, `impersonation-routes.spec.ts` (181 tests). Frontend : `pending-repo`, `GitHubRepoConnector`, `App.repo-return`, `GovernanceView`, `IntegrationsPanel`, `GitHubLinkConfirm` (54 tests).
+
+| ID | Mutation | Résultat |
+| --- | --- | --- |
+| B1 | Filtre `expiresAt` retiré (P9-S-a) | **Détectée** (1) |
+| B2 ; B3 | `Matches` retiré du DTO ; lookahead `.`/`..` retiré | **Détectées** (8 ; 2) |
+| B4 | `assertProject` retiré | **Détectée** (1) |
+| B5 | Statut GitHub non vérifié | **Détectée** (4) |
+| B6 | Saisie enregistrée au lieu du nom canonique | **Détectée** (1) |
+| B7 ; B8 | Erreur réseau non traduite (503) ; signal de délai retiré (`sync`) | **Détectées** (1 ; 1) |
+| B9 ; B10 | 409 GitHub retiré ; 409 Firebase retiré | **Détectées** (2 ; 1) |
+| B14 | 409 même pour la **même** identité | **Détectée** (1) |
+| B11 ; B12 | `@ForbiddenInImpersonation()` retiré de `sync` ; `@Throttle` retiré de `repos` | **Détectées** (2 ; 1) |
+| B15 | Nom canonique non validé | **Détectée** (1) |
+| B13 | `encodeURIComponent` retiré | **Survit : équivalente** (le format validé ne contient aucun caractère à encoder) |
+| B16 | Contrôle du format dans le service retiré (le DTO reste) | **Survit : équivalente** (le service n'est atteint que par la route, déjà validée) |
+| F1 ; F2 ; F3 | Format non validé à la lecture ; échéance ignorée ; durée de 24 h | **Détectées** (5 ; 3 ; 1) |
+| F4 ; F5 | 401 retiré de la liste des détours ; 500 et 503 ajoutés | **Détectées** (1 ; 1) |
+| F6 | `repoFullName` placé dans l'URL | **Détectée** (1) |
+| F7 ; F8 | Reprise pour toute finalité ; annulation sans nettoyage | **Détectées** (1 ; 1) |
+| F9 | Bouton pour tout non-VIEWER | **Détectée** (1) |
+| F10 ; F11 | Ouverture automatique répétée ; ouverture sans le droit | **Détectées** (1 ; 1) |
+| **F12** | Dépôt affiché = sélection au lieu de la réponse du serveur | **Survit** (voir P9-R-b) |
+| **F13** | `onLinked` ne relit plus les données (`refreshData`) | **Survit** (voir P9-R-b) |
+
+### Verdict par point
+
+| Exigence | Verdict | Preuve |
+| --- | --- | --- |
+| P9-S-a : `revokeAllForUser` ignore les sessions expirées | **VALIDÉ** | B1 ; test `{ revoked: 1 }` et audit `count: 1`. Aucun effet pour les autres appelants : une session expirée est déjà inerte |
+| O20 : `testTimeout: 15000` (Jest, Vitest), pas de délai par test | **VALIDÉ** | `backend/package.json`, `frontend/vite.config.ts` ; 2 essais verts sous charge ci-dessus |
+| `GithubSyncDto`, droit `project.manage`, vérification chez GitHub (jeton de l'utilisateur, 5 s, segments encodés, statut 200, nom canonique enregistré, aucune écriture en échec) | **VALIDÉ** | B2 à B8, B15 |
+| `@Throttle` 10/min sur `repos` et `sync` | **VALIDÉ** | B12 et test des limites |
+| Non bloquant r26 : 409 « Déliez d'abord… » (GitHub `link` et `repos`, et Firebase), avant toute écriture, même identité permise | **VALIDÉ** | B9, B10, B14. Non bloquant r26 « remplacement silencieux » **clos**. Reste ouvert : configuration SSO pour `ssoUid` |
+| `planner_pending_repo` : `sessionStorage`, échéance de 15 min, format validé à la lecture, entrée altérée supprimée ; `repoFullName` dans le corps | **VALIDÉ** | F1 à F3, F6 |
+| Parcours frontend : détour 400/403, reprise sur le projet en attente, ouverture unique, rappel des dépôts privés | **VALIDÉ** pour l'essentiel | F4 à F11 ; trous F12 et F13 |
+| Comportement de `github/repos` quand GitHub répond autre chose que 200 | **À REPRENDRE** | P9-R-a |
+
+### Nouveaux constats r33
+
+#### P9-R-a (Mineur) : tout échec de GitHub devient un 401, donc un détour d'autorisation
+
+- **Fichier** : `backend/src/auth/auth.service.ts`, `getGitHubRepositories` (`if (!response.ok) throw new UnauthorizedException(...)`) et `frontend/src/components/GitHubRepoConnector.tsx` (`[400, 401, 403]`).
+- **Cause** : une panne de GitHub (5xx), une limite de débit (403/429) ou un jeton révoqué (401) donnent le même 401. Le composant en déduit un jeton à renouveler et envoie l'utilisateur vers GitHub. Un 401 est en outre indiscernable d'une session Planner-Pro expirée (rotation et rejeu côté `fetch`, puis événement de fin de session).
+- **Impact** : parcours trompeur pendant un incident GitHub, redirections inutiles, ambiguïté avec la session. Pas de fuite ni d'écriture.
+- **Remédiation attendue** :
+  - `getGitHubRepositories` : réponse GitHub 401 -> **403** « Jeton GitHub invalide ou révoqué » ; autre statut non 200 -> **503** (comme le délai réseau). Un 401 de cette route ne signifie plus que « session expirée » ;
+  - frontend : détour vers GitHub seulement pour 400 et 403 ; 401 retiré de la liste (il suit le traitement normal de la session) ; 503 : message, aucun détour (déjà couvert par F5).
+- **Tests attendus** : backend, GitHub 401 -> 403, 500 et 429 -> 503, jeton absent -> 400 ; frontend, 401 et 503 sans détour, 400 et 403 avec détour.
+
+#### P9-R-b (Mineur, tests) : deux comportements de l'interface sans test
+
+- **F12** : le dépôt affiché après la liaison doit être `githubRepo` renvoyé par le serveur (nom canonique). Le test actuel renvoie la même valeur que la sélection, donc une version qui affiche la sélection passe. **Test attendu** : réponse de `sync` différente de la sélection (par exemple `Acme/Web` pour `acme/web`), et le texte « Dépôt lié : » affiche la réponse.
+- **F13** : après une liaison, `refreshData` doit être appelé (sinon le projet affiché garde l'ancien `githubRepo` quand on change de projet et qu'on revient). **Test attendu** : dans `IntegrationsPanel.spec.tsx`, après « Lier … », `refreshData` est appelé une fois.
+
+### Écarts déclarés par le fixeur
+
+1. **Regex excluant `.` et `..` : accepté.** Conforme à la règle de r31 (valeurs validées par format). `encodeURIComponent` ne neutralise pas les points, donc le lookahead est utile ; B3 le prouve.
+2. **`@ForbiddenInImpersonation()` sur `github/repos` et `github/sync` : accepté, et c'est la bonne décision.** Ces routes utilisent le jeton GitHub du compte ciblé et exposent ses dépôts privés, comme `link` et `unlink` (S18.2). La liste attendue et le balayage méta sont à jour. Limite côté interface : en impersonation le bouton s'affiche et le 403 déclenche le détour GitHub. C'est traité avec S18 (voir plus bas), sans effet de sécurité.
+3. **409 étendu à `firebase/link` : accepté.** Le non bloquant r26 visait les deux identités ; B10 et B14 le couvrent.
+4. **503 sur délai ou erreur réseau de GitHub : accepté.** Erreur de service tiers, sans écriture ; cohérent avec le 503 de la MFA sur délai Redis.
+5. **Dépendance `AuthService` -> `PolicyService` : acceptée.** `AuthzModule` est `@Global()` et exporte `PolicyService`, il n'importe pas `AuthService` : aucun cycle, `nest build` et les 86 suites sont verts. Elle évite de dupliquer la matrice de droits, ce qui aurait recréé le défaut « droit limité au créateur ».
+
+### Réponses aux questions du fixeur
+
+1. **Qui voit « Connecter un dépôt » : décision produit, recommandation à confirmer par l'utilisateur.** Recommandation : **exposer `myRole` (ou `canManage`) par projet**, calculé par `PolicyService` dans la charge utile des projets, puis lire cette valeur à la place du rôle de workspace. L'heuristique actuelle (OWNER et ADMIN) échoue du bon côté (le serveur reste l'autorité, B4) mais masque la fonction à un MANAGER par `ProjectMembership`. En pratique l'onglet Intégrations est lui-même caché aux VIEWER et ses routes exigent ADMIN : le gain est modeste. **Pas de lot dédié maintenant** : à faire avec les compléments de S18 (même besoin de fournir une information calculée par le serveur) ou avec A5 à A9. Décision à confirmer par l'utilisateur : lot dédié maintenant, ou différé.
+2. **401 de GitHub indiscernable d'une session expirée : non acceptable tel quel**, voir P9-R-a (403 dédié pour le jeton GitHub invalide, 503 pour le reste, 401 retiré de la liste des détours).
+3. **`encodeURIComponent` sans test : accepté.** B13 est une mutation équivalente tant que le format est validé ; ne pas écrire de test artificiel. Garder l'encodage et le lookahead (règle de r31).
+4. **Échéance de `planner_pending_repo` : suffisante.** `sessionStorage` (par onglet), 15 min, format validé à la lecture, supprimée à la consommation ou à l'annulation ; la valeur n'est qu'un identifiant de projet, sans secret. Amélioration facultative, sans lot : la supprimer aussi à la déconnexion.
+5. **O20 sous charge : rejoué et validé.** Deux essais, deux suites ensemble, 8 processus de charge : verts. Voir le tableau des mesures. La limite (pas de test sous charge à 18) est levée.
+
+### Statut des constats
+
+| ID | Statut r33 |
+| --- | --- |
+| P9-S-a | **VALIDÉ** |
+| O20 | **VALIDÉ** |
+| P9-R | **À REPRENDRE** (P9-R-a, P9-R-b) ; le reste de P9-R est conforme |
+| P9-R-a | Nouveau, Mineur |
+| P9-R-b | Nouveau, Mineur (tests) |
+| Non bloquant r26, remplacement silencieux d'une identité liée | **VALIDÉ, clos** (reste : configuration SSO pour `ssoUid`) |
+| S18 | Complété : en impersonation, masquer « Connecter un dépôt » (information `impersonated` fournie par le serveur, comme pour `SessionsSection`) |
+
+### Commit
+
+**Pas de feu vert pour l'instant.** Les corrections P9-R-a et P9-R-b sont petites ; P9-S-a, O20 et P9-R ne peuvent pas être commités séparément, car `AuthService` dépend désormais de `PolicyService` (le fournisseur est ajouté dans 13 fichiers de test, dont `session-lifecycle.spec.ts`). Après revue de la reprise, un seul commit, avec les fichiers suivants (36 entrées de `git status`, sans le dossier d'agent local) :
+
+- Backend source : `backend/package.json`, `src/auth/auth.controller.ts`, `src/auth/auth.service.ts`, `src/auth/dto/github.dto.ts`, `src/auth/session.service.ts`, `src/auth/auth.service.spec.ts`.
+- Backend tests : `tests/http/{account-routes,csrf-origin,impersonation-case,mfa-ticket,session-lifecycle}.spec.ts`, `tests/http/github-repos.spec.ts` (nouveau), `tests/unit/auth/{account-lifecycle,enumeration-timing,github-oauth,identity-linking,impersonation-routes,login-policy,mfa-lifecycle,mfa-redis-timeout}.spec.ts`.
+- Frontend : `vite.config.ts`, `src/App.tsx`, `src/App.repo-return.spec.tsx`, `src/github-repos.ts`, `src/pending-repo.ts`, `src/pending-repo.spec.ts`, `src/components/{GitHubLinkConfirm,GitHubLinkConfirm.spec,GovernanceView,GovernanceView.spec,IntegrationsPanel,IntegrationsPanel.spec}.tsx`, `src/components/GitHubRepoConnector.tsx` et `.spec.tsx`.
+- Documentation : `docs/security/rapport-audit.md` et `docs/security/journal-corrections.md`.
+
+Changements cassants (déjà déclarés, aucun appelant existant) : `sync` rejette un corps non conforme et un dépôt inaccessible (400) ; `repos` et `sync` répondent 403 en impersonation ; `link` répond 409 si une autre identité est déjà liée ; après P9-R-a, `repos` répondra 403 (jeton GitHub invalide) ou 503 au lieu de 401. Aucune migration.
+
+**Constats ouverts à la fin de r33, dans l'ordre de traitement** :
+
+1. **P9-R-a**, puis **P9-R-b** (petits, ensemble, puis une revue courte).
+2. Puis, inchangés :
+   - non bloquant r26 : configuration SSO pour `ssoUid` ;
+   - non bloquant r30 : jeton d'invitation dans le corps de `check` et `accept` ;
+   - S30, actions d'exploitation 1 à 4 ;
+   - Phases 4 à 6 : S18 (avec les compléments r32 et r33), S19 à S26 (hors volet `mock/login`), A5 à A9, P2, P5, P7, P8, Q-2, O10 à O17. La décision sur `myRole` / `canManage` est à prendre avec S18 ou A5 à A9.
+
+## Revue r34 — P9-R-a, P9-R-b et donc P9-R : VALIDÉ ; feu vert pour le commit unique (2026-11-09)
+
+Revue de la section « Reprise r33 (fixeur) » du journal (working tree, rien de commité). J'ai relu le code (`getGitHubRepositories`, `GitHubRepoConnector.tsx`, `IntegrationsPanel.tsx`), relancé les mesures et joué mes contre-mutations hors dépôt. `md5sum` des 36 entrées de `git status` (sans le dossier d'agent local) identique avant et après ; le dossier d'agent local et les `.env*` n'ont pas été touchés.
+
+### Mesures (relancées par l'architecte)
+
+| Commande | Résultat |
+| --- | --- |
+| `cd backend && env -u DATABASE_URL npx jest` | **86/86 suites, 2503/2503** |
+| `cd frontend && pnpm test:run` | **28 fichiers, 197/197** |
+| `nest build` ; `tsc --noEmit -p tests/tsconfig.json` ; frontend `tsc --noEmit -p .` ; `pnpm build` | exit 0 partout |
+| `grep -l -e "mock/login" -e "Simuler une session" frontend/dist/assets/*.js` | vide (exit 1) |
+| `pnpm lint` racine ; Prettier sur les fichiers de code modifiés ou ajoutés | 0 erreur (53 avertissements préexistants) ; conforme. Les deux fichiers `.md` de `docs/security` sont signalés par Prettier, y compris dans leur version de `HEAD` : préexistant, sans lien avec ce lot |
+
+### Contre-mutations de l'architecte
+
+| ID | Mutation | Résultat |
+| --- | --- | --- |
+| M1 | GitHub 401 renvoyé en 401 (`UnauthorizedException`) | **Détectée** (1) |
+| M2 | Branche 401 retirée (donc 503) | **Détectée** (1) |
+| M3 | Statut non 200 ignoré (la réponse est lue) | **Détectée** (5) |
+| M4 | Autres échecs renvoyés en 401 | **Détectée** (5) |
+| M5 | Frontend : 401 relance le détour | **Détectée** (1) |
+| M6 | Frontend : 403 sans détour | **Détectée** (1) |
+| M7 | Frontend : 400 sans détour | **Détectée** (2) |
+| M8 | Frontend : 503 relance le détour | **Détectée** (1) |
+| F12 | Dépôt affiché = sélection au lieu de la réponse du serveur | **Détectée** (1) |
+| F13 | `onLinked` ne relit plus les données | **Détectée** (1) |
+| F13b | `refreshData` appelé deux fois | **Détectée** (1) |
+
+Incident d'outillage de mon côté (sans effet sur le code) : un premier lot de mutations a laissé un fichier muté un court instant (alias `cp -i` bloquant, processus concurrent). Je l'ai restauré à la main et vérifié : `md5sum` des 36 fichiers identique à la mesure prise avant mes essais, puis rejoué toutes les mutations backend séquentiellement avec les bons numéros de ligne.
+
+### Verdict
+
+| Constat | Verdict | Preuve |
+| --- | --- | --- |
+| P9-R-a : `github/repos` ne répond plus 401 ; 403 (jeton GitHub invalide), 503 (autre échec) ; détour frontend limité à 400 et 403 | **VALIDÉ** | Code relu, M1 à M8, tests backend (+8) et frontend |
+| P9-R-b : tests F12 et F13 | **VALIDÉ** | F12, F13, F13b détectées |
+| **P9-R « Connecter un dépôt »** | **VALIDÉ** | Toutes les exigences de la revue r33 sont couvertes |
+
+### Statut des constats
+
+| ID | Statut r34 |
+| --- | --- |
+| P9-S-a | **VALIDÉ** (r33) |
+| O20 | **VALIDÉ** (r33) |
+| P9-R, P9-R-a, P9-R-b | **VALIDÉ, clos** |
+| Non bloquant r26, remplacement silencieux d'une identité liée | **Clos** (reste : configuration SSO pour `ssoUid`) |
+
+### Commit : feu vert, un seul commit
+
+Les 36 entrées de `git status` (sans le dossier d'agent local, qui reste hors de git) forment un lot indivisible, car `AuthService` dépend de `PolicyService` :
+
+- Backend source (6) : `backend/package.json`, `backend/src/auth/{auth.controller,auth.service,auth.service.spec,session.service}.ts`, `backend/src/auth/dto/github.dto.ts`.
+- Backend tests (17) : `backend/tests/http/{account-routes,csrf-origin,impersonation-case,mfa-ticket,session-lifecycle}.spec.ts`, `backend/tests/http/github-repos.spec.ts` (nouveau), `backend/tests/unit/auth/{account-lifecycle,enumeration-timing,github-oauth,identity-linking,impersonation-routes,login-policy,mfa-lifecycle,mfa-redis-timeout}.spec.ts`.
+- Frontend (11) : `frontend/vite.config.ts`, `frontend/src/App.tsx`, `frontend/src/App.repo-return.spec.tsx` (nouveau), `frontend/src/github-repos.ts` (nouveau), `frontend/src/pending-repo.ts` et `.spec.ts` (nouveaux), `frontend/src/components/{GitHubLinkConfirm,GitHubLinkConfirm.spec,GovernanceView,GovernanceView.spec,IntegrationsPanel,IntegrationsPanel.spec}.tsx`, `frontend/src/components/GitHubRepoConnector.tsx` et `.spec.tsx` (nouveaux).
+- Documentation (2) : `docs/security/rapport-audit.md`, `docs/security/journal-corrections.md`.
+
+Changements cassants : `sync` rejette un corps non conforme et un dépôt inaccessible (400) ; `repos` et `sync` répondent 403 en impersonation ; `link` (GitHub et Firebase) répond 409 si une autre identité est déjà liée ; `GET /auth/github/repos` répond 403 (jeton GitHub invalide) ou 503 au lieu de 401 (seul le nouveau composant l'appelle). **Migration : aucune.** Le message de commit ne doit mentionner aucun assistant.
+
+### Constats ouverts, dans l'ordre de traitement
+
+1. Non bloquant r26 : configuration SSO pour `ssoUid`.
+2. Non bloquant r30 : jeton d'invitation dans le corps de `check` et `accept`.
+3. S30, actions d'exploitation 1 à 4.
+4. Phases 4 à 6 : S18 (avec les compléments r32 et r33 : masquer « Connecter un dépôt » en impersonation), S19 à S26 (hors volet `mock/login`), A5 à A9, P2, P5, P7, P8, Q-2, O10 à O17. Décision `myRole` / `canManage` à prendre avec S18 ou A5 à A9 (confirmation utilisateur).

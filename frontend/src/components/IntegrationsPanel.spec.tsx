@@ -7,8 +7,10 @@ vi.mock('../context/AppContext', () => ({
   useApp: vi.fn(),
 }));
 
+const refreshData = vi.fn();
 const mockIntegrations = (integrations: unknown[]) =>
   vi.mocked(useApp).mockReturnValue({
+    refreshData,
     listIntegrations: vi.fn().mockResolvedValue(integrations),
     createIntegration: vi.fn(),
     toggleIntegration: vi.fn(),
@@ -58,5 +60,49 @@ describe('IntegrationsPanel : état réel des intégrations (P1)', () => {
     fireEvent.change(select, { target: { value: 'GOOGLE_CALENDAR' } });
     expect(await screen.findByText(/URL de flux/)).toBeInTheDocument();
     expect(container.innerHTML).not.toMatch(/mock-calendar|Simulateur/);
+  });
+
+  // P9-R : section « Dépôt GitHub » du projet
+  it('« Connecter un dépôt » : présent avec le droit de gestion, absent sans, absent sans projet', async () => {
+    const project = { id: '3f2b8c1e-5a4d-4e6f-9b7a-1c2d3e4f5a6b', githubRepo: 'acme/api' };
+    mockIntegrations([]);
+    const { rerender } = render(
+      <IntegrationsPanel workspaceId="ws-1" project={project} canManageProject />,
+    );
+    expect(await screen.findByRole('button', { name: 'Connecter un dépôt' })).toBeInTheDocument();
+    expect(screen.getByText(/Dépôt lié : acme\/api/)).toBeInTheDocument();
+
+    rerender(<IntegrationsPanel workspaceId="ws-1" project={project} canManageProject={false} />);
+    expect(screen.queryByRole('button', { name: 'Connecter un dépôt' })).toBeNull();
+
+    rerender(<IntegrationsPanel workspaceId="ws-1" />);
+    expect(screen.queryByText('Dépôt GitHub')).toBeNull();
+  });
+
+  it('après la liaison d’un dépôt, les données sont relues (refreshData appelé une fois)', async () => {
+    const project = { id: '3f2b8c1e-5a4d-4e6f-9b7a-1c2d3e4f5a6b', githubRepo: null };
+    mockIntegrations([]);
+    const fetchMock = vi.fn();
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => [
+          { id: 1, name: 'web', fullName: 'acme/web', description: null, private: false },
+        ],
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ id: project.id, githubRepo: 'acme/web' }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<IntegrationsPanel workspaceId="ws-1" project={project} canManageProject />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Connecter un dépôt' }));
+    refreshData.mockClear();
+    fireEvent.click(await screen.findByRole('button', { name: 'Lier acme/web' }));
+    await screen.findByText(/Dépôt lié : acme\/web/);
+    expect(refreshData).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
   });
 });

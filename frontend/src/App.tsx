@@ -41,6 +41,7 @@ import {
 import { AccountLinkPage } from './components/AccountLinkPage';
 import { isSsoState } from './sso-oauth';
 import { fetchGitHubPurpose } from './github-oauth';
+import { clearPendingRepo, readPendingRepo } from './pending-repo';
 import { readAccountLink, type AccountLink } from './account-api';
 import { captureInviteFromUrl, clearPendingInvite, readPendingInvite } from './invitation-store';
 import logo from './logo.png';
@@ -94,6 +95,8 @@ function AppWithSession() {
     state: string;
   } | null>(null);
   const [linkNotice, setLinkNotice] = useState('');
+  // Projet dont le sélecteur de dépôts doit s'ouvrir après le retour de GitHub (P9-R)
+  const [repoResumeProjectId, setRepoResumeProjectId] = useState<string | null>(null);
   const [sessionsVersion, setSessionsVersion] = useState(0);
   const isPlatformAdmin =
     user?.platformRole === 'SUPER_ADMIN' || user?.platformRole === 'PLATFORM_ADMIN';
@@ -182,11 +185,22 @@ function AppWithSession() {
         {...pendingGitHub}
         accountEmail={user.email}
         onDone={(message) => {
+          const pendingRepoProject = pendingGitHub.purpose === 'repos' ? readPendingRepo() : null;
+          clearPendingRepo();
           setPendingGitHub(null);
+          if (pendingRepoProject) {
+            // Finalité `repos` : retour sur les intégrations du projet visé, sélecteur ouvert
+            setRepoResumeProjectId(pendingRepoProject);
+            setActiveTab('governance');
+            return;
+          }
           setLinkNotice(message);
           setActiveTab('security');
         }}
-        onCancel={() => setPendingGitHub(null)}
+        onCancel={() => {
+          clearPendingRepo();
+          setPendingGitHub(null);
+        }}
       />
     );
   }
@@ -202,7 +216,12 @@ function AppWithSession() {
       case 'pomodoro':
         return <PomodoroTimer />;
       case 'governance':
-        return <GovernanceView />;
+        return (
+          <GovernanceView
+            resumeRepoProjectId={repoResumeProjectId}
+            onResumeRepoHandled={() => setRepoResumeProjectId(null)}
+          />
+        );
       case 'resources':
         return canSeeInternalViews ? <CapacityView /> : <DashboardContent />;
       case 'agile':

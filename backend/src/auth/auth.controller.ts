@@ -24,7 +24,7 @@ import { LoginDto } from './dto/login.dto';
 import { EmailOnlyDto, ResetPasswordDto, VerifyEmailDto } from './dto/password-reset.dto';
 import { FirebaseLoginDto } from './dto/firebase-login.dto';
 import { FirebaseLinkDto, GithubLinkDto, IdentityUnlinkDto } from './dto/identity.dto';
-import { GithubAuthorizeQueryDto, GithubLoginDto } from './dto/github.dto';
+import { GithubAuthorizeQueryDto, GithubLoginDto, GithubSyncDto } from './dto/github.dto';
 import {
   GITHUB_STATE_COOKIE,
   GITHUB_STATE_COOKIE_PATH,
@@ -424,23 +424,25 @@ export class AuthController {
   }
 
   /**
-   * Récupère les dépôts GitHub de l'utilisateur connecté
+   * Récupère les dépôts GitHub de l'utilisateur connecté. Interdit en impersonation : la route
+   * utilise le jeton GitHub du compte ciblé.
    */
   @Get('github/repos')
+  @ForbiddenInImpersonation()
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   getGitHubRepositories(@Req() req: AuthenticatedUserRequest) {
     const userId = req.user.id;
     return this.authService.getGitHubRepositories(userId);
   }
 
   /**
-   * Synchronise un dépôt GitHub à un projet Planner-Pro
+   * Associe un dépôt GitHub à un projet Planner-Pro (P9-R) : droit `project.manage`, dépôt vérifié
+   * chez GitHub avec le jeton de l'utilisateur. Le dépôt voyage dans le corps, jamais dans le chemin.
    */
   @Post('github/sync')
-  syncRepository(
-    @Body() body: { projectId: string; repoFullName: string },
-    @Req() req: AuthenticatedUserRequest,
-  ) {
-    const userId = req.user.id;
-    return this.authService.syncRepositoryToProject(userId, body.projectId, body.repoFullName);
+  @ForbiddenInImpersonation()
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  syncRepository(@Body() body: GithubSyncDto, @Req() req: AuthenticatedUserRequest) {
+    return this.authService.syncRepositoryToProject(req.user.id, body.projectId, body.repoFullName);
   }
 }

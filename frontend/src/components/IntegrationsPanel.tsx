@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
+import { GitHubRepoConnector } from './GitHubRepoConnector';
 import './IntegrationsPanel.css';
 
 const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
@@ -29,9 +30,22 @@ interface CalendarConflict {
 
 interface IntegrationsPanelProps {
   workspaceId: string;
+  /** Projet affiché : active la section « Dépôt GitHub » (P9-R). */
+  project?: { id: string; githubRepo?: string | null };
+  /** Droit `project.manage` sur ce projet ; sans lui, aucun bouton « Connecter un dépôt ». */
+  canManageProject?: boolean;
+  /** Retour de GitHub (finalité `repos`) : ouvre le sélecteur de dépôts. */
+  autoOpenRepoPicker?: boolean;
+  onRepoPickerOpened?: () => void;
 }
 
-export const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({ workspaceId }) => {
+export const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
+  workspaceId,
+  project,
+  canManageProject = false,
+  autoOpenRepoPicker = false,
+  onRepoPickerOpened,
+}) => {
   const {
     listIntegrations,
     createIntegration,
@@ -39,6 +53,7 @@ export const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({ workspaceI
     deleteIntegration,
     exportToCalendar,
     getCalendarConflicts,
+    refreshData,
   } = useApp();
 
   const getHeaders = () => ({
@@ -225,6 +240,17 @@ export const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({ workspaceI
         >
           {error}
         </div>
+      )}
+
+      {project && (
+        <GitHubRepoConnector
+          projectId={project.id}
+          currentRepo={project.githubRepo}
+          canManage={canManageProject}
+          autoOpen={autoOpenRepoPicker}
+          onAutoOpened={onRepoPickerOpened}
+          onLinked={() => refreshData?.()}
+        />
       )}
 
       {/* Liste des intégrations */}

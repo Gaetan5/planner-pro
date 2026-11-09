@@ -48,6 +48,7 @@ describe('S27 : login sans oracle temporel', () => {
         { provide: RedisService, useValue: new FakeRedisService() },
         { provide: FirebaseIdentityService, useValue: {} },
         { provide: MailService, useValue: {} },
+        { provide: PolicyService, useValue: {} },
       ],
     }).compile();
     service = module.get(AuthService);

@@ -1,3 +1,4 @@
+import { PolicyService } from '../../../src/authz/policy.service';
 import { ConflictException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { JwtModule } from '@nestjs/jwt';
@@ -53,6 +54,7 @@ describe('S9 : OAuth GitHub', () => {
         { provide: RedisService, useValue: new FakeRedisService() },
         { provide: FirebaseIdentityService, useValue: {} },
         { provide: MailService, useValue: {} },
+        { provide: PolicyService, useValue: {} },
       ],
     }).compile();
     service = module.get(AuthService);
