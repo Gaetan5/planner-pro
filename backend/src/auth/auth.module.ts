@@ -5,6 +5,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
+import { devAuthControllers } from './dev-auth';
 import { PrismaModule } from '../prisma/prisma.module';
 import { FirebaseIdentityService } from './firebase-identity.service';
 import { JwtAuthGuard } from './jwt.guard';
@@ -55,7 +56,7 @@ import { FirestoreSyncModule } from '../firestore-sync/firestore-sync.module';
     ScimKeyThrottlerGuard,
     UnverifiedAccountPurgeService,
   ],
-  controllers: [AuthController, SsoController, ScimController],
+  controllers: [AuthController, SsoController, ScimController, ...devAuthControllers()],
   exports: [AuthService, JwtAuthGuard, SsoService, ScimService],
 })
 export class AuthModule {}

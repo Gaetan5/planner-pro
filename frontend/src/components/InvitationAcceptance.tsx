@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { startGitHubAuthorization } from '../github-oauth';
+import { Login } from './Login';
+import { InvitationApiError, clearPendingInvite, savePendingInvite } from '../invitation-store';
 import { ShieldCheck, Loader, AlertCircle, ArrowRight, CheckCircle2 } from 'lucide-react';
 import logo from '../logo.png';
 import './Login.css'; // Réutiliser les styles globaux du login
@@ -8,10 +9,18 @@ import './Login.css'; // Réutiliser les styles globaux du login
 interface InvitationAcceptanceProps {
   token: string;
   onClose: () => void;
+  /** Retour OAuth (GitHub, SSO) en erreur, ou défi MFA en cours : on revient directement à `Login`. */
+  oauthError?: string;
+  initialMfaTicket?: string;
 }
 
-export const InvitationAcceptance: React.FC<InvitationAcceptanceProps> = ({ token, onClose }) => {
-  const { user, logout, mockLogin, checkInvitation, acceptInvitation } = useApp();
+export const InvitationAcceptance: React.FC<InvitationAcceptanceProps> = ({
+  token,
+  onClose,
+  oauthError,
+  initialMfaTicket,
+}) => {
+  const { user, logout, checkInvitation, acceptInvitation } = useApp();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -26,8 +35,14 @@ export const InvitationAcceptance: React.FC<InvitationAcceptanceProps> = ({ toke
   const [accepting, setAccepting] = useState(false);
   const [success, setSuccess] = useState(false);
 
-  // États pour connexion si non connecté
-  const [name, setName] = useState('');
+  // Authentification par le composant `Login` existant (aucun formulaire dupliqué ici, P13-b)
+  const [showLogin, setShowLogin] = useState(Boolean(oauthError || initialMfaTicket));
+  // Un retour OAuth en erreur ou un défi MFA tardif ramène à `Login`, même si l'écran était déjà monté
+  useEffect(() => {
+    if (oauthError || initialMfaTicket) setShowLogin(true);
+  }, [oauthError, initialMfaTicket]);
+  // 403 : l'adresse du compte connecté ne correspond pas à celle de l'invitation (S17)
+  const [mismatch, setMismatch] = useState(false);
 
   // Charger et vérifier le token d'invitation au montage
   useEffect(() => {
@@ -42,6 +57,8 @@ export const InvitationAcceptance: React.FC<InvitationAcceptanceProps> = ({ toke
         const message =
           err instanceof Error ? err.message : "Lien d'invitation invalide, expiré ou révoqué.";
         setError(message);
+        // Jeton invalide, expiré ou révoqué : inutile de le garder
+        clearPendingInvite();
       } finally {
         setLoading(false);
       }
@@ -52,43 +69,40 @@ export const InvitationAcceptance: React.FC<InvitationAcceptanceProps> = ({ toke
     }
   }, [token]);
 
-  const handleGitHubLogin = () => {
-    // `state`, `redirect_uri` et portée minimale sont fixés par le serveur (S9)
-    startGitHubAuthorization().catch(() => alert('Connexion GitHub indisponible.'));
-  };
-
-  const handleBypass = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      await mockLogin(name || 'Collaborateur');
-    } catch {
-      alert("Erreur d'authentification.");
-    }
-  };
-
   const handleAccept = async () => {
     if (!token) return;
     setAccepting(true);
     setError(null);
     try {
       await acceptInvitation(token);
+      clearPendingInvite();
       setSuccess(true);
     } catch (err: unknown) {
       console.error(err);
       const message = err instanceof Error ? err.message : "Impossible d'accepter l'invitation.";
+      if (err instanceof InvitationApiError && err.status === 403) {
+        setMismatch(true);
+      } else {
+        clearPendingInvite();
+      }
       setError(message);
     } finally {
       setAccepting(false);
     }
   };
 
+  // Quitter l'invitation (acceptée, ignorée ou invalide) : le jeton n'est plus nécessaire
   const handleGoToApp = () => {
-    // Nettoyer les paramètres token et invite de l'URL
-    const url = new URL(window.location.href);
-    url.searchParams.delete('token');
-    url.searchParams.delete('invite');
-    window.history.replaceState({}, document.title, url.pathname + (url.search ? url.search : ''));
+    clearPendingInvite();
     onClose();
+  };
+
+  // « Changer de compte » : déconnexion qui conserve l'invitation en attente (P13-c)
+  const handleChangeAccount = () => {
+    savePendingInvite(token);
+    setMismatch(false);
+    setError(null);
+    logout();
   };
 
   if (loading) {
@@ -113,6 +127,50 @@ export const InvitationAcceptance: React.FC<InvitationAcceptanceProps> = ({ toke
           </p>
         </div>
       </div>
+    );
+  }
+
+  if (mismatch && !success) {
+    return (
+      <div className="login-page">
+        <div className="glass-panel login-card" role="alert">
+          <AlertCircle size={48} color="var(--accent-primary)" />
+          <h3 className="login-title" style={{ fontSize: 'var(--font-xl)' }}>
+            Cette invitation est destinée à une autre adresse
+          </h3>
+          <p className="login-subtitle">{error}</p>
+          {inviteInfo?.email && (
+            <p className="login-subtitle">
+              Adresse invitée : <strong>{inviteInfo.email}</strong>
+            </p>
+          )}
+          <button onClick={handleChangeAccount} className="btn-primary">
+            Changer de compte
+          </button>
+          <button onClick={handleGoToApp} className="btn-text">
+            Ignorer l'invitation
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user && showLogin) {
+    return (
+      <Login
+        oauthError={oauthError}
+        initialMfaTicket={initialMfaTicket}
+        invitation={
+          // Bandeau seulement quand les informations de l'invitation sont chargées (P13-f)
+          inviteInfo
+            ? {
+                workspaceName: inviteInfo.workspaceName,
+                maskedEmail: inviteInfo.email,
+                onBack: () => setShowLogin(false),
+              }
+            : undefined
+        }
+      />
     );
   }
 
@@ -230,44 +288,17 @@ export const InvitationAcceptance: React.FC<InvitationAcceptanceProps> = ({ toke
 
         {!user ? (
           <>
-            <div className="login-divider">
-              <div className="login-divider__line"></div>
-              <span className="login-divider__text">CONNECTEZ-VOUS POUR REJOINDRE</span>
-              <div className="login-divider__line"></div>
-            </div>
-
-            <button onClick={handleGitHubLogin} className="github-btn">
-              <svg
-                height="20"
-                width="20"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-                style={{ marginRight: '8px' }}
-              >
-                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
-              </svg>
-              Se connecter avec GitHub
+            {inviteInfo?.email && (
+              <p className="login-subtitle">
+                Invitation destinée à l'adresse <strong>{inviteInfo.email}</strong>.
+              </p>
+            )}
+            <button onClick={() => setShowLogin(true)} className="btn-primary">
+              Se connecter ou créer un compte
             </button>
-
-            <div className="login-divider">
-              <div className="login-divider__line"></div>
-              <span className="login-divider__text">OU CRÉER UN COMPTE DE DÉMO</span>
-              <div className="login-divider__line"></div>
-            </div>
-
-            <form onSubmit={handleBypass} className="bypass-form">
-              <input
-                type="text"
-                required
-                placeholder="Votre prénom / Nom complet"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="form-input"
-              />
-              <button type="submit" className="btn-primary">
-                S'enregistrer et Continuer
-              </button>
-            </form>
+            <button onClick={handleGoToApp} className="btn-text">
+              Ignorer l'invitation
+            </button>
           </>
         ) : (
           <div

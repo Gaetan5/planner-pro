@@ -41,6 +41,7 @@ import { AccountLinkPage } from './components/AccountLinkPage';
 import { isSsoState } from './sso-oauth';
 import { fetchGitHubPurpose } from './github-oauth';
 import { readAccountLink, type AccountLink } from './account-api';
+import { captureInviteFromUrl, clearPendingInvite, readPendingInvite } from './invitation-store';
 import logo from './logo.png';
 import './App.css';
 
@@ -65,15 +66,15 @@ function AppWithSession() {
   const [oauthMfaTicket, setOauthMfaTicket] = useState<string | null>(null);
   // Lien reçu par e-mail (vérification d'adresse, réinitialisation) : jeton retiré de l'URL (P6)
   const [accountLink, setAccountLink] = useState<AccountLink | null>(() => readAccountLink());
-  const [inviteToken, setInviteToken] = useState<string | null>(() => {
-    const params = new URLSearchParams(window.location.search);
-    return params.get('token') || params.get('invite');
-  });
+  // Jeton d'invitation : retiré de l'URL dès le montage, conservé 30 min en sessionStorage pour
+  // survivre aux retours GitHub, SSO, Firebase et au défi MFA (P13-a)
+  const [inviteToken, setInviteToken] = useState<string | null>(
+    () => captureInviteFromUrl() ?? readPendingInvite(),
+  );
 
   useEffect(() => {
     const checkInviteParam = () => {
-      const params = new URLSearchParams(window.location.search);
-      const token = params.get('token') || params.get('invite');
+      const token = captureInviteFromUrl();
       if (token && token !== inviteToken) {
         setInviteToken(token);
       }
@@ -153,7 +154,14 @@ function AppWithSession() {
   }
 
   if (inviteToken) {
-    return <InvitationAcceptance token={inviteToken} onClose={() => setInviteToken(null)} />;
+    return (
+      <InvitationAcceptance
+        token={inviteToken}
+        onClose={() => setInviteToken(null)}
+        oauthError={oauthError ?? undefined}
+        initialMfaTicket={oauthMfaTicket ?? undefined}
+      />
+    );
   }
 
   if (handlingOAuth) {
@@ -366,7 +374,14 @@ function AppWithSession() {
             >
               <ShieldCheck size={16} />
             </button>
-            <button onClick={logout} className="btn-icon btn-icon--danger" title="Se déconnecter">
+            <button
+              onClick={() => {
+                clearPendingInvite();
+                logout();
+              }}
+              className="btn-icon btn-icon--danger"
+              title="Se déconnecter"
+            >
               <LogOut size={16} />
             </button>
           </div>

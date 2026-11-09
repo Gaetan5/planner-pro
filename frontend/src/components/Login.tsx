@@ -9,12 +9,17 @@ import './Login.css';
 
 const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
+const INVITE_AFTER_SIGNUP =
+  "Après avoir validé votre adresse, rouvrez le lien d'invitation ou revenez dans cet onglet.";
+
 export const Login: React.FC<{
   oauthError?: string;
   isLoadingOAuth?: boolean;
   /** Ticket MFA obtenu par un retour OAuth (GitHub, SSO). */
   initialMfaTicket?: string;
-}> = ({ oauthError, isLoadingOAuth = false, initialMfaTicket }) => {
+  /** Contexte d'invitation (P13) : bandeau, adresse masquée seulement (S27), retour à l'invitation. */
+  invitation?: { workspaceName: string; maskedEmail?: string | null; onBack: () => void };
+}> = ({ oauthError, isLoadingOAuth = false, initialMfaTicket, invitation }) => {
   const { mockLogin, classicLogin, classicRegister, firebaseLogin, verifyMfa, discoverSso } =
     useApp();
   const [isRegisterMode, setIsRegisterMode] = useState(false);
@@ -194,7 +199,7 @@ export const Login: React.FC<{
     try {
       // Réponse générique : aucune session avant la confirmation de l'adresse par e-mail (P6)
       const message = await classicRegister(regEmail, regPassword, regName);
-      setInfoMsg(message);
+      setInfoMsg(invitation ? `${message} ${INVITE_AFTER_SIGNUP}` : message);
       setLoginEmail(regEmail);
       setRegPassword('');
       setIsRegisterMode(false);
@@ -262,7 +267,11 @@ export const Login: React.FC<{
         await updateProfile(credential.user, { displayName: regName.trim() });
         await sendEmailVerification(credential.user);
         setIsRegisterMode(false);
-        setInfoMsg('Compte créé. Vérifie ton adresse e-mail avant de te connecter.');
+        setInfoMsg(
+          `Compte créé. Vérifie ton adresse e-mail avant de te connecter.${
+            invitation ? ` ${INVITE_AFTER_SIGNUP}` : ''
+          }`,
+        );
         return;
       }
 
@@ -310,6 +319,21 @@ export const Login: React.FC<{
             Le hub de planification immersif pour ingénieurs d'élite.
           </p>
         </div>
+
+        {invitation && (
+          <div className="login-invitation-banner" role="note" aria-label="Invitation en attente">
+            Invitation à rejoindre <strong>{invitation.workspaceName}</strong>
+            {invitation.maskedEmail ? (
+              <>
+                , connectez-vous avec l'adresse <strong>{invitation.maskedEmail}</strong>
+              </>
+            ) : null}
+            .{' '}
+            <button type="button" className="btn-text" onClick={invitation.onBack}>
+              Retour à l'invitation
+            </button>
+          </div>
+        )}
 
         {isFirebaseAuthConfigured && (
           <div className="auth-tabs" aria-label="Type de compte">
@@ -724,24 +748,26 @@ export const Login: React.FC<{
           GitHub SSO
         </button>
 
-        {/* Local bypass mode */}
-        <div className="bypass-section">
-          <details className="bypass-details">
-            <summary className="bypass-summary">Simuler une session locale (Dev)</summary>
-            <form onSubmit={handleBypass} className="bypass-form">
-              <input
-                type="text"
-                placeholder="Entrez votre prénom"
-                value={bypassName}
-                onChange={(e) => setBypassName(e.target.value)}
-                className="form-input form-input-sm"
-              />
-              <button type="submit" className="btn-secondary btn-sm btn-block">
-                Simuler Connexion
-              </button>
-            </form>
-          </details>
-        </div>
+        {/* Compte de démonstration : développement seulement, éliminé du build de production (P13-d) */}
+        {import.meta.env.DEV && (
+          <div className="bypass-section">
+            <details className="bypass-details">
+              <summary className="bypass-summary">Simuler une session locale (Dev)</summary>
+              <form onSubmit={handleBypass} className="bypass-form">
+                <input
+                  type="text"
+                  placeholder="Entrez votre prénom"
+                  value={bypassName}
+                  onChange={(e) => setBypassName(e.target.value)}
+                  className="form-input form-input-sm"
+                />
+                <button type="submit" className="btn-secondary btn-sm btn-block">
+                  Simuler Connexion
+                </button>
+              </form>
+            </details>
+          </div>
+        )}
       </div>
     </div>
   );

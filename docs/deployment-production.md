@@ -295,3 +295,7 @@ vers un stockage hors VM avec accès dédié et rétention indépendante.
 6. Transférer les fichiers `.sql.gz.gpg` vers un stockage chiffré hors de la VM et
    surveiller la réussite des transferts. La rétention locale de 30 jours ne remplace
    pas une copie hors site ni un test de restauration.
+
+## Connexion simulée (développement uniquement)
+
+La route `POST /auth/mock/login` (compte de démonstration) n'est enregistrée que si `NODE_ENV=development` **et** `ENABLE_DEV_AUTH=true`. Dans tous les autres cas (production, préproduction, `NODE_ENV` absent), elle n'existe pas (404). Ne jamais définir `ENABLE_DEV_AUTH` en production. Le build frontend de production ne contient plus ni la route ni le formulaire de démonstration.

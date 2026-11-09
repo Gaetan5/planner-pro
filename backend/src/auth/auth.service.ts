@@ -1,6 +1,8 @@
 import {
+  Inject,
   Injectable,
   Logger,
+  Optional,
   UnauthorizedException,
   BadRequestException,
   ConflictException,
@@ -21,6 +23,7 @@ import { TokenService, MFA_TICKET_TTL_SECONDS } from './token.service';
 import { SessionService } from './session.service';
 import { LoginResult, MfaLoginResult, SessionLoginResult } from './login-result';
 import { isFeatureEnabled } from '../config/features';
+import { isDevAuthEnabled } from './dev-auth-flag';
 import { RedisService } from '../redis/redis.service';
 import { MailService } from '../mail/mail.service';
 
@@ -59,7 +62,9 @@ const sha256 = (value: string) => createHash('sha256').update(value).digest('hex
 /** Nombre maximal d'essais de code par ticket MFA (S3). */
 const MFA_TICKET_MAX_ATTEMPTS = 5;
 /** Délai maximal d'un appel Redis du parcours MFA : au-delà, 503 plutôt qu'une requête bloquée. */
-const MFA_REDIS_TIMEOUT_MS = 2000;
+export const MFA_REDIS_TIMEOUT_MS = 2000;
+/** Jeton d'injection du délai Redis (O19) : les tests le raccourcissent, la production garde 2 s. */
+export const MFA_REDIS_TIMEOUT_TOKEN = 'MFA_REDIS_TIMEOUT_MS';
 
 /** Contexte client d'une connexion (A3) : transmis à l'émission de la session. */
 export interface LoginContext {
@@ -156,6 +161,9 @@ export class AuthService {
     private readonly redis: RedisService,
     private readonly sessionService: SessionService,
     private readonly mail: MailService,
+    @Optional()
+    @Inject(MFA_REDIS_TIMEOUT_TOKEN)
+    private readonly redisTimeoutMs: number = MFA_REDIS_TIMEOUT_MS,
   ) {}
 
   /**
@@ -493,8 +501,9 @@ export class AuthService {
    * Login simulé pour le développement local.
    */
   async mockLogin(name: string, ctx: LoginContext = {}): Promise<LoginResult> {
-    if (process.env.NODE_ENV === 'production') {
-      throw new BadRequestException("Le mode simulation n'est pas disponible en production.");
+    // Défense en profondeur : la route n'existe de toute façon que dans ce cas (P13-e)
+    if (!isDevAuthEnabled()) {
+      throw new BadRequestException("Le mode simulation n'est pas disponible.");
     }
 
     const sessionId = randomUUID();
@@ -1180,7 +1189,7 @@ export class AuthService {
   private async withRedisTimeout<T>(operation: () => Promise<T>): Promise<T> {
     let timer: NodeJS.Timeout | undefined;
     const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error('Délai Redis dépassé')), MFA_REDIS_TIMEOUT_MS);
+      timer = setTimeout(() => reject(new Error('Délai Redis dépassé')), this.redisTimeoutMs);
     });
     try {
       return await Promise.race([operation(), timeout]);

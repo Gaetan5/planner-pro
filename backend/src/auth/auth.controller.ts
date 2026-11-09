@@ -400,20 +400,6 @@ export class AuthController {
   }
 
   /**
-   * Endpoint de login simulé pour le développement local
-   */
-  @Public()
-  @Post('mock/login')
-  async mockLogin(
-    @Body() body: { name: string },
-    @Req() req: Request,
-    @Res({ passthrough: true }) res: Response,
-  ) {
-    const result = await this.authService.mockLogin(body.name, { userAgent: userAgentOf(req) });
-    return respondWithLogin(res, result);
-  }
-
-  /**
    * Récupère les dépôts GitHub de l'utilisateur connecté
    */
   @Get('github/repos')

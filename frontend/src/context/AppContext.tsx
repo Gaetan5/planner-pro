@@ -10,6 +10,7 @@ import React, {
 } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { SESSION_EXPIRED_EVENT, refreshSession } from '../api-session';
+import { invitationErrorFrom, isInviteToken } from '../invitation-store';
 
 export interface TaskAssignee {
   id: string;
@@ -456,6 +457,19 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 
 const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
+/** Connexion simulée : définie en développement seulement (voir `mockLogin`). */
+const requestMockLogin = import.meta.env.DEV
+  ? async (name: string) => {
+      const res = await fetch(`${BACKEND_URL}/auth/mock/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name || 'Gaëtan' }),
+      });
+      if (!res.ok) throw new Error('Échec simulation login');
+      return res.json();
+    }
+  : null;
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [apiError, setApiError] = useState<string | null>(null);
   const [user, setUser] = useState<AppContextType['user']>(null);
@@ -884,20 +898,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  // Absent du build de production : `import.meta.env.DEV` vaut `false` et la fonction de
+  // simulation (donc la route `mock/login`) est éliminée du paquet (P13-d).
   const mockLogin = async (name: string) => {
-    try {
-      const res = await fetch(`${BACKEND_URL}/auth/mock/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name || 'Gaëtan' }),
-      });
-      if (!res.ok) throw new Error('Échec simulation login');
-      const data = await res.json();
-      applyLoginResponse(data);
-    } catch (e) {
-      console.error(e);
-      throw e;
-    }
+    if (!requestMockLogin) throw new Error('Connexion simulée indisponible.');
+    applyLoginResponse(await requestMockLogin(name));
   };
 
   const classicLogin = async (email: string, passwordRaw: string) => {
@@ -1478,20 +1483,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const checkInvitation = async (token: string) => {
-    const res = await fetch(`${BACKEND_URL}/projects/invitations/check/${token}`);
+    if (!isInviteToken(token)) throw new Error("Lien d'invitation invalide ou expiré.");
+    const res = await fetch(
+      `${BACKEND_URL}/projects/invitations/check/${encodeURIComponent(token)}`,
+    );
     if (!res.ok) {
-      throw new Error((await res.text()) || "Lien d'invitation invalide ou expiré.");
+      throw await invitationErrorFrom(res, "Lien d'invitation invalide ou expiré.");
     }
     return res.json();
   };
 
   const acceptInvitation = async (token: string) => {
-    const res = await fetch(`${BACKEND_URL}/projects/invitations/accept/${token}`, {
-      method: 'POST',
-      headers: getHeaders(),
-    });
+    if (!isInviteToken(token)) throw new Error("Lien d'invitation invalide ou expiré.");
+    const res = await fetch(
+      `${BACKEND_URL}/projects/invitations/accept/${encodeURIComponent(token)}`,
+      {
+        method: 'POST',
+        headers: getHeaders(),
+      },
+    );
     if (!res.ok) {
-      throw new Error((await res.text()) || "Impossible d'accepter l'invitation.");
+      throw await invitationErrorFrom(res, "Impossible d'accepter l'invitation.");
     }
     const data = await res.json();
     refreshData();

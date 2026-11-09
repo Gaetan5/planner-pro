@@ -1,7 +1,7 @@
 import { Controller, Get, INestApplication, UseGuards } from '@nestjs/common';
 import { JwtModule, JwtService } from '@nestjs/jwt';
 import { AuthController } from '../../src/auth/auth.controller';
-import { AuthService } from '../../src/auth/auth.service';
+import { AuthService, MFA_REDIS_TIMEOUT_TOKEN } from '../../src/auth/auth.service';
 import { FirebaseIdentityService } from '../../src/auth/firebase-identity.service';
 import { JwtAuthGuard } from '../../src/auth/jwt.guard';
 import { hashPassword } from '../../src/auth/encryption.util';
@@ -16,10 +16,12 @@ import { FakeRedisService } from './fake-redis';
 import { startHttpTestApp } from './http-test-app';
 
 /**
- * Le délai Redis est de 2 s (borne le parcours) ; la marge de 1 s absorbe la vérification Argon2 du
- * mot de passe et la charge des exécutions parallèles de la suite.
+ * O19 : le délai Redis est injecté à 200 ms pour ce test (2 s en production). Un Redis suspendu
+ * doit donc répondre bien avant 2 s, quelle que soit la charge : la marge d'environ 1,8 s absorbe
+ * Argon2 et l'ordonnancement. Le délai par défaut de 2 s est vérifié dans `mfa-redis-timeout.spec.ts`.
  */
-const MAX_RESPONSE_MS = 3000;
+const TEST_REDIS_TIMEOUT_MS = 200;
+const MAX_RESPONSE_MS = 2000;
 
 const mailStub = {
   sendEmailVerificationEmail: jest.fn().mockResolvedValue(true),
@@ -74,6 +76,7 @@ describe('S3 : séparation ticket MFA / jeton d’accès (HTTP)', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: FirebaseIdentityService, useValue: {} },
         { provide: RedisService, useValue: redis },
+        { provide: MFA_REDIS_TIMEOUT_TOKEN, useValue: TEST_REDIS_TIMEOUT_MS },
       ],
     }));
   });
@@ -196,7 +199,7 @@ describe('S3 : séparation ticket MFA / jeton d’accès (HTTP)', () => {
     };
 
     it.each(['reject', 'hang'] as const)(
-      'POST /auth/login (compte MFA), Redis en mode %s : 503 en moins de 2,5 s, sans ticket',
+      'POST /auth/login (compte MFA), Redis en mode %s : 503 en moins de 2 s, sans ticket',
       async (mode) => {
         redis.mode = mode;
         const { res, elapsed, body } = await timed(() =>
@@ -210,7 +213,7 @@ describe('S3 : séparation ticket MFA / jeton d’accès (HTTP)', () => {
     );
 
     it.each(['reject', 'hang'] as const)(
-      'POST /auth/mfa/challenge, Redis en mode %s : 503 en moins de 2,5 s, sans jeton',
+      'POST /auth/mfa/challenge, Redis en mode %s : 503 en moins de 2 s, sans jeton',
       async (mode) => {
         const ticket = await login();
         redis.mode = mode;

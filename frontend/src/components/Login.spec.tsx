@@ -185,4 +185,43 @@ describe('Login : parcours de compte par e-mail (P6)', () => {
     fireEvent.submit(container.querySelector('form')!);
     expect(await screen.findByText("Renvoyer l'e-mail de confirmation")).toBeInTheDocument();
   });
+
+  it("invitation : bandeau avec l'adresse masquée, et message de fin d'inscription adapté (P13-b)", async () => {
+    const classicRegister = vi.fn().mockResolvedValue('Un e-mail de confirmation vient de partir.');
+    setup({ classicRegister });
+    const onBack = vi.fn();
+    const { container } = render(
+      <Login invitation={{ workspaceName: 'Atelier', maskedEmail: 'a***@c***.com', onBack }} />,
+    );
+    const banner = screen.getByRole('note', { name: 'Invitation en attente' });
+    expect(banner).toHaveTextContent('Atelier');
+    expect(banner).toHaveTextContent('a***@c***.com');
+    fireEvent.click(screen.getByText("Retour à l'invitation"));
+    expect(onBack).toHaveBeenCalled();
+
+    fireEvent.click(screen.getAllByText("S'inscrire")[0]);
+    const inputs = container.querySelectorAll('form input');
+    fireEvent.change(inputs[0], { target: { value: 'Ada' } });
+    fireEvent.change(inputs[1], { target: { value: 'ada@corp.com' } });
+    fireEvent.change(inputs[2], { target: { value: 'MotDePasse!2026' } });
+    fireEvent.submit(container.querySelector('form')!);
+    expect(await screen.findByText(/rouvrez le lien d'invitation/)).toBeInTheDocument();
+  });
+
+  it('sans invitation : pas de bandeau ni de mention du lien d’invitation', async () => {
+    setup({});
+    render(<Login />);
+    expect(screen.queryByRole('note', { name: 'Invitation en attente' })).not.toBeInTheDocument();
+  });
+
+  it('compte de démo : proposé en développement seulement, erreur dans un encart (pas d’alert)', async () => {
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => undefined);
+    const mockLogin = vi.fn().mockRejectedValue(new Error('Connexion simulée indisponible.'));
+    setup({ mockLogin });
+    render(<Login />);
+    expect(import.meta.env.DEV).toBe(true);
+    fireEvent.click(screen.getByText('Simuler Connexion'));
+    expect(await screen.findByText('Connexion simulée indisponible.')).toBeInTheDocument();
+    expect(alertSpy).not.toHaveBeenCalled();
+  });
 });

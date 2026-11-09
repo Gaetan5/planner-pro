@@ -66,6 +66,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Build
         run: pnpm build
+      - name: Aucune connexion simulée dans le build de production
+        # `! grep` seul ne ferait pas échouer l'étape sous `bash -e` : test explicite (P13-f)
+        run: |
+          ls frontend/dist/assets/*.js > /dev/null
+          if grep -l -e "mock/login" -e "Simuler une session" frontend/dist/assets/*.js; then
+            echo "La connexion simulée est présente dans le build de production" >&2
+            exit 1
+          fi
       - name: Lint
         run: pnpm lint
       - name: Test Frontend

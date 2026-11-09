@@ -410,3 +410,12 @@
     padding: var(--space-md);
   }
 }
+
+.login-invitation-banner {
+  padding: var(--space-sm);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background-color: rgba(255, 255, 255, 0.03);
+  font-size: var(--font-sm);
+  color: var(--text-secondary);
+}

@@ -116,13 +116,32 @@ describe('AuthService', () => {
       .mockResolvedValueOnce({ id: 'demo-1', email: 'demo-1@local.planner.pro', name: 'Ada' })
       .mockResolvedValueOnce({ id: 'demo-2', email: 'demo-2@local.planner.pro', name: 'Ada' });
 
-    await service.mockLogin('Ada');
-    await service.mockLogin('Ada');
+    const saved = { ...process.env };
+    process.env.NODE_ENV = 'development';
+    process.env.ENABLE_DEV_AUTH = 'true';
+    try {
+      await service.mockLogin('Ada');
+      await service.mockLogin('Ada');
+    } finally {
+      process.env = saved;
+    }
 
     const [firstCall, secondCall] = prisma.user.create.mock.calls;
     expect(firstCall[0].data.email).not.toBe(secondCall[0].data.email);
     expect(firstCall[0].data.githubId).not.toBe(secondCall[0].data.githubId);
     expect(prisma.user.create).toHaveBeenCalledTimes(2);
+  });
+
+  it('P13-e : la connexion simulée est refusée sans développement explicite, aucun compte créé', async () => {
+    const saved = { ...process.env };
+    process.env.NODE_ENV = 'development';
+    delete process.env.ENABLE_DEV_AUTH;
+    try {
+      await expect(service.mockLogin('Ada')).rejects.toThrow(BadRequestException);
+    } finally {
+      process.env = saved;
+    }
+    expect(prisma.user.create).not.toHaveBeenCalled();
   });
 
   it('S8 : refuse la liaison automatique d’une identité Firebase à un compte existant (409)', async () => {

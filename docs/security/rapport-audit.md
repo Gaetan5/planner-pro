@@ -4134,3 +4134,241 @@ Un lot par point, chacun revu séparément.
    - non bloquant r26 : configuration SSO pour `ssoUid` ;
    - exploitation : actions 1 à 4 de S30 ;
    - Phases 5 et 6 : S19 à S26 (hors volet `mock/login`), A5 à A9, P2, P5, P7, P8, Q-2, O10 à O17.
+
+## Revue r30 — O19 et P13 (option B, volet `mock/login` de S26) : VALIDÉ ; nouveau constat S32 (2026-11-05)
+
+Revue de la section « Lot r29 (fixeur) » du journal. J'ai relu le code et relancé les mesures. J'ai joué 22 contre-mutations : 20 sur les tests, 2 sur le build de production. Script hors dépôt, restauration vérifiée par `filecmp`, `git status --porcelain` et `md5sum` des 23 fichiers du lot identiques avant et après. J'ai aussi vérifié empiriquement que la route simulée est bien enregistrée à partir d'un fichier `.env`. Aucun commit ; le dossier d'agent local n'a pas été touché. L'historique a été réécrit depuis r29 : les identifiants de commit cités désormais sont `7fc9eb7` et `fb7d263`.
+
+**Verdict** :
+
+- **O19 : VALIDÉ.**
+- **P13-a à P13-e : VALIDÉ.** Deux tests manquent et sont à ajouter au lot suivant (P13-f, non bloquant).
+- **Nouveau constat S32 (Mineur)** : traversée de chemin côté client par le jeton d'invitation. Le défaut est préexistant, mais P13 l'a rendu plus durable (jeton conservé en `sessionStorage`). À traiter en tête du lot suivant.
+
+### Mesures (relancées par l'architecte)
+
+| Commande | Résultat |
+| --- | --- |
+| `cd backend && env -u DATABASE_URL npx jest` (seul) | **85/85 suites, 2450/2450** |
+| Même commande, lancée **en même temps** que `pnpm test:run` du frontend (critère O19) | **2450/2450**, `mfa-ticket.spec.ts` vert |
+| `nest build` ; `tsc --noEmit -p tsconfig.build.json` | exit 0 ; exit 0 |
+| `cd frontend && pnpm test:run` ; `tsc --noEmit -p .` ; `pnpm build` | **23 fichiers, 124/124** ; exit 0 ; build OK |
+| `grep -l "mock/login" frontend/dist/assets/*.js` ; `grep -l "Simuler" frontend/dist/assets/*.js` | **vides** (exit 1) |
+| `pnpm lint` racine ; Prettier (`backend/src/auth`, tests du lot, `frontend/src`, `docs/deployment-production.md`) | **0 erreur** (53 avertissements préexistants) ; conforme |
+| Module compilé chargé avec un `.env` seul, dans un répertoire de test | `ENABLE_DEV_AUTH=true` et `NODE_ENV=development` : `DevAuthController` enregistré ; `ENABLE_DEV_AUTH=false` : absent ; `NODE_ENV=production` et `ENABLE_DEV_AUTH=true` : absent |
+
+Sur le dernier point : `devAuthControllers()` est évalué au chargement du décorateur `@Module`. Dans le même littéral, `ConfigModule.forRoot()`, placé dans `imports`, est évalué avant `controllers` et charge `.env` de façon synchrone. La configuration par fichier `.env` fonctionne donc en développement. En production, elle reste fermée par défaut.
+
+### Contre-mutations de l'architecte
+
+| ID | Mutation | Résultat |
+| --- | --- | --- |
+| BM1 | Drapeau : `&&` remplacé par `\|\|` | **Détectée** (9) |
+| BM2 | `NODE_ENV === 'development'` remplacé par `!== 'production'` | **Détectée** (3) |
+| BM3 | `DevAuthController` toujours enregistré | **Détectée** (10) |
+| BM4 | Garde de défense en profondeur de `AuthService.mockLogin` retirée | **Détectée** (1) |
+| BM5, BM6 | `@Throttle` retiré ; `@MaxLength(80)` retiré | **Détectées** (1 ; 1) |
+| BM7 | Délai Redis injecté ignoré (constante utilisée) | **Détectée** (3) |
+| BM8 | Délai par défaut passé à 20 000 ms | **Détectée** (2) |
+| FM1 | Jeton laissé dans l'URL | **Détectée** (3) |
+| FM2 | `localStorage` au lieu de `sessionStorage` | **Détectée** (8) |
+| FM3 ; FM4 | Expiration ignorée ; durée de vie de 30 jours | **Détectées** (2 ; 1) |
+| FM5 | Un 403 efface l'invitation en attente (« Changer de compte » la perd) | **Détectée** (1) |
+| FM6 | Entrée conservée après l'acceptation | **Détectée** (1) |
+| FM7 | Entrée conservée quand le jeton est invalide | **Non détectée**. Effet limité : l'écran « Invitation invalide » réapparaît au rechargement pendant 30 min au plus. Voir P13-f |
+| FM8 | Bandeau de `Login` sans l'adresse masquée | **Détectée** (1) |
+| FM9 | `App` ignore l'entrée en attente | **Détectée** (3) |
+| FM10 | État initial `showLogin` à `false` malgré un retour OAuth en erreur | Non détectée, **équivalente** : l'effet suivant le remet à `true` au premier rendu |
+| FM11 | La déconnexion par l'en-tête ne supprime plus l'entrée | **Non détectée**. Le comportement exigé par P13-a est présent mais non testé. Voir P13-f |
+| FM12 | Acceptation automatique dès que l'utilisateur est connecté | **Détectée** (1) |
+| FB1 | Formulaire de démonstration rendu sans condition (build) | **Détectée** par `grep "Simuler"` sur `dist`. `grep "mock/login"` **ne la détecte pas** : la requête reste éliminée |
+| FB2 | `requestMockLogin` défini sans condition (build) | **Détectée** (`grep "mock/login"` trouve le paquet) |
+
+### Verdict par point
+
+| Point | Verdict | Preuve |
+| --- | --- | --- |
+| O19 | **VALIDÉ** | Délai injectable (`MFA_REDIS_TIMEOUT_TOKEN`, `@Optional`, 2000 ms par défaut, inchangé en production). Le test HTTP utilise 200 ms et une borne de 2 s. `mfa-redis-timeout.spec.ts` vérifie la valeur par défaut et la non-expiration à 1999 ms avec des minuteries simulées. Vert en charge concurrente ; BM7 et BM8 détectées |
+| P13-a | **VALIDÉ**, réserve P13-f | `invitation-store.ts` : jeton retiré de l'URL à la lecture, `sessionStorage` seulement, 30 min, entrée illisible ou expirée supprimée. `App.tsx:72` lit l'URL puis l'entrée en attente |
+| P13-b | **VALIDÉ** | `InvitationAcceptance` ne contient plus aucun formulaire d'authentification et réutilise `Login`. Le bandeau montre l'adresse masquée, avec « Retour à l'invitation ». L'acceptation se fait sur clic explicite (FM12). Le message de fin d'inscription est adapté. Le retour OAuth en erreur et le défi MFA ramènent à `Login` |
+| P13-c | **VALIDÉ** | Un 403 affiche l'adresse masquée, « Changer de compte » (déconnexion qui conserve l'entrée) et « Ignorer » |
+| P13-d | **VALIDÉ** | Le formulaire et la requête de démonstration ne sont présents qu'avec `import.meta.env.DEV`, et absents du paquet de production (FB1, FB2). `alert()` est supprimé |
+| P13-e (S26, volet `mock/login`) | **VALIDÉ** | `isDevAuthEnabled` : `development` **et** `ENABLE_DEV_AUTH === 'true'` (fermé par défaut). Contrôleur dédié enregistré seulement dans ce cas (404 sinon), `MockLoginDto` (1 à 80 caractères), `@Throttle` 5/min, garde dans le service en plus. `docs/deployment-production.md` documente le drapeau. S26 reste ouvert pour ses autres volets |
+
+#### P13-f (Mineur, tests ; à faire avec le lot suivant)
+
+- `App` : un test vérifie qu'un clic sur « Se déconnecter » dans l'en-tête supprime `planner_pending_invite` (FM11), et qu'une déconnexion provoquée par `SESSION_EXPIRED_EVENT` la conserve (comportement de la question 3).
+- `InvitationAcceptance` : un test vérifie qu'un jeton refusé par `check` supprime l'entrée (FM7).
+- Cosmétique : si `check` échoue alors qu'un retour OAuth en erreur est présent, `Login` s'affiche avec un bandeau sans nom d'espace (« Invitation à rejoindre . »). Afficher le bandeau seulement si `inviteInfo` est chargé.
+- Contrôle de build, à ajouter en CI (`ci.yml`, étape après `pnpm build`) : `! grep -l -e "mock/login" -e "Simuler une session" frontend/dist/assets/*.js`.
+
+### Nouveau constat r30
+
+#### S32 (Mineur) : traversée de chemin côté client par le jeton d'invitation (requêtes authentifiées vers d'autres routes de l'API)
+
+- **Fichiers** : `frontend/src/context/AppContext.tsx:1484-1503`. `checkInvitation` (`GET …/projects/invitations/check/${token}`, au montage) et `acceptInvitation` (`POST …/accept/${token}`, au clic) concatènent le jeton **sans `encodeURIComponent` ni contrôle de format**. Le jeton vient de `?token=` (décodé par `URLSearchParams`) puis, depuis P13-a, de `sessionStorage`. Le défaut est **préexistant** (déjà présent à HEAD) ; P13 ne l'a pas introduit.
+- **Démonstration** : `?token=..%2F..%2F..%2Fauth%2Flogout` donne le jeton `../../../auth/logout`. `new URL('…/projects/invitations/accept/' + jeton)` est normalisé en `/auth/logout`. Le `fetch` global ajoute `credentials: 'include'` (`api-session.ts:91`), et la requête part de l'origine légitime, donc `originCheckMiddleware` l'accepte.
+- **Scénario** : un lien d'invitation forgé, envoyé par courriel ou par messagerie, fait émettre par le navigateur de la victime connectée :
+  - une requête `GET` authentifiée vers une route arbitraire de l'API, au chargement de la page ;
+  - puis, si cette réponse est un 200 qui ressemble à une invitation, une requête `POST` authentifiée au corps vide vers la même route, lors du clic sur « Accepter ».
+
+  C'est l'équivalent d'une CSRF à travers l'application elle-même (CWE-22 et CWE-352, client-side path traversal).
+- **Sévérité** : Mineur. CVSS 3.1 : 3.1 (`AV:N/AC:H/PR:N/UI:R/S:U/C:N/I:L/A:N`). L'exploitation exige un clic sur le lien, une route qui réponde 200 en `GET` **et** agisse en `POST` sans corps, ainsi qu'un clic sur « Accepter ». La lecture ne fuit pas vers l'attaquant (la réponse n'est affichée qu'à la victime). Le risque augmentera avec des routes `POST` sans corps comme `POST /auth/sessions/revoke-others` (P9-S).
+- **Remédiation attendue** :
+  - `invitation-store.ts` : `isInviteToken(token)` = `/^[a-f0-9]{64}$/` (format émis par `invitations.service.ts:117`, `randomBytes(32).toString('hex')`). `captureInviteFromUrl` retire toujours le paramètre de l'URL, mais **n'enregistre ni ne renvoie** un jeton invalide ; `readPendingInvite` supprime une entrée invalide ;
+  - `AppContext.tsx` : `encodeURIComponent(token)` dans les deux URL, en défense en profondeur ;
+  - autres `fetch` de l'application qui insèrent une valeur venue de l'URL ou du stockage dans un **chemin** (`grep -n '\${[a-zA-Z]*}' frontend/src/**/*.ts*` sur les appels à l'API) : encoder ces segments et les lister dans le journal.
+- **Tests attendus** :
+  - `invitation-store.spec.ts` : `?token=../../auth/logout` donne `null`, le paramètre est retiré de l'URL et rien n'est enregistré ; une entrée en attente au format invalide est supprimée ; un jeton hexadécimal de 64 caractères est accepté ;
+  - `App.invitation-return.spec.tsx` ou un test du contexte : avec un jeton qui contient `/`, aucun `fetch` ne part vers un chemin hors de `/projects/invitations/` ;
+  - la contre-mutation « encodage retiré **et** validation retirée » doit faire échouer au moins un test.
+- **Critère d'acceptation** : aucune valeur venue de l'URL ou du stockage du navigateur ne peut modifier le chemin d'une requête vers l'API.
+
+### Réponses aux questions du fixeur
+
+1. **`.env.example` : oui, ajouter la ligne. C'est la session principale (ou l'utilisateur) qui s'en charge**, puisque ni le fixeur ni l'architecte ne modifient les fichiers `.env*`. Ce n'est pas bloquant, car une variable absente vaut « désactivé ». Texte à placer juste après le bloc `NODE_ENV=development` (vers la ligne 62) :
+
+   ```
+   # Connexion simulée POST /auth/mock/login (S26, P13-e) : n'existe que si NODE_ENV=development
+   # ET ENABLE_DEV_AUTH=true. Ne jamais l'activer en production ni en préproduction.
+   ENABLE_DEV_AUTH=false
+   ```
+
+2. **Jeton dans le chemin de `check` et `accept` : accepté en l'état, avec une amélioration non bloquante.** Le risque est borné : jeton haché en base, à usage unique, avec expiration, et adresse imposée par S17, donc un jeton lu dans un journal ne sert qu'au titulaire de l'adresse invitée. Amélioration à faire la prochaine fois que l'API des invitations est modifiée : passer le jeton dans le corps (`POST /projects/invitations/check` et `/accept` avec `{ token }`), ou exclure ces chemins des journaux d'accès du proxy. **Distinct** de ce point, le défaut de construction de l'URL côté client est traité par S32.
+3. **Invitation conservée après une déconnexion par expiration ou par 401 : VALIDÉ.** La fenêtre est d'au plus 30 minutes, dans le même onglet (`sessionStorage`). L'acceptation exige une session complète et une adresse identique (S17), et l'utilisateur peut toujours cliquer « Ignorer ». Seule la déconnexion explicite supprime l'entrée, ce qui est conforme à P13-a. Ce comportement doit être couvert par un test (P13-f).
+
+### Exigences complémentaires pour P9-S et P9-R
+
+Les exigences de r29 restent valables. Compléments :
+
+- **Ordre du lot suivant** :
+  1. **S32 et P13-f** (petits ; S32 avant P9-S, qui ajoute une route `POST` sans corps) ;
+  2. **P9-S** ;
+  3. **P9-R**.
+- **P9-S** :
+  - `POST /auth/sessions/revoke-others` n'a pas de corps : la route est concernée par S32, qui doit donc être livré avant ;
+  - `DELETE /auth/sessions/:sid` est appelé avec `encodeURIComponent(sid)`. Le format de `sid` est validé côté serveur (`ParseUUIDPipe`, ou expression régulière du format de `familyId`), avec un 400 sinon.
+- **P9-R** :
+  - l'entrée `planner_pending_repo` suit les mêmes règles que l'invitation en attente : `sessionStorage`, échéance, format de `projectId` validé à la lecture, segments encodés ;
+  - `repoFullName` est transmis **dans le corps** de `POST /auth/github/sync`, jamais dans un chemin.
+
+### Statut des constats
+
+| ID | Statut r30 |
+| --- | --- |
+| O19 | **VALIDÉ** |
+| P13 (P13-a à P13-e) | **VALIDÉ** ; P13-f (tests, Mineur) ouvert, non bloquant |
+| S26, volet `mock/login` | **VALIDÉ** (autres volets de S26 ouverts) |
+| **S32** | Nouveau, Mineur (CVSS 3.1), préexistant |
+| P9-S, P9-R | Ouverts, non commencés |
+
+**Commit** : le lot O19 et P13 peut être commité. Il comprend les 23 fichiers listés par `git status`, le rapport et le journal ; sans le dossier d'agent local. Changement cassant : `POST /auth/mock/login` renvoie 404 sauf si `NODE_ENV=development` et `ENABLE_DEV_AUTH=true` (à signaler aux développeurs). Aucune migration.
+
+**Constats ouverts à la fin de r30, dans l'ordre de traitement** :
+
+1. S32 et P13-f.
+2. P9-S.
+3. P9-R, avec le non bloquant r26 « remplacement silencieux ».
+4. Session principale : ligne `ENABLE_DEV_AUTH=false` dans `.env.example`.
+5. Puis :
+   - non bloquant r26 : configuration SSO pour `ssoUid` ;
+   - S30, actions d'exploitation 1 à 4 ;
+   - Phases 5 et 6 : S19 à S26 (hors volet `mock/login`), A5 à A9, P2, P5, P7, P8, Q-2, O10 à O17.
+
+## Revue r31 — S32 et P13-f : VALIDÉ ; amélioration P13-g (non bloquante) (2026-11-09)
+
+Revue de la section « Lot r30 (fixeur) » du journal. J'ai relu le code, relancé les mesures et joué 15 contre-mutations sur les tests et 4 scénarios sur l'étape CI, hors dépôt. Restauration vérifiée par `filecmp` après chaque mutation, puis `git status --porcelain` et `md5sum` des 26 fichiers modifiés ou nouveaux identiques avant et après ; aucune remise en réserve (`git stash`) restante. Le lot r29, validé en r30, n'est pas revu à nouveau : aucune régression constatée. Aucun commit ; le dossier d'agent local et les fichiers `.env*` n'ont pas été touchés.
+
+**Verdict** :
+
+- **S32 : VALIDÉ.**
+- **P13-f : VALIDÉ**, écart CI (`if grep … then exit 1`) accepté.
+- **P13-g (Amélioration, non bloquante)** : l'étape CI de contrôle du build passe si le paquet est absent.
+
+### Mesures (relancées par l'architecte)
+
+| Commande | Résultat |
+| --- | --- |
+| `cd backend && env -u DATABASE_URL npx jest`, lancé en même temps que `pnpm test:run` du frontend | **85/85 suites, 2450/2450** |
+| `cd frontend && pnpm test:run` ; `tsc --noEmit -p .` ; `pnpm build` | **24 fichiers, 145/145** ; exit 0 ; build OK |
+| `grep -l -e "mock/login" -e "Simuler une session" frontend/dist/assets/*.js` | vide (exit 1) |
+| `pnpm lint` racine | **0 erreur** (53 avertissements préexistants) |
+| Prettier sur les 8 fichiers de code du lot et `ci.yml` | conforme |
+
+### Contre-mutations de l'architecte
+
+Fichiers de test exécutés : `invitation-store.spec.ts`, `AppContext.invitation.spec.tsx`, `App.invitation-return.spec.tsx`, `InvitationAcceptance.spec.tsx`, `Login.spec.tsx` (50 tests).
+
+| ID | Mutation | Résultat |
+| --- | --- | --- |
+| AM1 | `isInviteToken` réduit à `typeof value === 'string'` | **Détectée** (15) |
+| AM2 | Gardes de `checkInvitation` et `acceptInvitation` retirées, validation du stockage conservée | **Détectée** (5) |
+| AM3 | Validation, gardes et encodage retirés (critère r30) | **Détectée** (15) |
+| AM4 | Ancres `^` et `$` retirées | **Détectée** (1) |
+| AM5 | Expression insensible à la casse (`/i`) | **Détectée** (2) |
+| AM6 | Ancre de fin seule retirée | **Détectée** (1) |
+| AM7 | Jeton invalide enregistré avant la validation | **Détectée** (9) |
+| AM8 | Jeton invalide : retour anticipé, paramètre laissé dans l'URL | **Détectée** (9) |
+| AM9 | Entrée invalide non supprimée à la lecture | **Détectée** (3) |
+| AM10 | En-tête : `clearPendingInvite()` retiré (FM11) | **Détectée** (1) |
+| AM11 | `logout()` efface l'entrée (donc aussi sur `SESSION_EXPIRED_EVENT`) | **Détectée** (1) |
+| AM12 | `check` refusé : entrée conservée (FM7) | **Détectée** (1) |
+| AM13 | Bandeau fourni sans condition sur `inviteInfo` | **Détectée** (1) |
+| AM14 | Encodage seul retiré | Non détectée, **équivalente** : la validation exclut tout caractère à encoder |
+| AM15 | `acceptInvitation` appelle la route `check` | **Détectée** (1) |
+
+Étape CI simulée sous `bash --noprofile --norc -eo pipefail` (interpréteur des étapes `run` de GitHub Actions), dans des répertoires de test :
+
+| Scénario | `if grep … exit 1` (lot) | `! grep` en dernière ligne | `! grep` suivi d'une autre commande |
+| --- | --- | --- | --- |
+| Paquet contenant `mock/login` | échec (1) | échec (1) | **succès (0)** |
+| Paquet contenant « Simuler une session » | échec (1) | échec (1) | **succès (0)** |
+| Paquet propre | succès (0) | succès (0) | succès (0) |
+| **Aucun paquet** (`frontend/dist/assets` absent) | **succès (0)** | **succès (0)** | succès (0) |
+
+### Verdict par point
+
+| Point | Verdict | Preuve |
+| --- | --- | --- |
+| S32 | **VALIDÉ** | `invitation-store.ts` : `isInviteToken` = `/^[a-f0-9]{64}$/` (le `$` de JavaScript sans drapeau `m` n'accepte pas de saut de ligne final, test dédié). `captureInviteFromUrl` retire toujours le paramètre et n'enregistre ni ne renvoie un jeton invalide ; `readPendingInvite` supprime une entrée invalide. `AppContext.tsx:1486` et `:1497` : refus avant tout `fetch`, puis `encodeURIComponent`. Tests demandés présents (store ; contexte : aucun `fetch` pour 5 jetons dangereux, seules les routes `check`/`accept` pour un jeton valide). AM1 à AM9 et AM15 détectées. Critère d'acceptation satisfait (audit des sources ci-dessous) |
+| P13-f | **VALIDÉ** | FM11 (`App.invitation-return.spec.tsx`), conservation sur `SESSION_EXPIRED_EVENT` (`AppContext.invitation.spec.tsx`), FM7 et bandeau conditionnel (`InvitationAcceptance.spec.tsx`) : AM10 à AM13 détectées. Étape CI présente après `pnpm build`, fonctionnelle quand le paquet existe |
+
+**Audit des sources (vérifié par l'architecte)** : dans `frontend/src`, hors tests, l'URL n'est lue que pour `?token=`/`?invite=` (S32), `?verify=`/`?reset=` (`account-api.ts`, transmis dans le corps d'un `POST`) et `?code=`/`?state=`/`?error=` (`App.tsx:99-112`, transmis dans le corps de `/auth/github/login` et `/auth/sso/callback`). Le stockage n'est lu que pour `planner_theme`, `planner_user` (profil ; `user.id` ne sert que dans une clé locale et des comparaisons), `planner_admin_original_session` (bannière) et l'invitation en attente. Les actions de la barre IA (`AiCommandBar.tsx`) sont envoyées dans le corps d'`executeAiActions`, pas dans un chemin. Aucune autre valeur venue de l'URL, du stockage ou d'une réponse de modèle n'atteint un chemin d'API.
+
+#### P13-g (Amélioration, non bloquante) : contrôle CI du build ouvert en cas d'absence du paquet
+
+- **Fichier** : `.github/workflows/ci.yml`, étape « Aucune connexion simulée dans le build de production ».
+- **Cause** : si le motif `frontend/dist/assets/*.js` ne correspond à aucun fichier (sortie du build déplacée, renommage de `outDir`), `grep` sort en 2, la condition `if` est fausse et l'étape réussit sans rien contrôler. La forme `! grep` demandée en r30 avait le même défaut.
+- **Impact** : faible. Le contrôle deviendrait silencieusement inopérant après une modification de la configuration de Vite. Les autres défenses (`import.meta.env.DEV`, 404 côté serveur hors développement) restent en place.
+- **Remédiation attendue** : ajouter en première ligne du bloc `run` : `ls frontend/dist/assets/*.js > /dev/null`.
+- **Critère d'acceptation** (vérifié par l'architecte sur la forme proposée) : sortie 2 sans paquet, 0 sur un build propre, 1 si l'une des deux chaînes est présente.
+
+### Réponses aux questions du fixeur
+
+1. **Autres segments de chemin non encodés : accepté, pas de lot dédié.** Les valeurs listées (`copilot/alerts?workspaceId=`, `briefing?workspaceId=`, `deliverables/…/status/${status}`, `audit/logs?limit=`) viennent de l'état de l'application ou des réponses de l'API, que l'utilisateur ne contrôle pas par un lien. Le critère d'acceptation de S32 est donc satisfait, et un encodage généralisé n'apporterait aujourd'hui qu'un gain de robustesse, sans réduction de risque mesurable. Règle de conduite, à appliquer sans lot spécifique : tout appel modifié ou ajouté encode ses segments de chemin (`encodeURIComponent`) et ses paramètres de requête (`URLSearchParams`) ; toute nouvelle valeur venue de l'URL ou du stockage est validée par format avant usage (déjà exigé pour P9-S et P9-R). Un utilitaire de construction d'URL commun pourra être introduit avec A5 à A9 (Phase 5), pas avant.
+2. **CI : `if grep … then exit 1` au lieu de `! grep` : accepté**, l'écart est retenu dans le rapport. Précision factuelle : `! grep` seul fonctionne s'il est la **dernière** commande du bloc (le code de sortie de l'étape est celui de la dernière commande), mais il est ignoré par `-e` dès qu'une commande le suit. La forme `if` est robuste dans les deux cas. Elle partage le défaut corrigé par P13-g.
+
+### Statut des constats
+
+| ID | Statut r31 |
+| --- | --- |
+| S32 | **VALIDÉ** |
+| P13-f | **VALIDÉ** ; P13 clos |
+| P13-g | Nouveau, Amélioration, non bloquant |
+| Ligne `ENABLE_DEV_AUTH=false` dans `.env.example` (question 1 de r30) | **Faite** par la session principale (présente dans le working tree) |
+| P9-S, P9-R | Ouverts, non commencés |
+
+**Commit** : **feu vert pour le lot r29 + r30.** Il comprend les fichiers listés par `git status` (y compris `.env.example`), le rapport et le journal, sans le dossier d'agent local. P13-g peut y être ajouté s'il est fait avant (une ligne dans `ci.yml`), sinon il passe dans le lot suivant. Changement cassant à signaler aux développeurs (rappel r30) : `POST /auth/mock/login` renvoie 404 sauf si `NODE_ENV=development` et `ENABLE_DEV_AUTH=true`. Aucune migration.
+
+**r31-bis (P13-g) : VALIDÉ.** Bloc `run` réel de `ci.yml` exécuté sous `bash --noprofile --norc -eo pipefail` : sans paquet, exit 2 ; build propre, exit 0 ; chaîne interdite présente, exit 1. P13-g clos ; le feu vert de commit couvre le lot r29 + r30 + P13-g.
+
+**Constats ouverts à la fin de r31, dans l'ordre de traitement** :
+
+1. ~~P13-g~~ : VALIDÉ en r31-bis.
+2. P9-S, selon les exigences de r29 et r30 (`sid` encodé et validé côté serveur, 400 sinon).
+3. P9-R, avec le non bloquant r26 « remplacement silencieux » ; `planner_pending_repo` validé à la lecture, `repoFullName` dans le corps.
+4. Puis :
+   - non bloquant r26 : configuration SSO pour `ssoUid` ;
+   - non bloquant r30 : jeton d'invitation dans le corps de `check`/`accept` à la prochaine modification de l'API des invitations ;
+   - S30, actions d'exploitation 1 à 4 ;
+   - Phases 5 et 6 : S19 à S26 (hors volet `mock/login`), A5 à A9, P2, P5, P7, P8, Q-2, O10 à O17.

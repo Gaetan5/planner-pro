@@ -24,7 +24,6 @@ const PUBLIC_ROUTES_ALLOWLIST = [
   'POST /auth/refresh',
   'POST /auth/logout',
   'POST /auth/firebase/login',
-  'POST /auth/mock/login',
   'POST /auth/sso/discover',
   'GET /auth/sso/authorize',
   'POST /auth/sso/callback',

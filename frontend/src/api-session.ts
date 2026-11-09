@@ -22,9 +22,10 @@ const NO_REFRESH_PREFIXES = [
   '/auth/github/login',
   '/auth/github/authorize',
   '/auth/sso/',
-  '/auth/mock/login',
   '/auth/password/',
   '/auth/email/',
+  // Route simulée : développement seulement, absente du paquet de production (P13-d)
+  ...(import.meta.env.DEV ? ['/auth/mock/login'] : []),
 ];
 
 let refreshInFlight: Promise<boolean> | null = null;
