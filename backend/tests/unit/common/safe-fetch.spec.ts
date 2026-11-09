@@ -1,5 +1,8 @@
+import { CALENDAR_FEED_CONTENT_TYPES } from '../../../src/projects/integration-url';
+import { constants as osConstants } from 'node:os';
 import {
   isForbiddenAddress,
+  RETRYABLE_CODES,
   PinnedRequest,
   RawResponse,
   safeFetch,
@@ -145,6 +148,96 @@ describe('safeFetch (S19)', () => {
     ).resolves.toMatchObject({ ok: false, status: 503 });
   });
 
+  it('r37-m3 : accepte text/plain, refuse text/html et application/octet-stream (liste des flux ICS)', async () => {
+    const allowedContentTypes = CALENDAR_FEED_CONTENT_TYPES;
+    transport.mockResolvedValueOnce(ok('BEGIN:VCALENDAR', 'text/plain; charset=utf-8'));
+    await expect(run('https://example.com/', { allowedContentTypes })).resolves.toMatchObject({
+      contentType: 'text/plain',
+    });
+    for (const type of ['text/html', 'application/octet-stream']) {
+      transport.mockResolvedValueOnce(ok('x', type));
+      await expect(run('https://example.com/', { allowedContentTypes })).rejects.toThrow(
+        /Type de contenu/,
+      );
+    }
+  });
+
+  describe('r37-m2 : adresses essayées à tour de rôle', () => {
+    const unreachable = (code = 'ENETUNREACH') =>
+      Object.assign(new Error(code), { code }) as NodeJS.ErrnoException;
+
+    it('essaie IPv4 avant IPv6, puis bascule sur la suivante après une erreur de connexion', async () => {
+      resolvePublic.mockResolvedValue(['2606:4700:4700::1111', '93.184.216.34', '8.8.8.8']);
+      transport.mockRejectedValueOnce(unreachable('ECONNREFUSED'));
+      transport.mockResolvedValueOnce(ok());
+      await expect(run('https://example.com/')).resolves.toMatchObject({ ok: true });
+      expect(transport.mock.calls.map((c) => c[0].address)).toEqual(['93.184.216.34', '8.8.8.8']);
+    });
+
+    it.each(['ECONNREFUSED', 'ENETUNREACH', 'EHOSTUNREACH', 'EADDRNOTAVAIL', 'ETIMEDOUT'])(
+      'bascule sur la seconde adresse après %s (exactement 2 appels)',
+      async (code) => {
+        resolvePublic.mockResolvedValue(['93.184.216.34', '8.8.8.8']);
+        transport.mockRejectedValueOnce(unreachable(code));
+        transport.mockResolvedValueOnce(ok());
+        await expect(run('https://example.com/')).resolves.toMatchObject({ ok: true });
+        expect(transport).toHaveBeenCalledTimes(2);
+      },
+    );
+
+    it('le jeu des codes de bascule est exactement celui attendu', () => {
+      expect([...RETRYABLE_CODES].sort()).toEqual(
+        ['ECONNREFUSED', 'ENETUNREACH', 'EHOSTUNREACH', 'EADDRNOTAVAIL', 'ETIMEDOUT'].sort(),
+      );
+    });
+
+    it('chaque code de bascule est un errno réel (garde-fou contre les fautes de frappe)', () => {
+      const known = Object.keys(osConstants.errno);
+      for (const code of RETRYABLE_CODES) expect(known).toContain(code);
+    });
+
+    it('bascule sur IPv6 quand toutes les IPv4 échouent', async () => {
+      resolvePublic.mockResolvedValue(['2606:4700:4700::1111', '93.184.216.34']);
+      transport.mockRejectedValueOnce(unreachable('EHOSTUNREACH'));
+      transport.mockResolvedValueOnce(ok());
+      await run('https://example.com/');
+      expect(transport.mock.calls.map((c) => c[0].address)).toEqual([
+        '93.184.216.34',
+        '2606:4700:4700::1111',
+      ]);
+    });
+
+    it('relève la dernière erreur quand toutes les adresses échouent', async () => {
+      resolvePublic.mockResolvedValue(['93.184.216.34', '8.8.8.8']);
+      transport.mockRejectedValue(unreachable());
+      await expect(run('https://example.com/')).rejects.toMatchObject({ code: 'ENETUNREACH' });
+      expect(transport).toHaveBeenCalledTimes(2);
+    });
+
+    it('ne bascule pas sur une erreur autre que de connexion (réponse trop grande, délai, reset)', async () => {
+      resolvePublic.mockResolvedValue(['93.184.216.34', '8.8.8.8']);
+      transport.mockRejectedValueOnce(new SafeFetchError('Réponse trop volumineuse.'));
+      await expect(run('https://example.com/')).rejects.toBeInstanceOf(SafeFetchError);
+      transport.mockRejectedValueOnce(unreachable('ECONNRESET'));
+      await expect(run('https://example.com/')).rejects.toMatchObject({ code: 'ECONNRESET' });
+      expect(transport).toHaveBeenCalledTimes(2);
+    });
+
+    it("n'essaie jamais une adresse non validée (une adresse interdite refuse tout l'hôte)", async () => {
+      resolvePublic.mockResolvedValue(['93.184.216.34', '::1']);
+      await expect(run('https://example.com/')).rejects.toThrow(/non autorisée/);
+      expect(transport).not.toHaveBeenCalled();
+    });
+
+    it('borne la résolution DNS par le délai', async () => {
+      resolvePublic.mockReturnValue(new Promise(() => undefined));
+      const started = Date.now();
+      await expect(run('https://example.com/', { timeoutMs: 100 })).rejects.toThrow(/Délai/);
+      expect(Date.now() - started).toBeLessThan(1500);
+      expect(transport).not.toHaveBeenCalled();
+    });
+  });
+
   describe('isForbiddenAddress', () => {
     it.each([
       '0.0.0.0',
@@ -167,16 +260,26 @@ describe('safeFetch (S19)', () => {
       'fe80::1',
       'ff02::1',
       '64:ff9b::7f00:1',
+      '64:ff9b:1::1',
+      '64:ff9b:1:ffff::1',
+      'fec0::1',
+      'febf::1',
+      '192.88.99.1',
+      '192.88.99.255',
       'pas-une-ip',
     ])('%s est interdite', (ip) => {
       expect(isForbiddenAddress(ip)).toBe(true);
     });
 
-    it.each(['93.184.216.34', '8.8.8.8', '172.32.0.1', '2606:4700:4700::1111'])(
-      '%s est publique',
-      (ip) => {
-        expect(isForbiddenAddress(ip)).toBe(false);
-      },
-    );
+    it.each([
+      '93.184.216.34',
+      '8.8.8.8',
+      '172.32.0.1',
+      '192.88.98.255',
+      '192.88.100.0',
+      '2606:4700:4700::1111',
+    ])('%s est publique', (ip) => {
+      expect(isForbiddenAddress(ip)).toBe(false);
+    });
   });
 });

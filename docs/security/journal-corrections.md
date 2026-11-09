@@ -3755,3 +3755,128 @@ Verdicts : **S19 VALIDÉ**, **S20 VALIDÉ**, **r36-m1 VALIDÉ** (réserves non b
 - **Écarts** : les 5 écarts acceptés. **Questions** : les 7 tranchées (voir rapport) ; décisions produit et d'exploitation (`text/plain`, `powerplatform.com`, recensement, types de pièces jointes, secret affiché une fois) **à confirmer par l'utilisateur**.
 - **Commit** : feu vert, un seul commit, 25 entrées sans `.claude/`.
 - **Constats ouverts** : r37-m1, r37-m2, r37-m3, r37-m4, r37-a1 (petit lot), puis S21, puis S22 avec O16.
+
+
+## Lot r37 (fixeur) — r37-m1, r37-m2, r37-m3, r37-m4, r37-a1
+
+### r37-m1 — `defaultTransport` testé en CI (serveur TLS local)
+
+**Statut** : CORRIGÉ – À REVOIR
+
+**Changement** : `backend/src/common/safe-fetch.ts` : `defaultTransport` exporté ; champ optionnel `ca` dans `PinnedRequest`, transmis à `httpsRequest` (réservé aux tests ; `safeFetch` ne le renseigne jamais, aucune option publique). Nouveau `backend/tests/unit/common/safe-fetch.transport.spec.ts` : serveur `node:https` sur 127.0.0.1, deux certificats ECDSA éphémères générés par `openssl` (binaire présent sur `ubuntu-latest`) dans un dossier temporaire supprimé en fin de suite (aucun secret dans le dépôt). Connexion épinglée sur 127.0.0.1, URL `https://localhost:PORT/`, certificat valable pour `localhost` seulement (donc invalide pour l'IP).
+
+**Tests** (10, tous verts) : certificat vérifié contre le nom d'hôte (SNI `localhost` reçu, `Host` = `localhost:PORT`) ; `servername` passé explicitement (espion sur `https.request`, absent pour une URL en IP) ; certificat d'un autre nom refusé (altnames) ; certificat non approuvé refusé ; dépassement de `maxBytes` interrompu ; réponse exactement à la limite acceptée ; réponse qui ne se termine jamais (un octet toutes les 50 ms, pour que le délai d'inactivité de la socket ne masque pas le minuteur global) coupée à `timeoutMs` ; connexion coupée à l'établissement TLS ; connexion coupée en cours de réponse ; `safeFetch` de bout en bout refuse 127.0.0.1.
+
+**Contre-mutations** (sauvegarde bac à sable, restauration `/bin/cp -f`, une à la fois) :
+| Mutation | Résultat |
+| --- | --- |
+| `servername` supprimé | détectée par le test de l'espion (voir écart) |
+| `servername: ''` ; `servername: req.address` ; `servername` supprimé et `Host: req.address` | détectées (4 à 6 tests en échec, dont le test de certificat) |
+| contrôle `maxBytes` désactivé (`if (false)`) | détectée |
+| minuteur global neutralisé | détectée (test de réponse sans fin) |
+
+**Écart par rapport au rapport** : la suppression pure de `servername` ne change pas le comportement réel : l'Agent HTTPS de Node déduit le nom SNI et du certificat de l'en-tête `Host` (`calculateServerName`), que `defaultTransport` force à `url.host`. Un test de comportement seul (serveur TLS) ne peut donc pas la détecter : c'est un mutant équivalent. Pour satisfaire le critère, un test fige le contrat explicite (espion sur `https.request`, option `servername` égale au nom d'hôte). Toute variante qui change réellement le comportement est détectée par les tests de comportement.
+
+**Questions pour l'architecte** : l'espion couple le test à `https.request` appelé via le module ; acceptable ? `openssl` est requis par la suite : à confirmer côté CI (présent sur `ubuntu-latest` ; l'image Node alpine ne l'a pas toujours).
+
+### r37-m2 — adresses essayées à tour de rôle, DNS borné
+
+**Statut** : CORRIGÉ – À REVOIR
+
+**Changement** : `safe-fetch.ts` : `resolvePublicAddresses` renvoie toutes les adresses, **toutes validées** (une seule interdite refuse l'hôte), IPv4 d'abord ; la résolution est bornée par `timeoutMs` (`withTimeout`, minuteur nettoyé). `safeFetch` essaie les adresses dans l'ordre et passe à la suivante seulement sur `ECONNREFUSED`, `ENETUNREACH`, `EHOSTUNREACH`, `EADDRNOTAVAIN`, `ETIMEDOUT` (échec de connexion, rien envoyé : sans risque de doubler un POST). Délai dépassé, réponse trop volumineuse, certificat invalide, `ECONNRESET` : pas de bascule. Après la dernière adresse, la dernière erreur est relevée.
+
+**Tests** (`safe-fetch.spec.ts`, 5 ajoutés) : IPv4 avant IPv6 puis bascule après `ECONNREFUSED` ; bascule vers IPv6 quand l'IPv4 échoue ; dernière erreur relevée ; pas de bascule sur `SafeFetchError` ni `ECONNRESET` ; adresse interdite parmi d'autres : aucune connexion ; DNS qui ne répond pas : « Délai » en moins de 1,5 s sans transport.
+
+**Contre-mutations** : bascule retirée (4 échecs), tri IPv4 d'abord retiré (2), DNS non borné (1, par dépassement du délai de test) : toutes détectées.
+
+**Écart / question** : chaque tentative dispose de `timeoutMs` (budget par adresse, comme par saut auparavant) ; une adresse qui se bloque sans refuser consomme son délai puis la bascule est tentée seulement pour les codes ci-dessus, donc pas après un « Délai dépassé ». Budget global par appel à définir si l'architecte le souhaite.
+
+### r37-m3 — `text/plain` pour les flux ICS
+
+**Statut** : CORRIGÉ – À REVOIR
+
+**Changement** : `backend/src/projects/integration-url.ts:12` : `CALENDAR_FEED_CONTENT_TYPES = ['text/calendar', 'text/plain', 'application/json']`.
+**Tests** : `safe-fetch.spec.ts` (`text/plain; charset=utf-8` accepté, `text/html` et `application/octet-stream` refusés, avec la constante réelle) ; `calendar-sync.service.spec.ts` (liste transmise à `safeFetch` mise à jour). **Contre-mutation** : `text/plain` retiré : détectée (2 échecs).
+**Question** : décision à confirmer par l'utilisateur (déjà notée par l'architecte).
+
+### r37-m4 — ancre de fin de l'expression `data:`
+
+**Statut** : CORRIGÉ – À REVOIR
+
+**Changement** : tests seulement. `attachment-dto.spec.ts` (backend) et `safe-href.spec.ts` (frontend) : `data:image/png;base64,AAAA` suivi d'un espace, de `"`, de `"onerror="x`, d'un saut de ligne, d'un saut de ligne plus `<script>` : refusé.
+**Contre-mutations** : ancre `$` retirée côté backend (`attachment-url.ts`) : détectée (5 échecs) ; côté frontend (`safe-href.ts`) : détectée (5 échecs).
+
+### r37-a1 — plages complémentaires
+
+**Statut** : CORRIGÉ – À REVOIR
+
+**Changement** : `safe-fetch.ts` : `64:ff9b:1::/48`, `fec0::/10`, `192.88.99.0/24` ajoutées. **Tests** : bornes basses et hautes refusées (`64:ff9b:1:ffff::1`, `febf::1`, `192.88.99.255`), voisins publics admis (`192.88.98.255`, `192.88.100.0`). **Contre-mutations** : chacune des trois lignes retirée : détectée (1 à 2 échecs).
+
+### Mesures
+| Commande | Résultat |
+| --- | --- |
+| `cd backend && env -u DATABASE_URL npx jest` | **92 suites, 2670/2670** (91 suites, 2640 avant) |
+| `nest build` ; `tsc --noEmit -p tsconfig.test.json` ; `-p tsconfig.build.json` ; frontend `tsc --noEmit` ; `pnpm build` | exit 0 ; `tsconfig.json` garde l'erreur `rootDir` préexistante (O21) |
+| `cd frontend && vitest run` | **30 fichiers, 226/226** (221 avant) |
+| `grep -rlE "mock/login\|Simuler une session" frontend/dist/assets` | vide |
+| Lint racine ; Prettier sur les fichiers modifiés | 0 erreur (53 avertissements inchangés) ; conforme |
+
+Contrôle des mutations : après chaque restauration, `cmp` avec la sauvegarde identique pour les 4 fichiers source mutés ; aucun processus jest ou vitest en attente.
+
+### Migrations et changements cassants
+Aucune migration. Changements de comportement : les flux ICS servis en `text/plain` sont acceptés ; les hôtes dont l'adresse résolue tombe dans les trois nouvelles plages sont refusés ; un hôte à plusieurs adresses bascule sur la suivante après échec de connexion.
+
+## Revue architecte (r38) — lot r37
+
+Mesures relancées : jest 92 suites 2670/2670, nest build, tsc (tests, build, frontend), pnpm build, vitest 226/226, grep `dist/assets` vide, lint 0 erreur, Prettier conforme ; `git diff` relu, aucune mutation résiduelle.
+
+- **r37-m1 : VALIDÉ.** Serveur TLS local, certificats éphémères, `ca` réservé aux tests. Mutations `ca`, `servername` détectées. Espion sur `https.request` : accepté (mutant équivalent figé, réserve de couplage). `openssl` sur `ubuntu-latest` : acceptable.
+- **r37-m2 : À REPRENDRE.** `safe-fetch.ts:187` : `'EADDRNOTAVAIN'` doit être `'EADDRNOTAVAIL'` (confirmé : la constante n'existe pas dans `os.constants.errno`). Contre-mutations « EADDRNOTAVAIN retiré » et « ETIMEDOUT retiré » : non détectées. À faire : corriger la faute ; `it.each` sur les 5 codes (première adresse en échec, seconde réussit) ; test garde-fou que chaque code de `RETRYABLE_CODES` appartient à `Object.keys(os.constants.errno)` (exporter la constante ou équivalent). Critère : retirer une ligne ou réintroduire la faute fait échouer un test. Budget de délai par adresse : accepté. Voir r38-m1 dans le rapport.
+- **r37-m3 : VALIDÉ** (décision `text/plain` à confirmer par l'utilisateur).
+- **r37-m4 : VALIDÉ.**
+- **r37-a1 : VALIDÉ.**
+
+Pas de commit tant que r38-m1 n'est pas repris. Ouvert : r38-m1, puis S21, S22 + O16.
+
+
+## Reprise r38 (fixeur) — r38-m1
+
+### r38-m1 — faute de frappe `EADDRNOTAVAIN` dans les codes de bascule d'adresse
+
+**Statut** : CORRIGÉ – À REVOIR
+
+**Cause confirmée** : `backend/src/common/safe-fetch.ts:187` contenait `'EADDRNOTAVAIN'` ; `os.constants.errno` ne connaît que `EADDRNOTAVAIL`. La bascule ne se déclenchait jamais sur cette erreur.
+
+**Changement** : `safe-fetch.ts` : `'EADDRNOTAVAIL'` ; `RETRYABLE_CODES` exportée.
+
+**Tests** (`backend/tests/unit/common/safe-fetch.spec.ts`, 7 ajoutés) : `it.each` sur les 5 codes (première adresse en échec avec ce code, seconde réussit, exactement 2 appels au transport) ; le jeu de codes est exactement les 5 attendus ; garde-fou : chaque code appartient à `Object.keys(os.constants.errno)`.
+
+**Contre-mutations** (sauvegarde bac à sable, `/bin/cp -f`, une à la fois, `cmp` identique après chaque restauration) :
+| Mutation | Résultat |
+| --- | --- |
+| ligne `ECONNREFUSED` retirée | détectée (7 échecs) |
+| ligne `ENETUNREACH` retirée | détectée (4) |
+| ligne `EHOSTUNREACH` retirée | détectée (5) |
+| ligne `EADDRNOTAVAIL` retirée | détectée (4) |
+| ligne `ETIMEDOUT` retirée | détectée (4) |
+| faute `EADDRNOTAVAIN` réintroduite | détectée (5) |
+
+**Écart par rapport au rapport** : aucun.
+
+**Mesures** : jest backend (`env -u DATABASE_URL`) 92 suites, 2677/2677 ; `nest build`, `tsc -p tsconfig.test.json`, `tsc -p tsconfig.build.json`, frontend `tsc --noEmit` et `pnpm build` : exit 0 ; vitest 30 fichiers, 226/226 ; grep `mock/login|Simuler une session` dans `dist/assets` : vide ; lint 0 erreur (53 avertissements inchangés) ; Prettier conforme (backend, frontend/src). Aucun processus de test en attente.
+
+**Questions pour l'architecte** : aucune.
+
+
+## Revue architecte (r39) — reprise r38-m1
+
+Mesures relancées : jest backend 92 suites 2677/2677, `nest build`, `tsc` (tests et build), ESLint et Prettier sur les fichiers modifiés : propres. `git diff` de `safe-fetch.ts` et `safe-fetch.spec.ts` relu, aucune mutation résiduelle.
+
+#### Revue architecte
+- **r38-m1 : VALIDÉ.** `EADDRNOTAVAIL` corrigé, `RETRYABLE_CODES` exporté, `it.each` sur les 5 codes, jeu exact figé, garde-fou `os.constants.errno`. Contre-mutations rejouées : `EADDRNOTAVAIL` retiré (4 échecs), `ETIMEDOUT` retiré (4), faute réintroduite (5) : toutes détectées ; fichier restauré par `/bin/cp -f`, `cmp` identique, aucun processus en attente.
+- **r37-m2 : VALIDÉ** (via r38-m1).
+- Observation : avertissement jest « worker failed to exit gracefully » en fin de suite, à traiter plus tard (`--detectOpenHandles`), non bloquant.
+
+**Feu vert de commit unique (lot r37 + reprise r38)**, 9 fichiers : `backend/src/common/safe-fetch.ts`, `backend/src/projects/integration-url.ts`, `backend/tests/unit/common/safe-fetch.spec.ts`, `backend/tests/unit/common/safe-fetch.transport.spec.ts`, `backend/tests/unit/projects/attachment-dto.spec.ts`, `backend/tests/unit/projects/calendar-sync.service.spec.ts`, `frontend/src/safe-href.spec.ts`, `docs/security/journal-corrections.md`, `docs/security/rapport-audit.md`.
+
+**Ouverts** : S21, puis S22 + O16, puis le reste (voir « Revue r39 » du rapport pour les décisions à obtenir de l'utilisateur avant S21 et S22).

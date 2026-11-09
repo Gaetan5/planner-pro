@@ -29,6 +29,7 @@ v4('169.254.0.0', 16); // link-local, métadonnées cloud
 v4('172.16.0.0', 12);
 v4('192.0.0.0', 24);
 v4('192.0.2.0', 24);
+v4('192.88.99.0', 24); // relais 6to4 obsolète
 v4('192.168.0.0', 16);
 v4('198.18.0.0', 15);
 v4('198.51.100.0', 24);
@@ -38,12 +39,14 @@ v4('240.0.0.0', 4); // réservé, diffusion
 v6('::', 96); // non spécifiée, loopback, compatible IPv4
 v6('::ffff:0:0', 96); // IPv4 mappée : refusée en bloc, une résolution DNS n'en renvoie jamais
 v6('64:ff9b::', 96); // NAT64
+v6('64:ff9b:1::', 48); // NAT64 à usage local
 v6('100::', 64);
 v6('2001::', 32); // Teredo
 v6('2001:db8::', 32);
 v6('2002::', 16); // 6to4
 v6('fc00::', 7); // ULA
 v6('fe80::', 10); // link-local
+v6('fec0::', 10); // site-local obsolète
 v6('ff00::', 8);
 
 /** Vrai si l'adresse IP est privée, réservée ou non routable (ou n'est pas une IP). */
@@ -68,6 +71,8 @@ export interface PinnedRequest {
   body?: string;
   timeoutMs: number;
   maxBytes: number;
+  /** Autorités de certification supplémentaires : réservé aux tests (certificat local). */
+  ca?: string | Buffer;
 }
 
 export interface SafeFetchOptions {
@@ -104,7 +109,7 @@ async function defaultResolve(hostname: string): Promise<string[]> {
 }
 
 /** Connexion TLS sur l'adresse validée ; le nom d'hôte reste utilisé pour SNI et le certificat. */
-function defaultTransport(req: PinnedRequest): Promise<RawResponse> {
+export function defaultTransport(req: PinnedRequest): Promise<RawResponse> {
   return new Promise((resolve, reject) => {
     const hostname = req.url.hostname.replace(/^\[|\]$/g, '');
     const headers: Record<string, string> = { ...req.headers, Host: req.url.host };
@@ -117,6 +122,7 @@ function defaultTransport(req: PinnedRequest): Promise<RawResponse> {
       headers,
       servername: isIP(hostname) ? undefined : hostname,
       timeout: req.timeoutMs,
+      ca: req.ca,
     });
     const deadline = setTimeout(
       () => request.destroy(new SafeFetchError('Délai dépassé.')),
@@ -173,18 +179,41 @@ function parseTarget(raw: string, allowHost?: (hostname: string) => boolean): UR
   return url;
 }
 
-async function resolvePublicAddress(
+/** Erreurs de connexion après lesquelles l'adresse suivante peut être essayée (rien n'a été envoyé). */
+export const RETRYABLE_CODES = new Set([
+  'ECONNREFUSED',
+  'ENETUNREACH',
+  'EHOSTUNREACH',
+  'EADDRNOTAVAIL',
+  'ETIMEDOUT',
+]);
+
+async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const expired = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new SafeFetchError('Délai dépassé.')), ms);
+  });
+  try {
+    return await Promise.race([promise, expired]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Adresses validées de l'hôte, IPv4 d'abord ; la résolution DNS est bornée par le délai. */
+async function resolvePublicAddresses(
   url: URL,
   resolve: (hostname: string) => Promise<string[]>,
-): Promise<string> {
+  timeoutMs: number,
+): Promise<string[]> {
   const hostname = url.hostname.replace(/^\[|\]$/g, '');
-  const addresses = isIP(hostname) ? [hostname] : await resolve(hostname);
+  const addresses = isIP(hostname) ? [hostname] : await withTimeout(resolve(hostname), timeoutMs);
   if (addresses.length === 0) throw new SafeFetchError('Hôte introuvable.');
   // Une seule adresse interdite suffit à refuser : l'hôte ne doit viser que des adresses publiques
   if (addresses.some(isForbiddenAddress)) {
     throw new SafeFetchError('Adresse de destination non autorisée.');
   }
-  return addresses[0];
+  return [...addresses.filter((a) => isIP(a) === 4), ...addresses.filter((a) => isIP(a) === 6)];
 }
 
 export async function safeFetch(
@@ -201,16 +230,25 @@ export async function safeFetch(
   let target = rawUrl;
   for (let hop = 0; ; hop++) {
     const url = parseTarget(target, options.allowHost);
-    const address = await resolvePublicAddress(url, resolve);
-    const res = await transport({
-      url,
-      address,
-      method,
-      headers: options.headers ?? {},
-      body: options.body,
-      timeoutMs,
-      maxBytes,
-    });
+    const addresses = await resolvePublicAddresses(url, resolve, timeoutMs);
+    let res: RawResponse | undefined;
+    for (let i = 0; !res; i++) {
+      try {
+        res = await transport({
+          url,
+          address: addresses[i],
+          method,
+          headers: options.headers ?? {},
+          body: options.body,
+          timeoutMs,
+          maxBytes,
+        });
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        const retryable = !(err instanceof SafeFetchError) && !!code && RETRYABLE_CODES.has(code);
+        if (!retryable || i + 1 >= addresses.length) throw err;
+      }
+    }
 
     if (REDIRECT_STATUSES.has(res.status)) {
       const location = res.headers.location;

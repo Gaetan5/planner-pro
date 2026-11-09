@@ -4949,3 +4949,105 @@ Reprendre la remédiation du constat d'origine, avec : (1) `rawBody: true` dans 
 3. **S22 + O16** (exigences ci-dessus).
 4. S30, actions d'exploitation 1 à 4 ; recensement S19/S20 avant production.
 5. Puis S23 à S25, S26 (hors volet `mock/login`), A5, A6, A7, P5, P8, O10 à O17 (O16 traité avec S22), Phase 6 (A8, A9 avec O21, P2, P7, Q-2).
+
+## Revue r38 — lot r37 : r37-m1, r37-m3, r37-m4, r37-a1 VALIDÉS ; r37-m2 À REPRENDRE (nouveau constat r38-m1) (2026-11-09)
+
+### Mesures relancées par l'architecte
+`env -u DATABASE_URL npx jest` : 92 suites, 2670/2670. `nest build`, `tsc --noEmit` (tests, build), frontend `tsc --noEmit`, `pnpm build` : exit 0. `vitest run` : 30 fichiers, 226/226. `grep mock/login|Simuler une session` dans `dist/assets` : vide. Lint : 0 erreur (53 avertissements). Prettier : conforme. `git diff` relu en entier (source, tests, frontend) : aucune mutation résiduelle ; md5 des quatre fichiers source mutés identiques avant/après ; 8 entrées `git status` ; aucun processus jest/vitest en attente.
+
+### Nouveau constat
+- **r38-m1 (Majeur faible, fiabilité) : `safe-fetch.ts:187` contient `'EADDRNOTAVAIN'` (faute de frappe) au lieu de `'EADDRNOTAVAIL'`.** Confirmé : `os.constants.errno.EADDRNOTAVAIL` vaut 99, `EADDRNOTAVAIN` n'existe pas (`undefined`). La bascule d'adresse ne se déclenche donc jamais sur cette erreur, typique d'un AAAA sans IPv6 sortant (cas visé par r37-m2, avec ENETUNREACH). Aucune faille de sécurité (la bascule est un confort de disponibilité, toutes les adresses sont validées), mais le correctif r37-m2 est incomplet. Contre-mutation : retirer la ligne `EADDRNOTAVAIN` ou `ETIMEDOUT` : **non détectée** (76/76 verts) ; seule `EHOSTUNREACH` est couverte, et `ECONNREFUSED`/`ENETUNREACH` par les tests existants.
+  **Remédiation et critères** : (1) corriger en `'EADDRNOTAVAIL'` ; (2) tester **chaque** code de `RETRYABLE_CODES` par `it.each` (ECONNREFUSED, ENETUNREACH, EHOSTUNREACH, EADDRNOTAVAIL, ETIMEDOUT) : première adresse en erreur, seconde réussit, deux appels ; (3) garde-fou contre les fautes de frappe : exporter `RETRYABLE_CODES` (ou le tester via le comportement) et vérifier que chaque code appartient à `Object.keys(os.constants.errno)` ; (4) critère : retirer n'importe quelle ligne du jeu, ou réintroduire la faute, fait échouer au moins un test.
+
+### Contre-mutations de l'architecte (sauvegarde bac à sable, `/bin/cp -f`, une à la fois, `cmp` après chaque restauration)
+| Mutation | Résultat |
+| --- | --- |
+| `EADDRNOTAVAIN` retiré | **non détectée** (r38-m1) |
+| `ETIMEDOUT` retiré | **non détectée** (r38-m1) |
+| `EHOSTUNREACH` retiré | détectée (2 échecs) |
+| `servername` supprimé | détectée (1 échec, espion : mutant équivalent figé) |
+| `ca: req.ca` supprimé | détectée (8 échecs) |
+| DNS non borné (`withTimeout` retiré) | détectée (1 échec) |
+
+### Verdicts
+| Point | Verdict |
+| --- | --- |
+| r37-m1 (`defaultTransport` testé, serveur TLS local) | **VALIDÉ** |
+| r37-m2 (bascule d'adresses, IPv4 d'abord, DNS borné) | **À REPRENDRE** (r38-m1) |
+| r37-m3 (`text/plain` pour ICS) | **VALIDÉ** (décision à confirmer par l'utilisateur) |
+| r37-m4 (ancre `data:`) | **VALIDÉ** |
+| r37-a1 (3 plages) | **VALIDÉ** |
+
+### Écarts et questions du fixeur
+1. **`servername`, mutant équivalent figé par un espion sur `https.request` : accepté.** Le contrat explicite (SNI et certificat indépendants de l'en-tête `Host`) mérite d'être figé ; l'espion fonctionne car `https.request` est appelé via le module. Réserve : le test dépend de ce mode d'appel ; s'il casse après un changement d'import, le remplacer par un test de comportement. Les variantes qui changent réellement le comportement sont couvertes.
+2. **`openssl` en CI : acceptable.** `ci.yml` tourne sur `ubuntu-latest` (job backend sur le runner, pas dans une image alpine) où `openssl` est présent. Les certificats sont éphémères et supprimés. Si la suite est un jour lancée dans un conteneur alpine, installer `openssl` ou générer les certificats par `node:crypto` (pas bloquant).
+3. **Budget de délai : par adresse accepté.** Cohérent avec le comportement par saut existant, et pas de bascule après « Délai dépassé ». Pire cas : DNS (`timeoutMs`) plus N tentatives de connexion bloquées sur ETIMEDOUT. À durcir seulement si le délai par défaut est élevé : alors plafonner à 3 tentatives (sans test bloquant).
+4. **`text/plain` pour ICS : validé côté code ; décision produit à confirmer par l'utilisateur** (inchangé).
+
+### Statut des constats
+| Constat | Statut |
+| --- | --- |
+| r37-m1, r37-m3, r37-m4, r37-a1 | **VALIDÉ** (clos après commit) |
+| r37-m2 | ouvert, à reprendre via **r38-m1** |
+| S21, S22 + O16, S30, O21 | inchangés |
+
+### Commit : feu vert différé
+Tant que r38-m1 n'est pas repris, ne pas committer. Une fois r38-m1 corrigé (une ligne et quelques tests), les 8 fichiers : `backend/src/common/safe-fetch.ts`, `backend/src/projects/integration-url.ts`, `backend/tests/unit/common/safe-fetch.spec.ts`, `backend/tests/unit/common/safe-fetch.transport.spec.ts`, `backend/tests/unit/projects/attachment-dto.spec.ts`, `backend/tests/unit/projects/calendar-sync.service.spec.ts`, `frontend/src/safe-href.spec.ts`, `docs/security/journal-corrections.md` (plus `docs/security/rapport-audit.md`), chemins explicites, sans `.claude/`.
+
+### Constats ouverts, dans l'ordre de traitement
+1. **r38-m1** (une ligne plus tests), puis revue courte.
+2. **S21**, 3. **S22 + O16**, 4. S30, actions d'exploitation, recensement S19/S20, 5. S23 à S25, S26, A5 à A7, P5, P8, O10 à O17, Phase 6.
+
+
+## Revue r39 — reprise de r38-m1
+
+### Vérifications
+`git diff` de `safe-fetch.ts` et de `safe-fetch.spec.ts` relu : `EADDRNOTAVAIL` correct, `RETRYABLE_CODES` exporté, `it.each` sur les 5 codes (2 appels exactement), test du jeu exact, garde-fou `os.constants.errno`. Aucune mutation résiduelle. Jest backend (`env -u DATABASE_URL`) : 92 suites, 2677/2677. `nest build`, `tsc -p tsconfig.test.json`, `tsc -p tsconfig.build.json` : exit 0. ESLint sur les deux fichiers : 0 erreur. Prettier sur les fichiers `.ts` modifiés : conforme.
+
+### Contre-mutations rejouées (sauvegarde en bac à sable, restauration `/bin/cp -f`, `cmp` identique après chaque)
+| Mutation | Résultat |
+| --- | --- |
+| ligne `EADDRNOTAVAIL` retirée | détectée (4 échecs) |
+| ligne `ETIMEDOUT` retirée | détectée (4 échecs) |
+| faute `EADDRNOTAVAIN` réintroduite | détectée (5 échecs) |
+
+Aucun processus jest en attente après les mutations.
+
+### Verdicts
+| Point | Verdict |
+| --- | --- |
+| r38-m1 | **VALIDÉ** |
+| r37-m2 | **VALIDÉ** |
+| r37-m1, r37-m3, r37-m4, r37-a1 | **VALIDÉ** (inchangé) |
+
+Observation mineure (non bloquante) : jest signale « A worker process has failed to exit gracefully » en fin de suite complète. À investiguer avec `--detectOpenHandles` dans un lot d'hygiène (timers sans `unref()`), sans lien avec ce lot.
+
+### Commit : feu vert (un seul commit, lot r37 + reprise r38)
+Fichiers, chemins explicites, sans `.claude/` ni `.env*` :
+1. `backend/src/common/safe-fetch.ts`
+2. `backend/src/projects/integration-url.ts`
+3. `backend/tests/unit/common/safe-fetch.spec.ts`
+4. `backend/tests/unit/common/safe-fetch.transport.spec.ts` (nouveau)
+5. `backend/tests/unit/projects/attachment-dto.spec.ts`
+6. `backend/tests/unit/projects/calendar-sync.service.spec.ts`
+7. `frontend/src/safe-href.spec.ts`
+8. `docs/security/journal-corrections.md`
+9. `docs/security/rapport-audit.md`
+
+### Constats ouverts, dans l'ordre
+1. **S21** (webhook GitHub), 2. **S22 + O16** (en-têtes frontend, `no-store`), 3. S30, actions d'exploitation, recensement S19/S20, 4. S23 à S25, S26, A5 à A7, P5, P8, O10 à O17, O21, Phase 6.
+
+### Informations à obtenir de l'utilisateur avant de commencer
+**S21**
+- Affichage unique du secret de webhook (montré une fois, régénération possible, pas de réaffichage) : confirmer oui/non.
+- Qui peut régénérer le secret : propriétaire du projet seul (proposition) ou aussi les administrateurs.
+- Sort de l'ancienne route : suppression ou réponse 410 ; existe-t-il des webhooks déjà configurés chez des clients à migrer (le secret global actuel est-il déjà déployé quelque part).
+- Comportement si Redis est indisponible : refus (proposé) ou acceptation dégradée.
+
+**S22 + O16**
+- Domaine exact de l'API de production (confirmer `api.planner-pro.boukarou-os.com`) et du frontend.
+- Valeur réelle de `VITE_FIREBASE_AUTH_DOMAIN`.
+- Connexion Google par popup ou par redirection (détermine `frame-src` et `script-src`).
+- Police : auto-hébergement (préféré) ou autorisation de `fonts.googleapis.com` / `fonts.gstatic.com`.
+- Accord sur le déploiement en `Content-Security-Policy-Report-Only` d'abord, puis passage en blocage, et sur qui valide la connexion Google réelle.
+- HSTS : confirmer que tous les sous-domaines sont servis en HTTPS avant `includeSubDomains`.

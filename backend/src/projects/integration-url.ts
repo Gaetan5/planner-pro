@@ -9,7 +9,7 @@ export const INTEGRATION_TYPES: IntegrationType[] = [
 ];
 
 /** Types de contenu acceptés pour un flux d'agenda externe (S19). */
-export const CALENDAR_FEED_CONTENT_TYPES = ['text/calendar', 'application/json'];
+export const CALENDAR_FEED_CONTENT_TYPES = ['text/calendar', 'text/plain', 'application/json'];
 
 const WEBHOOK_HOSTS: Partial<Record<IntegrationType, (host: string) => boolean>> = {
   SLACK: (host) => host === 'hooks.slack.com',

@@ -327,7 +327,7 @@ describe('CalendarSyncService', () => {
       expect(safeFetchMock).toHaveBeenCalledWith(
         'https://calendar.example/prive/jeton-secret.ics',
         {
-          allowedContentTypes: ['text/calendar', 'application/json'],
+          allowedContentTypes: ['text/calendar', 'text/plain', 'application/json'],
         },
       );
       expect(JSON.stringify(logSpy.mock.calls)).not.toContain('jeton-secret');
