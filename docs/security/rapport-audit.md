@@ -4855,3 +4855,97 @@ M10 et M11 : **r36-m1** (Amélioration, non bloquant). Ajouter deux tests au pan
 2. S30, actions d'exploitation 1 à 4.
 3. **Phase 5 (durcissement)**, ordre proposé : S19, S20, S21, S22 (surfaces exposées, en-têtes, CORS, secrets), puis S23 à S25, S26 (hors volet `mock/login`, déjà fait), A5, A6, A7, P5 (dont `trust proxy` et limites des routes publiques), P8, O10 à O17. Chaque constat en lot séparé, revue à chaque lot.
 4. **Phase 6** : A8 (`AuditLog` avec attribution de l'acteur réel en impersonation, prérequis de l'ouverture du drapeau), A9 (CI, pnpm 10, O21), P2, P7, Q-2. Décision `myRole` / `canManage` avec A5 à A9 (confirmation utilisateur).
+
+
+## Revue r37 — lot r36 : S19, S20 et r36-m1 VALIDÉS (réserves non bloquantes) ; feu vert pour le commit (2026-11-09)
+
+### Mesures relancées par l'architecte
+`env -u DATABASE_URL npx jest` : 91 suites, 2640/2640. `nest build`, `tsc --noEmit` (tests, build), frontend `tsc --noEmit` et `pnpm build` : exit 0. `vitest run` : 30 fichiers, 221/221. `grep mock/login|Simuler une session` dans `dist/assets` : vide. Lint : 0 erreur (53 avertissements inchangés). Prettier : conforme. `git diff` relu en entier : aucune mutation résiduelle ; md5 du working tree identiques avant et après mes contre-mutations ; aucun processus en attente.
+
+### Revue de `safeFetch` (code critique)
+- **Plages** : sondées une à une sur `isForbiddenAddress` (49 adresses). Refusées : 0/8, 10/8, 100.64/10 (bornes exactes 100.64 et 100.127 ; 100.128 admise), 127/8, 169.254/16 (dont .169.254), 172.16/12 (bornes exactes), 192.0.0/24, 198.18/15, 224/4, 240/4, 255.255.255.255 ; IPv6 `::`, `::1`, `::/96` (compatibles), `::ffff:x` (formes pointée et hexadécimale), `64:ff9b::/96`, ULA, link-local, multicast, `2001:db8`, Teredo, 6to4, `100::/64`. Texte non-IP, zone (`%eth0`) : refusés. Adresses publiques (8.8.8.8, 2606:4700::1111) : admises. Deux `BlockList` distinctes : correct.
+- **Hôtes** : `URL` normalise les formes décimale, octale et hexadécimale en IPv4 (`2130706433`, `0x7f.1`) ; le test `isIP` puis la liste les refuse. `localhost.` (point final) passe le contrôle du point mais est refusé par l'adresse résolue (`127.0.0.1`/`::1`). Le point final ne contourne pas la liste blanche (`endsWith` strict).
+- **Rebinding** : l'adresse validée est celle passée à `httpsRequest({host})` ; aucune seconde résolution. Vérifié.
+- **Transport réel** (serveur HTTPS local, hors dépôt, `NODE_EXTRA_CA_CERTS`) : certificat vérifié contre le nom d'hôte et non contre l'IP épinglée (nom différent : échec « altnames ») ; réponse au-delà de `maxBytes` : interrompue ; réponse qui ne se termine jamais : « Délai dépassé » à 1,5 s ; connexion coupée : erreur, pas de blocage. Le délai couvre bien la réponse entière.
+- **Redirections** : revalidées à chaque saut (protocole, hôte, liste blanche, adresses), 0 pour les POST, 3 au plus ; rien d'anormal (les en-têtes personnalisés ne portent aucun secret aujourd'hui).
+
+### Contre-mutations de l'architecte (sauvegarde bac à sable, `/bin/cp -f`, une à la fois)
+| Mutation | Résultat |
+| --- | --- |
+| `safe-fetch.ts` : plage IPv6 mappée retirée | détectée |
+| `safe-fetch.ts` : `some(isForbiddenAddress)` remplacé par le test de la première adresse seule | détectée |
+| `safe-fetch.ts` : `servername` supprimé | **non détectée** |
+| `safe-fetch.ts` : contrôle `maxBytes` désactivé | **non détectée** |
+| `safe-fetch.ts` : minuteur global (`deadline`) neutralisé | **non détectée** |
+| `safe-href.ts` : refus des identifiants retiré | détectée |
+| `attachment-url.ts` : ancre `$` de l'expression `data:` retirée | **non détectée** |
+
+Les trois premières non-détections ont une même cause : `defaultTransport` n'est exécuté par aucun test automatisé (tous passent par `transport` simulé) ; le fixeur l'a vérifié à la main, hors CI.
+
+### Verdicts
+| Point | Verdict |
+| --- | --- |
+| S19 (SSRF) | **VALIDÉ**, réserves r37-m1 à r37-m3 et r37-a1 (non bloquantes) |
+| S20 (XSS et e-mails) | **VALIDÉ**, réserve r37-m4 (non bloquante) |
+| r36-m1 (deux tests du panneau) | **VALIDÉ**, clos |
+
+### Les 5 écarts de S19 et S20
+1. Pas d'`ipaddr.js` ni d'`undici` : **accepté**. `BlockList` plus connexion épinglée donnent la garantie demandée, sans dépendance ; sondes ci-dessus.
+2. `*.powerplatform.com` pour Teams : **accepté**, à confirmer par l'utilisateur ; resserrage possible vers `*.environment.api.powerplatform.com` si les URL réellement utilisées le permettent.
+3. `fetch` à hôtes fixes non migrés (Google, Microsoft, GitHub, SSO) : **accepté** ; seul `calendarId` est variable et il est passé par `encodeURIComponent` dans le chemin. Condition : tout futur `fetch` dont l'hôte dépend d'une donnée utilisateur passe par `safeFetch`.
+4. Liste MIME limitée aux URL `data:` et taille maximale de 10 Mio : **accepté**. `fileType` (libre, 127 caractères) n'est pas recoupé avec le type de l'URL `data:` : à traiter avec P5 (stockage objet), sans incidence de sécurité tant que le client déduit l'ouverture de l'URL et non du type.
+5. CSP renvoyée à S22 : **accepté** (c'est la défense en profondeur de S20).
+
+Changements cassants (intégrations hors liste blanche, flux ICS en `http` ou de type autre, pièces jointes limitées aux images et PDF) : **acceptés**, avec recensement préalable (voir journal).
+
+### Nouveaux constats (non bloquants)
+- **r37-m1 (Mineur) : `defaultTransport` non testé en CI.** Exiger un test (serveur `node:https` local avec certificat de test, `NODE_EXTRA_CA_CERTS` ou `ca` injectable dans la requête épinglée) qui couvre : certificat vérifié contre le nom d'hôte et non l'IP épinglée (échec si nom différent), `maxBytes`, délai global sur réponse qui ne se termine pas, `Host` envoyé. Critère : les mutations `servername` supprimé, `maxBytes` désactivé et minuteur neutralisé sont détectées. Si `defaultTransport` doit être exporté, le faire explicitement.
+- **r37-m2 (Mineur) : seule la première adresse est essayée.** `resolvePublicAddress` renvoie `addresses[0]` : un hôte avec un enregistrement AAAA en tête, sur un conteneur sans IPv6 sortant, échoue (ENETUNREACH) là où l'ancien `fetch` basculait. Exiger : essayer les adresses validées à tour de rôle (IPv4 d'abord), toutes déjà validées, et borner aussi la résolution DNS par le délai. Test : première adresse en erreur de connexion, la seconde réussit.
+- **r37-m3 (Mineur) : prise en charge de `text/plain` pour les flux ICS** (décision de l'architecte, voir journal) : ajouter `text/plain` à `CALENDAR_FEED_CONTENT_TYPES`, avec un test ; `text/html` et `application/octet-stream` restent refusés.
+- **r37-m4 (Mineur) : ancre de fin de l'expression `data:` non testée.** Ajouter aux tests (`attachment-dto.spec.ts`, `safe-href.spec.ts`) une URL `data:image/png;base64,AAAA` suivie de caractères parasites (espace, `"`, saut de ligne) : refusée. Critère : la mutation « ancre `$` retirée » est détectée des deux côtés.
+- **r37-a1 (Amélioration) : plages complémentaires.** Ajouter `64:ff9b:1::/48` (NAT64 à usage local), `fec0::/10` (site-local obsolète) et `192.88.99.0/24` (relais 6to4 obsolète). Aucune exploitation connue ; durcissement.
+
+### Réponses aux 7 questions du fixeur
+1. **`text/plain` pour les flux ICS : oui** (à confirmer par l'utilisateur). La protection réelle est l'adresse de destination ; le type de contenu n'est qu'un filtre secondaire, et les flux d'agenda privés sont souvent servis en `text/plain`. Garder `text/html` refusé. Voir r37-m3.
+2. **`powerplatform.com` : accepté** (à confirmer). Les webhooks Teams récents (Workflows) sont servis par `*.logic.azure.com` ou `*.environment.api.powerplatform.com` ; l'exploitation peut resserrer après recensement.
+3. **Recensement des `Integration` et `Attachment` hors règle : oui**, requête en lecture seule demandée à l'exploitation avant la mise en production, sans nettoyage automatique (à confirmer). Les lignes non conformes sont signalées aux propriétaires, pas supprimées.
+4. **Types de pièces jointes : images et PDF suffisent jusqu'à P5** (à confirmer par l'utilisateur, car les `.docx`, `.zip` et textes sont désormais refusés). Prévenir les utilisateurs ; P5 (stockage objet) élargira.
+5. **S21 : affichage unique du secret de webhook : oui** (décision produit, à confirmer). Le secret est chiffré en base, montré une fois à la liaison du dépôt, avec une action « régénérer » (ancien secret invalidé immédiatement). Pas de réaffichage.
+6. **S22 : domaines.** Voir exigences ci-dessous : ce qui se déduit du dépôt et ce qui doit venir de l'utilisateur.
+7. **O16 à lier à S22 : oui**, même lot (intercepteur `no-store` backend plus en-têtes nginx), un seul passage de revue.
+
+### Exigences précisées pour S21 (lot suivant)
+Reprendre la remédiation du constat d'origine, avec : (1) `rawBody: true` dans `NestFactory.create` et HMAC (`timingSafeEqual`, longueur vérifiée) sur `req.rawBody` ; (2) `Project.githubWebhookSecret` chiffré par `encrypt()`, migration additive nullable, nom daté postérieur à `20261114000000`, secret généré (32 octets) à la liaison P9-R, montré une seule fois, route de régénération réservée au propriétaire du projet, secret jamais renvoyé par les lectures de projet (`select` explicite) ni journalisé ; (3) route `POST /projects/:id/webhooks/github` ; l'ancienne route supprimée (ou 410) et l'exemption CSRF de `origin-guard.ts` ajustée à la nouvelle route seule ; (4) `closeTaskFromWebhook(projectId, taskId)` : tâche du projet **et** `payload.repository.full_name === project.githubRepo` ; (5) `X-GitHub-Delivery` en Redis (`SET NX EX 86400`), second envoi ignoré, et comportement défini si Redis est indisponible (refus, pas d'acceptation silencieuse) ; (6) passe-droit `NODE_ENV === 'test'` supprimé ; réponse 401 uniforme quel que soit le motif (projet inexistant, secret absent, signature fausse) ; (7) tests : signature sur corps brut avec espaces acceptée, signature fausse, projet inconnu, tâche d'un autre projet non fermée, dépôt différent refusé, rejeu ignoré, secret absent de `GET /projects/:id`. Décision produit à confirmer : affichage unique (question 5).
+
+### Exigences précisées pour S22 + O16 (lot suivant, après S21)
+- En-têtes avec `always` sur `/` **et** dans le bloc des assets (répétés : nginx n'hérite pas), `scripts/check-headers.sh` vérifiant `/` et un asset `.js` ; O16 : `Cache-Control: no-store` et `Pragma: no-cache` sur `/auth/*` et `/admin/*` (test dans `session-lifecycle.spec.ts`).
+- **Déductible du dépôt** : l'API est lue dans `VITE_API_URL` au build (`docker-compose.prod.yml`, `Dockerfile.prod`), donc `connect-src` doit être généré depuis cette variable (substitution au build ou `envsubst` au démarrage), pas codé en dur ; la documentation (`docs/manifeste-synchronisation-firestore.md`) cite `https://planner-pro.boukarou-os.com` (frontend) et `https://api.planner-pro.boukarou-os.com` (API) comme domaines de production. `socket.io-client` utilise la même URL d'API : prévoir `wss://` du même hôte. Le frontend n'utilise que **Firebase Auth** (`firebase/app`, `firebase/auth` dans `firebase-auth.ts` ; pas de client Firestore, la synchronisation Firestore est côté serveur) : donc `https://identitytoolkit.googleapis.com` et `https://securetoken.googleapis.com` dans `connect-src`, et non `*.firebaseio.com` du modèle initial ; selon le mode de connexion (popup ou redirection), `frame-src` et `script-src` pour `https://<projet>.firebaseapp.com` et `https://apis.google.com` : à vérifier en testant la connexion Google réelle avec la CSP en mode `Content-Security-Policy-Report-Only` d'abord. **Point que le modèle initial omet** : `frontend/src/index.css` importe `https://fonts.googleapis.com/...` : `style-src` doit ajouter `https://fonts.googleapis.com` et `font-src https://fonts.gstatic.com` (ou auto-héberger la police, préférable). L'icône `data:` de `index.html` est couverte par `img-src data:`.
+- **À fournir par l'utilisateur** : le domaine exact de l'API de production (confirmer `api.planner-pro.boukarou-os.com`), `VITE_FIREBASE_AUTH_DOMAIN` réel, et si la connexion Google passe par popup ou redirection. Déployer la CSP d'abord en `Report-Only`, puis en blocage.
+
+### Statut des constats
+| Constat | Statut |
+| --- | --- |
+| S19, S20, r36-m1 | **VALIDÉ** (code) ; S19 et S20 clos côté code après commit, réserves ci-dessous |
+| r37-m1, r37-m2, r37-m3, r37-m4 | Ouverts, Mineur, à traiter dans un petit lot avant S21 |
+| r37-a1 | Ouvert, Amélioration |
+| S30, O21 | inchangés |
+
+### Commit : feu vert, un seul commit
+25 entrées (les 24 du fixeur plus `rapport-audit.md`), sans `.claude/` ; ajouter les chemins explicitement, jamais `git add -A` :
+- Backend source (13) : `backend/src/common/safe-fetch.ts`, `backend/src/mail/mail.service.ts`, `backend/src/projects/attachment-url.ts`, `backend/src/projects/calendar-sync.service.ts`, `backend/src/projects/comments.controller.ts`, `backend/src/projects/comments.service.ts`, `backend/src/projects/dto/attachment.dto.ts`, `backend/src/projects/dto/create-comment.dto.ts`, `backend/src/projects/dto/create-integration.dto.ts`, `backend/src/projects/integration-url.ts`, `backend/src/projects/integration.service.ts`, `backend/src/projects/projects.controller.ts`, `backend/src/mail/mail.service.escape.spec.ts`.
+- Backend tests (5) : `backend/tests/unit/common/` (dossier, `safe-fetch.spec.ts`), `backend/tests/unit/projects/attachment-dto.spec.ts`, `backend/tests/unit/projects/integration-ssrf.spec.ts`, `backend/tests/unit/projects/calendar-sync.service.spec.ts`, `backend/tests/unit/projects/comments.service.spec.ts`.
+- Frontend (5) : `frontend/src/safe-href.ts`, `frontend/src/safe-href.spec.ts`, `frontend/src/components/TaskCommentsPanel.tsx`, `frontend/src/components/TaskCommentsPanel.spec.tsx`, `frontend/src/components/IntegrationsPanel.spec.tsx`.
+- Documentation (2) : `docs/security/rapport-audit.md`, `docs/security/journal-corrections.md`.
+
+(`git status` affiche 25 entrées une fois ce rapport modifié, le dossier `tests/unit/common/` comptant pour une.) Message de commit sans mention d'assistant.
+
+**Changements cassants** : (1) intégrations Slack/Teams hors liste blanche : échec d'envoi journalisé ; (2) flux d'agenda en `http`, ou de type autre que `text/calendar`/`application/json`, ou vers hôte privé : 502 ; (3) pièces jointes hors images et PDF, ou `data:` hors liste, ou `javascript:`/`http:` : 400 ; (4) liens de pièces jointes déjà stockées avec URL dangereuse : masqués.
+**Migration** : aucune.
+**Consignes de déploiement** : backend et frontend sans ordre imposé (l'ancien frontend recevrait un 400 sur un fichier non accepté). Avant la mise en production : recensement en lecture seule des lignes `Integration` (types SLACK/TEAMS dont `url` n'est pas sur `hooks.slack.com`, `*.webhook.office.com`, `*.logic.azure.com`, `*.powerplatform.com` ; flux d'agenda en `http`) et `Attachment` (`fileUrl` ni `https://` ni `data:` image/PDF). Vérifier que le conteneur backend dispose d'un DNS et d'une sortie directe en 443 : `safeFetch` ignore `HTTP(S)_PROXY`, un proxy sortant obligatoire ferait échouer tous les webhooks et flux. Vérifier, après déploiement, l'envoi d'un webhook Slack de test et la synchronisation d'un flux ICS réel (surveiller l'effet de r37-m2 sur les hôtes dotés d'un AAAA).
+
+### Constats ouverts, dans l'ordre de traitement
+1. Petit lot r37-m1, r37-m2, r37-m3, r37-m4 (+ r37-a1), avant S21.
+2. **S21** (exigences ci-dessus).
+3. **S22 + O16** (exigences ci-dessus).
+4. S30, actions d'exploitation 1 à 4 ; recensement S19/S20 avant production.
+5. Puis S23 à S25, S26 (hors volet `mock/login`), A5, A6, A7, P5, P8, O10 à O17 (O16 traité avec S22), Phase 6 (A8, A9 avec O21, P2, P7, Q-2).

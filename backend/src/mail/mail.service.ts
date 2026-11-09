@@ -12,6 +12,11 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
+/** Valeur destinée à un en-tête (objet) : sans saut de ligne, pour exclure l'injection d'en-têtes. */
+function singleLine(value: string): string {
+  return value.replace(/[\r\n\u2028\u2029]+/g, ' ').trim();
+}
+
 /**
  * Environnements où le corps des e-mails peut apparaître dans la console (mode simulé). Partout
  * ailleurs, il contient des liens secrets (vérification, réinitialisation) et n'est jamais écrit
@@ -77,14 +82,20 @@ export class MailService {
     role: string,
   ): Promise<boolean> {
     const inviteLink = `${this.frontendUrl}/?token=${rawToken}`;
-    const subject = `Invitation à rejoindre l'espace de travail "${workspaceName}"`;
+    const subject = singleLine(`Invitation à rejoindre l'espace de travail "${workspaceName}"`);
+    // Les valeurs saisies par des utilisateurs sont échappées avant interpolation dans le HTML (S20)
+    const safeSubject = escapeHtml(subject);
+    const safeWorkspace = escapeHtml(workspaceName);
+    const safeInviter = escapeHtml(invitedByName);
+    const safeRole = escapeHtml(role);
+    const safeLink = escapeHtml(inviteLink);
 
     const html = `
       <!DOCTYPE html>
       <html>
       <head>
         <meta charset="utf-8">
-        <title>${subject}</title>
+        <title>${safeSubject}</title>
         <style>
           body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -177,16 +188,16 @@ export class MailService {
           <h2 class="title">Rejoignez vos collaborateurs</h2>
           <div class="content">
             <p>Bonjour,</p>
-            <p><strong>${invitedByName}</strong> vous invite chaleureusement à collaborer au sein de l'espace de travail de gestion de projet <strong>"${workspaceName}"</strong>.</p>
-            <p>Vous y serez affecté avec le rôle : <span class="role-badge">${role}</span>.</p>
+            <p><strong>${safeInviter}</strong> vous invite chaleureusement à collaborer au sein de l'espace de travail de gestion de projet <strong>"${safeWorkspace}"</strong>.</p>
+            <p>Vous y serez affecté avec le rôle : <span class="role-badge">${safeRole}</span>.</p>
             <p>Planner Pro vous permettra d'organiser vos tâches, de suivre la rentabilité de vos projets avec des dashboards en temps réel et de collaborer avec votre équipe.</p>
           </div>
           <div class="btn-container">
-            <a href="${inviteLink}" class="btn">Accepter l'Invitation</a>
+            <a href="${safeLink}" class="btn">Accepter l'Invitation</a>
           </div>
           <div class="link-fallback">
             Si le bouton ne fonctionne pas, copiez-collez ce lien dans votre navigateur :<br>
-            <a href="${inviteLink}" style="color: #818cf8; text-decoration: none;">${inviteLink}</a>
+            <a href="${safeLink}" style="color: #818cf8; text-decoration: none;">${safeLink}</a>
           </div>
           <div class="footer">
             Cet email a été envoyé automatiquement par Planner Pro. Si vous n'êtes pas à l'origine de cette demande, vous pouvez ignorer cet email en toute sécurité.
@@ -210,15 +221,21 @@ export class MailService {
     taskTitle: string,
     commentSnippet: string,
   ): Promise<boolean> {
-    const subject = `${senderName} vous a mentionné sur la tâche "${taskTitle}"`;
+    const subject = singleLine(`${senderName} vous a mentionné sur la tâche "${taskTitle}"`);
     const actionLink = `${this.frontendUrl}/?activeTab=kanban`;
+    // Valeurs saisies par des utilisateurs : échappées avant interpolation dans le HTML (S20)
+    const safeSubject = escapeHtml(subject);
+    const safeSender = escapeHtml(senderName);
+    const safeTask = escapeHtml(taskTitle);
+    const safeSnippet = escapeHtml(commentSnippet);
+    const safeActionLink = escapeHtml(actionLink);
 
     const html = `
       <!DOCTYPE html>
       <html>
       <head>
         <meta charset="utf-8">
-        <title>${subject}</title>
+        <title>${safeSubject}</title>
         <style>
           body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -301,13 +318,13 @@ export class MailService {
           <h2 class="title">Nouvelle mention</h2>
           <div class="content">
             <p>Bonjour,</p>
-            <p><strong>${senderName}</strong> vous a mentionné dans un commentaire sur la tâche <strong>"${taskTitle}"</strong> :</p>
+            <p><strong>${safeSender}</strong> vous a mentionné dans un commentaire sur la tâche <strong>"${safeTask}"</strong> :</p>
           </div>
           <div class="quote-container">
-            "${commentSnippet}"
+            "${safeSnippet}"
           </div>
           <div class="btn-container">
-            <a href="${actionLink}" class="btn">Répondre sur le Kanban</a>
+            <a href="${safeActionLink}" class="btn">Répondre sur le Kanban</a>
           </div>
           <div class="footer">
             Vous recevez cet email car vous avez été mentionné par un collaborateur dans Planner Pro. Vous pouvez ajuster vos préférences de notification dans vos paramètres.
@@ -397,7 +414,9 @@ export class MailService {
   ): Promise<boolean> {
     const link = `${this.frontendUrl}/`;
     const when = details.at.toISOString();
-    const subject = `Une identité ${details.provider} a été ${action} à votre compte Planner-Pro`;
+    const subject = singleLine(
+      `Une identité ${details.provider} a été ${action} à votre compte Planner-Pro`,
+    );
     const html = this.simpleMailHtml(
       subject,
       `<p>Identité : <strong>${escapeHtml(details.provider)}</strong> (${escapeHtml(details.identifier)}), le ${escapeHtml(when)}.</p><p>Si vous n’êtes pas à l’origine de cette action, changez votre mot de passe et vérifiez la section « Sécurité du compte » sans attendre.</p>`,
@@ -435,7 +454,7 @@ Si vous n'êtes pas à l'origine de cette action, changez votre mot de passe et 
         const info = await this.transporter.sendMail({
           from: this.fromAddress,
           to,
-          subject,
+          subject: singleLine(subject),
           text,
           html,
         });

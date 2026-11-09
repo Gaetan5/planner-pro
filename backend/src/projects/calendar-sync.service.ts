@@ -8,6 +8,8 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { encrypt, decrypt } from '../auth/encryption.util';
+import { safeFetch } from '../common/safe-fetch';
+import { CALENDAR_FEED_CONTENT_TYPES } from './integration-url';
 
 export interface CalendarConflict {
   id: string;
@@ -324,15 +326,18 @@ export class CalendarSyncService {
     userName: string,
   ): Promise<CalendarEvent[]> {
     try {
-      this.logger.log(`Fetching external calendar from URL: ${url}`);
-      const response = await fetch(url);
+      // L'URL peut contenir un jeton de flux privé : elle n'est pas journalisée (S19)
+      this.logger.log('Fetching external calendar feed.');
+      const response = await safeFetch(url, {
+        allowedContentTypes: CALENDAR_FEED_CONTENT_TYPES,
+      });
       if (!response.ok) {
         this.logger.warn(`External calendar request failed with status ${response.status}.`);
         throw new BadGatewayException(
           'Un agenda externe est indisponible. Vérifiez son URL ou réessayez ultérieurement.',
         );
       }
-      const text = await response.text();
+      const text = response.text;
       const trimmedText = text.trim();
 
       // 1. Essayer de parser comme du JSON

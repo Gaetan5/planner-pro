@@ -14,7 +14,11 @@ import {
   Image,
   File,
 } from 'lucide-react';
+import { safeHref } from '../safe-href';
 import './TaskCommentsPanel.css';
+
+/** Types acceptés par le serveur pour les pièces jointes (S20). */
+const ATTACHMENT_ACCEPT = 'image/png,image/jpeg,image/gif,image/webp,application/pdf';
 
 interface TaskCommentsPanelProps {
   taskId: string;
@@ -501,7 +505,7 @@ export const TaskCommentsPanel: React.FC<TaskCommentsPanelProps> = ({
                   {c.attachments.map((att: any) => (
                     <a
                       key={att.id}
-                      href={att.fileUrl}
+                      href={safeHref(att.fileUrl)}
                       download={att.fileName}
                       target="_blank"
                       rel="noopener noreferrer"
@@ -586,6 +590,7 @@ export const TaskCommentsPanel: React.FC<TaskCommentsPanelProps> = ({
               <input
                 ref={taskFileInputRef}
                 type="file"
+                accept={ATTACHMENT_ACCEPT}
                 onChange={handleTaskFileChange}
                 style={{ display: 'none' }}
               />
@@ -604,7 +609,7 @@ export const TaskCommentsPanel: React.FC<TaskCommentsPanelProps> = ({
               {taskAttachments.map((att) => (
                 <div key={att.id} className="task-attachment-item">
                   <a
-                    href={att.fileUrl}
+                    href={safeHref(att.fileUrl)}
                     download={att.fileName}
                     target="_blank"
                     rel="noopener noreferrer"
@@ -734,6 +739,7 @@ export const TaskCommentsPanel: React.FC<TaskCommentsPanelProps> = ({
               <input
                 ref={commentFileInputRef}
                 type="file"
+                accept={ATTACHMENT_ACCEPT}
                 onChange={handleCommentFileChange}
                 style={{ display: 'none' }}
               />

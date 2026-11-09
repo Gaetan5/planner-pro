@@ -11,6 +11,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
 import { PolicyService } from '../authz/policy.service';
 import { ProjectAction } from '../authz/permissions';
+import { isSafeAttachmentUrl } from './attachment-url';
 
 export type CommentWithRelations = Prisma.CommentGetPayload<{
   include: {
@@ -55,6 +56,8 @@ export class CommentsService {
     attachments?: { fileName: string; fileUrl: string; fileType: string; fileSize: number }[],
   ) {
     const task = await this.loadTask(taskId, userId, 'comment.write');
+    // Même contrôle que le DTO pour les appelants internes (S20), après l'autorisation
+    this.assertSafeAttachmentUrls(attachments?.map((a) => a.fileUrl) ?? []);
 
     if (parentId) {
       const parent = await this.prisma.comment.findFirst({
@@ -345,6 +348,15 @@ export class CommentsService {
 
   // --- CRUD Pièces jointes (Attachment) ---
 
+  /** Refuse toute URL de pièce jointe hors `https:` ou `data:` en liste blanche (S20). */
+  private assertSafeAttachmentUrls(urls: string[]) {
+    if (urls.some((url) => !isSafeAttachmentUrl(url))) {
+      throw new BadRequestException(
+        'L’URL de la pièce jointe doit être en HTTPS ou une image ou un PDF encodé (data:).',
+      );
+    }
+  }
+
   async createAttachmentForTask(
     taskId: string,
     userId: string,
@@ -354,6 +366,7 @@ export class CommentsService {
     fileSize: number,
   ) {
     const task = await this.loadTask(taskId, userId, 'attachment.write');
+    this.assertSafeAttachmentUrls([fileUrl]);
 
     return this.prisma.$transaction(async (tx) => {
       const created = await tx.attachment.create({

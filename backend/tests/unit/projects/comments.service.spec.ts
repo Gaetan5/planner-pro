@@ -6,7 +6,7 @@ import { IntegrationService } from '../../../src/projects/integration.service';
 import { NotificationsService } from '../../../src/notifications/notifications.service';
 import { FirestoreSyncService } from '../../../src/firestore-sync/firestore-sync.service';
 import { WorkspaceRole } from '@prisma/client';
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 
 describe('CommentsService', () => {
   let service: CommentsService;
@@ -417,7 +417,7 @@ describe('CommentsService', () => {
       const mockAttachment = {
         id: 'att-1',
         fileName: 'doc.pdf',
-        fileUrl: 'http://test.com/doc.pdf',
+        fileUrl: 'https://test.com/doc.pdf',
         fileType: 'application/pdf',
         fileSize: 1024,
         taskId,
@@ -428,7 +428,7 @@ describe('CommentsService', () => {
         taskId,
         userId,
         'doc.pdf',
-        'http://test.com/doc.pdf',
+        'https://test.com/doc.pdf',
         'application/pdf',
         1024,
       );
@@ -437,13 +437,57 @@ describe('CommentsService', () => {
       expect(mockPrisma.attachment.create).toHaveBeenCalledWith({
         data: {
           fileName: 'doc.pdf',
-          fileUrl: 'http://test.com/doc.pdf',
+          fileUrl: 'https://test.com/doc.pdf',
           fileType: 'application/pdf',
           fileSize: 1024,
           taskId,
           uploadedById: userId,
         },
       });
+    });
+
+    // S20 : aucune URL exécutable ne doit être persistée, même pour un appelant interne
+    it.each([
+      'javascript:alert(1)',
+      'JaVaScRiPt:alert(1)',
+      'http://test.com/doc.pdf',
+      'data:text/html;base64,PHNjcmlwdD4=',
+      'data:image/svg+xml;base64,PHN2Zz4=',
+      'vbscript:msgbox(1)',
+      'pas une url',
+    ])('createAttachmentForTask refuse fileUrl %s', async (fileUrl) => {
+      mockPrisma.task.findFirst.mockResolvedValue({ id: taskId, project: { workspaceId } });
+      mockPrisma.membership.findFirst.mockResolvedValue({ userId, role: WorkspaceRole.MEMBER });
+      await expect(
+        service.createAttachmentForTask(taskId, userId, 'a.png', fileUrl, 'image/png', 10),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.attachment.create).not.toHaveBeenCalled();
+    });
+
+    it('createComment refuse une pièce jointe javascript: sans rien écrire', async () => {
+      mockPrisma.task.findFirst.mockResolvedValue({ id: taskId, project: { workspaceId } });
+      mockPrisma.membership.findFirst.mockResolvedValue({ userId, role: WorkspaceRole.MEMBER });
+      await expect(
+        service.createComment(taskId, userId, 'x', undefined, [
+          { fileName: 'a', fileUrl: 'javascript:alert(1)', fileType: 'image/png', fileSize: 1 },
+        ]),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('createAttachmentForTask accepte une image data: en liste blanche', async () => {
+      mockPrisma.task.findFirst.mockResolvedValue({ id: taskId, project: { workspaceId } });
+      mockPrisma.membership.findFirst.mockResolvedValue({ userId, role: WorkspaceRole.MEMBER });
+      mockPrisma.attachment.create.mockResolvedValue({ id: 'att-2' });
+      await service.createAttachmentForTask(
+        taskId,
+        userId,
+        'a.png',
+        'data:image/png;base64,iVBORw0KGgo=',
+        'image/png',
+        10,
+      );
+      expect(mockPrisma.attachment.create).toHaveBeenCalled();
     });
   });
 });

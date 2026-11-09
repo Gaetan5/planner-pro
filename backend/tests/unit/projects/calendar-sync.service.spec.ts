@@ -4,12 +4,20 @@ import { PrismaService } from '../../../src/prisma/prisma.service';
 import {
   BadGatewayException,
   BadRequestException,
+  Logger,
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { safeFetch, SafeFetchError } from '../../../src/common/safe-fetch';
 import { decrypt } from '../../../src/auth/encryption.util';
+
+jest.mock('../../../src/common/safe-fetch', () => ({
+  ...jest.requireActual('../../../src/common/safe-fetch'),
+  safeFetch: jest.fn(),
+}));
+const safeFetchMock = safeFetch as jest.Mock;
 
 const FIXTURE_ICS = readFileSync(
   join(__dirname, '../../fixtures/calendar/sample-feed.ics'),
@@ -212,9 +220,12 @@ describe('CalendarSyncService', () => {
           },
         },
       ]);
-      jest
-        .spyOn(global, 'fetch')
-        .mockResolvedValue({ ok: true, text: async () => FIXTURE_ICS } as Response);
+      safeFetchMock.mockResolvedValue({
+        ok: true,
+        status: 200,
+        contentType: 'text/calendar',
+        text: FIXTURE_ICS,
+      });
 
       const conflicts = await service.detectCalendarConflicts('workspace-123');
 
@@ -244,9 +255,12 @@ describe('CalendarSyncService', () => {
           },
         },
       ]);
-      jest
-        .spyOn(global, 'fetch')
-        .mockResolvedValue({ ok: true, text: async () => FIXTURE_ICS } as Response);
+      safeFetchMock.mockResolvedValue({
+        ok: true,
+        status: 200,
+        contentType: 'text/calendar',
+        text: FIXTURE_ICS,
+      });
 
       expect(await service.detectCalendarConflicts('workspace-123')).toEqual([]);
     });
@@ -284,6 +298,60 @@ describe('CalendarSyncService', () => {
       expect(result.length).toBe(0);
     });
 
+    it('S19 : le flux externe passe par safeFetch, limité aux types calendrier et JSON, URL non journalisée', async () => {
+      const logSpy = jest.spyOn(Logger.prototype, 'log');
+      mockPrisma.integration.findMany.mockResolvedValue([
+        {
+          id: 'int-ics',
+          type: 'GOOGLE_CALENDAR',
+          url: 'https://calendar.example/prive/jeton-secret.ics',
+        },
+      ]);
+      mockPrisma.timeBlock.findMany.mockResolvedValue([
+        {
+          id: 'block-1',
+          startTime: new Date('2026-06-01T11:00:00Z'),
+          endTime: new Date('2026-06-01T13:00:00Z'),
+          task: { title: 'Tâche', assignees: [] },
+        },
+      ]);
+      safeFetchMock.mockResolvedValue({
+        ok: true,
+        status: 200,
+        contentType: 'text/calendar',
+        text: FIXTURE_ICS,
+      });
+
+      await service.detectCalendarConflicts('workspace-123');
+
+      expect(safeFetchMock).toHaveBeenCalledWith(
+        'https://calendar.example/prive/jeton-secret.ics',
+        {
+          allowedContentTypes: ['text/calendar', 'application/json'],
+        },
+      );
+      expect(JSON.stringify(logSpy.mock.calls)).not.toContain('jeton-secret');
+    });
+
+    it('S19 : un flux refusé par safeFetch (adresse interne) devient une erreur 502 générique', async () => {
+      mockPrisma.integration.findMany.mockResolvedValue([
+        { id: 'int-ics', type: 'GOOGLE_CALENDAR', url: 'https://interne.example/f.ics' },
+      ]);
+      mockPrisma.timeBlock.findMany.mockResolvedValue([
+        {
+          id: 'block-1',
+          startTime: new Date('2026-06-01T11:00:00Z'),
+          endTime: new Date('2026-06-01T13:00:00Z'),
+          task: { title: 'Tâche', assignees: [] },
+        },
+      ]);
+      safeFetchMock.mockRejectedValue(new SafeFetchError('Adresse de destination non autorisée.'));
+
+      const error = await service.detectCalendarConflicts('workspace-123').catch((e) => e);
+      expect(error).toBeInstanceOf(BadGatewayException);
+      expect(String(error.message)).not.toContain('Adresse de destination');
+    });
+
     it('propage une erreur claire quand un flux de calendrier externe est indisponible', async () => {
       mockPrisma.integration.findMany.mockResolvedValue([
         { id: 'int-calendar', type: 'GOOGLE_CALENDAR', url: 'https://calendar.example/feed.ics' },
@@ -296,11 +364,7 @@ describe('CalendarSyncService', () => {
           task: { title: 'Tâche', assignees: [] },
         },
       ]);
-      jest.spyOn(global, 'fetch').mockResolvedValue({
-        ok: false,
-        status: 503,
-        statusText: 'Service Unavailable',
-      } as Response);
+      safeFetchMock.mockResolvedValue({ ok: false, status: 503, contentType: '', text: '' });
 
       await expect(service.detectCalendarConflicts('workspace-123')).rejects.toThrow(
         BadGatewayException,
@@ -319,10 +383,12 @@ describe('CalendarSyncService', () => {
           task: { title: 'Tâche', assignees: [] },
         },
       ]);
-      jest.spyOn(global, 'fetch').mockResolvedValue({
+      safeFetchMock.mockResolvedValue({
         ok: true,
-        text: async () => 'unsupported response',
-      } as Response);
+        status: 200,
+        contentType: 'text/calendar',
+        text: 'unsupported response',
+      });
 
       await expect(service.detectCalendarConflicts('workspace-123')).rejects.toThrow(
         BadGatewayException,
@@ -499,9 +565,12 @@ describe('CalendarSyncService', () => {
       mockPrisma.task.findFirst.mockResolvedValue(null);
       mockPrisma.task.create.mockResolvedValue({ id: 'sync-task' });
       mockPrisma.timeBlock.findFirst.mockResolvedValue(null);
-      jest
-        .spyOn(global, 'fetch')
-        .mockResolvedValue({ ok: true, text: async () => FIXTURE_ICS } as Response);
+      safeFetchMock.mockResolvedValue({
+        ok: true,
+        status: 200,
+        contentType: 'text/calendar',
+        text: FIXTURE_ICS,
+      });
 
       const result = await service.syncCalendarEvents('ws-1', 'user-appelant');
 

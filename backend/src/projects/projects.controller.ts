@@ -21,7 +21,8 @@ import { SprintService } from './sprint.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { PolicyService } from '../authz/policy.service';
 import { ProjectPermissionsService } from './project-permissions.service';
-import { IntegrationService, IntegrationDto } from './integration.service';
+import { IntegrationService } from './integration.service';
+import { CreateIntegrationDto } from './dto/create-integration.dto';
 import { CalendarSyncService } from './calendar-sync.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
@@ -473,7 +474,7 @@ export class ProjectsController {
   async createIntegration(
     @Req() req: any,
     @Param('workspaceId') workspaceId: string,
-    @Body() body: IntegrationDto,
+    @Body() body: CreateIntegrationDto,
   ) {
     await this.projectPermissionsService.assertWorkspaceAccess(workspaceId, req.user.id, [
       'OWNER',

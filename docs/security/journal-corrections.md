@@ -3627,3 +3627,131 @@ Un seul commit, 14 entrées de `git status` (les 13 du fixeur plus `rapport-audi
 #### Constats encore ouverts
 
 r36-m1 (mineur) ; S30 (actions d'exploitation 1 à 4) ; Phase 5 (S19 à S26 hors `mock/login`, A5 à A7, P5, P8, O10 à O17) ; Phase 6 (A8, A9 avec O21, P2, P7, Q-2).
+
+
+## Lot r36 (fixeur)
+
+Périmètre demandé : S19 à S22 et r36-m1. **S19 et S20 sont traités** dans ce lot (chacun est volumineux : module réseau, DTO, e-mails, frontend). **S21 et S22 ne sont pas traités** et forment le lot suivant ; leur état et leur plan sont consignés ci-dessous. Aucune migration Prisma dans ce lot. Aucun commit.
+
+### État initial et plan (S19 à S22)
+
+| Constat | État avant le lot (relu dans le code) | Plan |
+| --- | --- | --- |
+| S19 | Non traité. `IntegrationDto` était une interface (aucune validation) ; `fetch(url)` direct sur l'URL stockée dans `calendar-sync.service.ts` (flux ICS/JSON, titres renvoyés dans les messages de conflit) et dans `integration.service.ts` (`postToWebhook`, corps de réponse mis dans l'exception donc journalisé) ; URL de flux journalisée en clair. Les autres `fetch` (Google, Microsoft, GitHub, points d'accès SSO) visent des hôtes fixés dans le code. | Fait dans ce lot (voir S19). |
+| S20 | Non traité. `CreateCommentDto.attachments` : `@IsArray` seulement ; `POST tasks/:taskId/attachments` avec un type inline ; `fileUrl` stocké tel quel ; `<a href={att.fileUrl}>` à 2 endroits ; e-mails d'invitation et de mention sans échappement (`escapeHtml` n'était appliqué qu'aux e-mails simples). | Fait dans ce lot (voir S20). |
+| S21 | Non traité. `POST /projects/webhooks/github` public ; HMAC sur `JSON.stringify(payload)` ; secret unique `GITHUB_WEBHOOK_SECRET` ; `return NODE_ENV === 'test'` si le secret est absent ; `closeTaskFromWebhook(taskId)` ferme n'importe quelle tâche par UUID ; pas d'anti-rejeu. `main.ts` sans `rawBody`. `Project.githubRepo` est posé par `auth.service.ts:631` (P9-R). | Lot suivant : (1) `rawBody: true` et HMAC sur `req.rawBody` ; (2) colonne `Project.githubWebhookSecret` chiffrée (migration additive nullable, nom daté) générée à la liaison du dépôt, secret montré une seule fois à l'utilisateur (**décision produit**) ; (3) route `POST /projects/:id/webhooks/github` (l'ancienne route supprimée, ou 410) et exemption CSRF de `origin-guard.ts` ajustée ; (4) `closeTaskFromWebhook(projectId, taskId)` limité au projet et `payload.repository.full_name === githubRepo` ; (5) `X-GitHub-Delivery` dans Redis, TTL 24 h ; (6) suppression du passe-droit `NODE_ENV === 'test'` ; (7) tests listés au rapport. |
+| S22 | Non traité. `frontend/nginx.prod.conf` n'a aucun en-tête de sécurité. | Lot suivant, avec O16 (`Cache-Control: no-store` sur `/auth/*` et `/admin/*`, rattaché à la Phase 5 par le rapport) : en-têtes avec `always` sur `/` et sur le bloc des assets (nginx n'hérite pas des `add_header` d'un bloc enfant qui en déclare un), `scripts/check-headers.sh`. Le domaine API de `connect-src` et les domaines Firebase réellement utilisés sont à fournir (**question**). |
+
+### r36-m1 — Deux tests du panneau d'intégrations
+
+**Statut** : CORRIGÉ – À REVOIR
+
+**Changement** : aucun code produit.
+**Tests** : `frontend/src/components/IntegrationsPanel.spec.tsx` (+2) : (a) `listSessions` rejeté : « Connecter un dépôt » s'affiche ; (b) session courante ordinaire et autre session de la liste d'assistance : le bouton s'affiche.
+**Contre-mutations** (fichier restauré par `/bin/cp -f`, md5 identiques) : hook `.catch` -> `setImpersonated(true)` : détectée ; `find(current)` remplacé par `some(impersonated)` : détectée (M49, M50 ci-dessous).
+**Écart par rapport au rapport** : aucun. **Questions** : aucune.
+
+### S19 — SSRF par les URL d'intégration
+
+**Statut** : CORRIGÉ – À REVOIR
+
+**Cause confirmée** : `integration.service.ts` (interface sans validation, `fetch(url)` sur l'URL stockée, corps de réponse dans l'exception) ; `calendar-sync.service.ts` (`fetch(url)` du flux, URL journalisée).
+
+**Changement** :
+- `backend/src/common/safe-fetch.ts` (nouveau) : `safeFetch(url, options)`. HTTPS seul, port 443 seul, pas d'identifiants dans l'URL, nom d'hôte avec au moins un point (`cache`, `localhost` refusés) ; résolution DNS préalable (`dns.lookup all`), refus si **une seule** adresse résolue est privée ou réservée ; `isForbiddenAddress` (IPv4 : 0/8, 10/8, 100.64/10, 127/8, 169.254/16, 172.16/12, 192.0.0/24, 192.0.2/24, 192.168/16, 198.18/15, 198.51.100/24, 203.0.113/24, 224/4, 240/4 ; IPv6 : `::/96` (non spécifiée, loopback, compatible IPv4), `::ffff:0:0/96` (mappées), NAT64, `100::/64`, Teredo, `2001:db8::/32`, 6to4, ULA, link-local, multicast) ; connexion TLS **ouverte sur l'adresse validée** (`host: <ip>`, `servername` = nom d'hôte pour SNI et certificat, en-tête `Host`) : pas de seconde résolution, donc pas de rebinding DNS ; redirections suivies à la main (3 au plus, 0 pour les POST), chacune revalidée (protocole, hôte, liste blanche, adresses) ; délai total de 5 s ; réponse limitée à 1 Mio (connexion détruite au-delà) ; types de contenu optionnels vérifiés (sans paramètres, insensible à la casse) ; `allowHost` appliqué à chaque saut. Points d'injection `resolve` et `transport` pour les tests.
+- `backend/src/projects/integration-url.ts` (nouveau) : liste blanche par type (Slack `hooks.slack.com` ; Teams `*.webhook.office.com`, `*.logic.azure.com` et `*.powerplatform.com` ; calendriers : hôte public quelconque), IP littérales et hôtes sans point toujours refusés ; types de contenu des flux : `text/calendar`, `application/json`.
+- `backend/src/projects/dto/create-integration.dto.ts` (nouveau) : `@IsIn` sur les 4 types, `@IsUrl({ protocols:['https'], require_protocol, require_tld })`, `@MaxLength(2048)` ; nom et `calendarId` bornés à 191 (taille des colonnes). `projects.controller.ts` : `@Body() body: CreateIntegrationDto` ; l'interface `IntegrationDto` est supprimée.
+- `integration.service.ts` : `createIntegration` refuse (400) une URL hors liste blanche du type (IP littérale, hôte voisin comme `hooks.slack.com.evil.example`, port, `http`) ; `postToWebhook` passe par `safeFetch` (sans redirection, `allowHost` revérifié à l'envoi pour les lignes antérieures), et l'erreur ne contient plus que `HTTP <statut>` (corps ni renvoyé ni journalisé).
+- `calendar-sync.service.ts` : `fetchExternalEvents` passe par `safeFetch` avec les types de contenu autorisés ; l'URL (qui peut contenir un jeton de flux privé) n'est plus journalisée ; toute erreur de `safeFetch` reste mappée en 502 générique (le motif du refus n'est pas renvoyé au client).
+
+**Tests** : `tests/unit/common/safe-fetch.spec.ts` (51 : `http://127.0.0.1`, `http://169.254.169.254`, `http://[::1]`, `http://cache:6379`, `https://[::ffff:127.0.0.1]`, domaine résolvant vers 10.0.0.1 (DNS mocké), résolution mixte, redirection 302 vers 127.0.0.1, redirection vers hôte résolvant en privé, liste blanche revalidée à chaque saut, 3 sauts au plus, 0 saut, épinglage, types de contenu, 33 adresses classées) ; `tests/unit/projects/integration-ssrf.spec.ts` (30 : `type:'FOO'`, `url:'http://...'`, `javascript:`, hôte sans domaine, URL trop longue, champ inconnu : 400 ; 10 URL refusées et 4 acceptées à la création ; `postToWebhook` : options de `safeFetch`, corps de réponse absent des journaux) ; `calendar-sync.service.spec.ts` (+2 : options passées à `safeFetch` et URL absente des journaux ; refus de `safeFetch` donne un 502 sans le motif ; 5 tests existants adaptés pour simuler `safeFetch` au lieu de `fetch`). Vérification manuelle du transport réel (hors CI) : `safeFetch('https://example.com/')` renvoie 200 `text/html` (SNI et certificat valides sur l'adresse épinglée), un hôte inexistant échoue, `maxBytes: 100` interrompt la réponse.
+**Contre-mutations** : M1 à M23 ci-dessous (toutes détectées).
+
+**Écart par rapport au rapport** :
+1. Pas de `ipaddr.js` ni d'agent `undici` : `node:net.BlockList` pour les plages (aucune dépendance ajoutée) et `node:https` avec connexion épinglée sur l'IP validée, qui donne la même garantie que l'agent à `lookup` personnalisé. Deux `BlockList` distinctes (IPv4 et IPv6), car Node confronte une IPv4 aux règles IPv6 sous forme mappée (premier essai : tout était refusé).
+2. Les IPv4 mappées en IPv6 sont refusées en bloc, plutôt que dépliées : un DNS n'en renvoie jamais de légitime.
+3. Types de contenu des flux limités à `text/calendar` et `application/json`, comme le rapport. Des serveurs servent des ICS en `text/plain` ou `application/octet-stream` : ces flux seraient refusés (502).
+4. Teams : `*.powerplatform.com` ajouté aux deux domaines du rapport (nouveaux webhooks Power Automate), à confirmer.
+5. Les `fetch` vers Google, Microsoft, GitHub et les points d'accès SSO ne sont pas migrés : hôtes fixés dans le code, aucune donnée utilisateur dans l'hôte (sauf `calendarId` encodé dans le chemin).
+
+**Changements cassants** : une intégration Slack/Teams existante dont l'URL est hors liste blanche, ou un flux d'agenda en `http`/non `text/calendar`/`application/json`, cesse de fonctionner (échec journalisé, ou 502 pour un flux). Aucune migration de données ; **reprise recommandée** : requête de recensement des lignes `Integration` dont l'URL ne passe pas `isAllowedIntegrationUrl` avant la mise en production.
+**Questions pour l'architecte** : (a) accepter `text/plain` pour les flux ICS ? (b) liste Teams : `powerplatform.com` accepté ? (c) un nettoyage des lignes existantes non conformes est-il à planifier (script d'exploitation) ?
+
+### S20 — XSS stockée (pièces jointes) et injection HTML dans les e-mails
+
+**Statut** : CORRIGÉ – À REVOIR
+
+**Cause confirmée** : `create-comment.dto.ts` (`@IsArray` seul), `comments.controller.ts` (type inline pour `POST tasks/:taskId/attachments`), `comments.service.ts` (`fileUrl` stocké tel quel), `TaskCommentsPanel.tsx` (`href={att.fileUrl}` x2), `mail.service.ts` (invitation et mention sans échappement).
+
+**Changement** :
+- `backend/src/projects/attachment-url.ts` (nouveau) : `isSafeAttachmentUrl` : `https:` (2048 caractères au plus, sans identifiants) ou `data:` base64 d'un type de la liste blanche (`image/png|jpeg|gif|webp`, `application/pdf`). `javascript:`, `vbscript:`, `http:`, `data:text/html`, `data:image/svg+xml` refusés.
+- `backend/src/projects/dto/attachment.dto.ts` (nouveau) : `AttachmentDto` (`fileName` 1 à 255 sans `/`, `\` ni caractère de contrôle ; `fileUrl` ; `fileType` 127 ; `fileSize` entier de 0 à 10 Mio). `create-comment.dto.ts` : `@ArrayMaxSize(10)`, `@ValidateNested({ each: true })`, `@Type`. `comments.controller.ts` : `@Body() body: AttachmentDto`.
+- `comments.service.ts` : `createComment` et `createAttachmentForTask` revérifient les URL (`BadRequestException`) **après** l'autorisation (un appelant non autorisé reçoit 403, pas une réponse de validation).
+- `mail.service.ts` : e-mails d'invitation et de mention : espace, invitant, rôle, expéditeur, titre de tâche, extrait, lien et titre HTML passent par `escapeHtml` ; `singleLine()` retire CR/LF/U+2028/9 des objets, à la construction et à l'envoi.
+- Frontend : `frontend/src/safe-href.ts` (nouveau, `https:` ou `data:` admis, sinon `undefined`), appliqué aux 2 `href` de `TaskCommentsPanel.tsx` ; `accept` des deux champs fichier aligné sur les types acceptés par le serveur.
+
+**Tests** : `tests/unit/projects/attachment-dto.spec.ts` (19 : `javascript:alert(1)` (casse, espace), `http:`, `data:text/html`, `data:image/svg+xml`, `blob:`, `file:`, identifiants, noms avec `/` ou `\`, taille, champ inconnu : 400 ; liste imbriquée validée, 11 éléments refusés) ; `comments.service.spec.ts` (+9 : refus des 7 URL pour `createAttachmentForTask`, `createComment` refuse `javascript:` sans transaction, image `data:` acceptée) ; `src/mail/mail.service.escape.spec.ts` (6 : `workspaceName = '<a href=x>'` donne `&lt;a href=x&gt;`, invitant, rôle, titre HTML, expéditeur/tâche/extrait d'une mention, jeton cassant l'attribut, objets sur une ligne) ; frontend `safe-href.spec.ts` (16) et `TaskCommentsPanel.spec.tsx` (1 : pièces jointes `javascript:` de commentaire et de tâche rendues **sans attribut `href`**, liens `https:` et `data:` PDF conservés).
+**Contre-mutations** : M24 à M48 ci-dessous.
+
+**Écart par rapport au rapport** : (1) la liste blanche des types MIME s'applique aux URL `data:` seulement, `fileType` n'est borné qu'en longueur ; (2) taille maximale de 10 Mio (valeur choisie, alignée sur P5) ; (3) la CSP du frontend (point 4 du rapport) relève de S22, lot suivant ; (4) `safeHref` n'est appliqué qu'aux deux `href` alimentés par des données (seuls existants, vérifié par recherche de `href={`) ; (5) la montée vers React 19 n'est pas faite.
+**Changements cassants** : les pièces jointes hors images et PDF (par exemple `.docx`, `.zip`, texte) sont désormais refusées en 400, alors que l'interface les acceptait (en base64, sous la limite d'environ 70 Ko du parseur JSON). Le sélecteur de fichier ne propose plus que les types acceptés. Les pièces jointes déjà stockées sont conservées mais leur lien est masqué si l'URL est dangereuse ; aucune reprise en base.
+**Questions pour l'architecte** : (a) le périmètre des types acceptés (images et PDF seulement) convient-il en attendant P5 ? (b) un recensement des lignes `Attachment` dont `fileUrl` ne passe pas `isSafeAttachmentUrl` est-il à demander à l'exploitation ?
+
+### Contre-mutations du lot (méthode imposée)
+
+Sauvegarde de chaque fichier dans le bac à sable avant mutation, une mutation à la fois, restauration par `/bin/cp -f` dans un `finally`, `md5` de chaque fichier comparé avant/après chaque mutation et en fin de passage (identiques), aucun processus en attente. 50 mutations ; 45 détectées au premier passage, 5 non détectées (M21, M28, M31, M32, M35) puis les tests ont été renforcés (ou la mutation corrigée) et rejouées : **50/50 détectées**.
+
+| Mutations | Fichier | Résultat |
+| --- | --- | --- |
+| M1 plage 169.254/16 retirée ; M10 ULA retiré | `safe-fetch.ts` | détectées |
+| M2 `some` -> `every` (une seule IP interdite suffit) ; M3 HTTPS non exigé ; M7 port libre ; M8 hôte sans point admis | `safe-fetch.ts` | détectées |
+| M4 plus d'épinglage ; M5 redirections 10 ; M6 type de contenu ignoré ; M9 `allowHost` ignoré ; M11 redirection non revalidée | `safe-fetch.ts` | détectées |
+| M12 IP littérale admise ; M13 `endsWith` -> `includes` (Teams) ; M14 Slack par `includes` | `integration-url.ts` | détectées |
+| M15 pas de liste blanche à la création ; M16 redirections suivies ; M17 `allowHost` retiré à l'envoi ; M18 corps de réponse dans l'erreur | `integration.service.ts` | détectées |
+| M19 `http` admis ; M20 type libre ; M21 longueur 2048 retirée (test renforcé : URL de 2059 caractères) | `create-integration.dto.ts` | détectées |
+| M22 types de contenu retirés ; M23 URL journalisée | `calendar-sync.service.ts` | détectées |
+| M24 à M30, M32 (invitant, espace, rôle, titre HTML, expéditeur, tâche, extrait, lien non échappés) ; M31 objet multi-ligne à l'envoi | `mail.service.ts` | détectées (M28, M31, M32 après renforcement des tests) |
+| M33 `http` admis ; M34 `data:` libre ; M35 type MIME hors liste admis (première version de M35 sans effet : `+` de `svg+xml` non échappé dans l'expression, mutation refaite avec `text/html`) ; M36 identifiants admis | `attachment-url.ts` | détectées |
+| M37 nom avec `/` ; M38 taille maximale retirée | `attachment.dto.ts` | détectées |
+| M39 liste imbriquée non validée ; M40 limite de 10 retirée | `create-comment.dto.ts` | détectées |
+| M41 `createComment` sans contrôle ; M42 `createAttachmentForTask` sans contrôle | `comments.service.ts` | détectées |
+| M43 contrôleur à type inline | `comments.controller.ts` | détectée (test de matrice, DTO classe) |
+| M44 `safeHref` renvoie tout ; M45 `http` admis ; M46 `data:` libre | `safe-href.ts` | détectées |
+| M47 lien de commentaire brut ; M48 lien de tâche brut | `TaskCommentsPanel.tsx` | détectées |
+| M49 hook : échec = impersonation ; M50 hook : `some(impersonated)` | `useImpersonatedSession.ts` | détectées (r36-m1) |
+
+Un incident de conception de test, corrigé : le premier mock de `useApp` du test du panneau renvoyait des objets neufs à chaque rendu et provoquait une boucle de chargement (l'effet dépend de `workspaceMembers`) ; le mock renvoie désormais une valeur stable.
+
+### Migrations
+Aucune. Le schéma Prisma n'est pas modifié (`prisma validate` non requis).
+
+### Changements cassants (récapitulatif)
+- S19 : intégrations Slack/Teams hors liste blanche et flux d'agenda non conformes (`http`, type de contenu autre que `text/calendar` ou `application/json`) cessent de fonctionner.
+- S20 : pièces jointes limitées aux images et PDF (400 sinon).
+- Contrat d'API : aucun champ ajouté ni retiré ; seuls des refus 400 nouveaux.
+
+### Mesures (après Prettier)
+| Commande | Résultat |
+| --- | --- |
+| `cd backend && env -u DATABASE_URL npx jest` | **91/91 suites, 2640/2640** (87 suites, 2529 tests avant) |
+| `nest build` ; `tsc --noEmit -p tests/tsconfig.json` ; `tsc --noEmit -p tsconfig.build.json` ; frontend `tsc --noEmit` ; `pnpm build` | exit 0 partout |
+| `cd frontend && vitest run` | **30 fichiers, 221/221** (28 fichiers, 202 avant) |
+| `grep -l -e "mock/login" -e "Simuler une session" frontend/dist/assets/*.js` | vide (exit 1) |
+| `pnpm lint` racine ; Prettier sur les fichiers modifiés | 0 erreur (53 avertissements inchangés) ; conforme |
+
+Note : `tsc --noEmit -p tsconfig.json` (backend) garde l'erreur `rootDir` préexistante (O21).
+
+### Constats restants de la Phase 5 (lot suivant)
+S21 (webhook GitHub) puis S22 (en-têtes nginx, avec O16), conformément à l'ordre de la revue r36. Décisions à obtenir : affichage du secret de webhook par projet (S21), domaines API et Firebase pour la CSP (S22).
+
+
+## Revue architecte (r37) — lot r36
+
+Verdicts : **S19 VALIDÉ**, **S20 VALIDÉ**, **r36-m1 VALIDÉ** (réserves non bloquantes). Détail, sondes, contre-mutations de l'architecte, réponses aux 7 questions, exigences S21 et S22 et feu vert de commit : section « Revue r37 » à la fin de `docs/security/rapport-audit.md`.
+
+- **Mesures relancées** : jest 91 suites / 2640 tests, `nest build`, `tsc` (tests, build, frontend), `pnpm build`, vitest 30 fichiers / 221 tests, grep `mock/login` vide, lint 0 erreur, Prettier conforme. `git diff` relu : aucune mutation résiduelle ; working tree identique (md5) après mes contre-mutations.
+- **S19** : plages IPv4/IPv6 sondées (49 adresses), hôtes numériques, `localhost.`, rebinding (connexion sur l'adresse validée), certificat vérifié contre le nom d'hôte sur l'IP épinglée, taille et délai appliqués (vérifiés sur serveur HTTPS local). Réserves : r37-m1 (`defaultTransport` non testé en CI : 3 mutations non détectées), r37-m2 (seule la première adresse essayée, DNS non borné par le délai), r37-m3 (`text/plain` ICS), r37-a1 (plages complémentaires).
+- **S20** : validé. Réserve r37-m4 (ancre `$` de l'expression `data:` non testée).
+- **Écarts** : les 5 écarts acceptés. **Questions** : les 7 tranchées (voir rapport) ; décisions produit et d'exploitation (`text/plain`, `powerplatform.com`, recensement, types de pièces jointes, secret affiché une fois) **à confirmer par l'utilisateur**.
+- **Commit** : feu vert, un seul commit, 25 entrées sans `.claude/`.
+- **Constats ouverts** : r37-m1, r37-m2, r37-m3, r37-m4, r37-a1 (petit lot), puis S21, puis S22 avec O16.

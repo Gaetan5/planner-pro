@@ -1,12 +1,8 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-
-export interface IntegrationDto {
-  type: 'SLACK' | 'TEAMS' | 'GOOGLE_CALENDAR' | 'OUTLOOK';
-  name: string;
-  url?: string;
-  calendarId?: string;
-}
+import { safeFetch } from '../common/safe-fetch';
+import { CreateIntegrationDto } from './dto/create-integration.dto';
+import { integrationHostAllowed, isAllowedIntegrationUrl } from './integration-url';
 
 /**
  * Champs d'une intégration renvoyables par l'API : jamais `accessToken` ni `refreshToken` (S14).
@@ -33,7 +29,11 @@ export class IntegrationService {
   /**
    * Crée une intégration pour un workspace.
    */
-  async createIntegration(workspaceId: string, dto: IntegrationDto) {
+  async createIntegration(workspaceId: string, dto: CreateIntegrationDto) {
+    // Liste blanche d'hôtes par type, en plus de la validation du DTO (S19)
+    if (dto.url && !isAllowedIntegrationUrl(dto.type, dto.url)) {
+      throw new BadRequestException("L'URL n'est pas autorisée pour ce type d'intégration.");
+    }
     this.logger.log(`Création d'une intégration ${dto.type} pour le workspace ${workspaceId}`);
     const created = await this.prisma.integration.create({
       data: {
@@ -178,17 +178,20 @@ export class IntegrationService {
       };
     }
 
-    const response = await fetch(url, {
+    // Sortie contrôlée (S19) : hôte autorisé revérifié à l'envoi (lignes antérieures au contrôle),
+    // aucune redirection suivie, corps de réponse ni journalisé ni renvoyé
+    const response = await safeFetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(payload),
+      maxRedirects: 0,
+      allowHost: (host) => integrationHostAllowed(type, host),
     });
 
     if (!response.ok) {
-      const respText = await response.text();
-      throw new Error(`HTTP ${response.status} : ${respText}`);
+      throw new Error(`HTTP ${response.status}`);
     }
   }
 

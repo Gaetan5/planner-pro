@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { CommentsService } from './comments.service';
 import { CreateCommentDto } from './dto/create-comment.dto';
+import { AttachmentDto } from './dto/attachment.dto';
 import { RealtimeService } from '../realtime/realtime.service';
 
 @Controller('projects')
@@ -118,7 +119,7 @@ export class CommentsController {
   async createAttachment(
     @Req() req: any,
     @Param('taskId') taskId: string,
-    @Body() body: { fileName: string; fileUrl: string; fileType: string; fileSize: number },
+    @Body() body: AttachmentDto,
   ) {
     return this.commentsService.createAttachmentForTask(
       taskId,

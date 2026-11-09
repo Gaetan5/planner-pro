@@ -151,4 +151,31 @@ describe('IntegrationsPanel : état réel des intégrations (P1)', () => {
     await screen.findByText('Aucun dépôt lié à ce projet.');
     expect(screen.queryByRole('button', { name: 'Connecter un dépôt' })).toBeNull();
   });
+
+  // r36-m1 : le serveur reste l'autorité, une lecture en échec n'est pas une impersonation
+  it('« Connecter un dépôt » : affiché quand la lecture des sessions échoue', async () => {
+    const project = { id: '3f2b8c1e-5a4d-4e6f-9b7a-1c2d3e4f5a6b', githubRepo: null };
+    vi.mocked(listSessions).mockRejectedValue(new Error('réseau'));
+    mockIntegrations([]);
+    render(<IntegrationsPanel workspaceId="ws-1" project={project} canManageProject />);
+    expect(await screen.findByRole('button', { name: 'Connecter un dépôt' })).toBeInTheDocument();
+  });
+
+  // r36-m1 : seul l'élément `current` compte, pas une autre session d'assistance ouverte ailleurs
+  it('« Connecter un dépôt » : affiché si la session courante est ordinaire et une autre est d’assistance', async () => {
+    const project = { id: '3f2b8c1e-5a4d-4e6f-9b7a-1c2d3e4f5a6b', githubRepo: null };
+    const base = {
+      createdAt: '',
+      authenticatedAt: '',
+      expiresAt: '',
+      userAgent: null,
+    };
+    vi.mocked(listSessions).mockResolvedValue([
+      { ...base, id: 's-assistance', current: false, impersonated: true },
+      { ...base, id: 's-1', current: true, impersonated: false },
+    ]);
+    mockIntegrations([]);
+    render(<IntegrationsPanel workspaceId="ws-1" project={project} canManageProject />);
+    expect(await screen.findByRole('button', { name: 'Connecter un dépôt' })).toBeInTheDocument();
+  });
 });
