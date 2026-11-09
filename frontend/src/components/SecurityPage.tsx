@@ -7,6 +7,7 @@ import {
   disableMfa,
   getMfaStatus,
   regenerateRecoveryCodes,
+  revokeOtherSessions,
   setupMfa,
   type MfaSetup,
   type MfaStatus,
@@ -90,7 +91,10 @@ const RecoveryCodesPanel: React.FC<{ codes: string[]; onClose: () => void }> = (
   );
 };
 
-export const SecurityPage: React.FC = () => {
+export const SecurityPage: React.FC<{
+  /** Appelé quand des sessions ont été fermées ici : l'écran relit la liste des sessions. */
+  onSessionsClosed?: () => void;
+}> = ({ onSessionsClosed }) => {
   const [status, setStatus] = useState<MfaStatus | null>(null);
   const [loadError, setLoadError] = useState('');
   const [error, setError] = useState('');
@@ -103,6 +107,8 @@ export const SecurityPage: React.FC = () => {
   const [code, setCode] = useState('');
   const [mode, setMode] = useState<'idle' | 'disable' | 'regenerate'>('idle');
   const [useRecovery, setUseRecovery] = useState(false);
+  // Proposé une fois, juste après l'activation de la MFA (les anciennes sessions n'ont pas de 2e facteur)
+  const [offerCloseOthers, setOfferCloseOthers] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -155,6 +161,7 @@ export const SecurityPage: React.FC = () => {
       setRecoveryCodes(result.recoveryCodes);
       setSetup(null);
       setCode('');
+      setOfferCloseOthers(true);
       setStatus((current) => (current ? { ...current, mfaEnabled: true } : current));
     });
   };
@@ -221,6 +228,34 @@ export const SecurityPage: React.FC = () => {
 
       {recoveryCodes && (
         <RecoveryCodesPanel codes={recoveryCodes} onClose={() => setRecoveryCodes(null)} />
+      )}
+
+      {offerCloseOthers && !recoveryCodes && (
+        <section className="security-card" aria-label="Fermer les autres sessions">
+          <h3>Fermer les autres sessions ?</h3>
+          <p>
+            Les sessions ouvertes avant l'activation de la double authentification restent valides.
+            Fermez-les si vous ne les reconnaissez pas toutes.
+          </p>
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={busy}
+            onClick={() =>
+              void run(async () => {
+                const { revoked } = await revokeOtherSessions();
+                setOfferCloseOthers(false);
+                setNotice(revoked === 1 ? '1 session fermée.' : `${revoked} sessions fermées.`);
+                onSessionsClosed?.();
+              })
+            }
+          >
+            Fermer les autres sessions
+          </button>
+          <button type="button" className="btn-ghost" onClick={() => setOfferCloseOthers(false)}>
+            Plus tard
+          </button>
+        </section>
       )}
 
       {status && !recoveryCodes && (

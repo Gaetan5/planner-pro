@@ -26,7 +26,11 @@ export class SecurityApiError extends Error {
   }
 }
 
-async function call<T>(path: string, method: 'GET' | 'POST', body?: Record<string, string>) {
+async function call<T>(
+  path: string,
+  method: 'GET' | 'POST' | 'DELETE',
+  body?: Record<string, string>,
+) {
   const res = await fetch(`${BACKEND_URL}${path}`, {
     method,
     headers: { 'Content-Type': 'application/json' },
@@ -84,3 +88,23 @@ export const linkFirebase = (idToken: string, proof: IdentityProof) =>
 
 export const unlinkIdentity = (provider: IdentityProvider, proof: IdentityProof) =>
   call<Record<string, never>>(`/auth/${provider}/unlink`, 'POST', clean({ ...proof }));
+
+/** Session active du compte (`GET /auth/sessions`). Aucun jeton n'est exposé par le serveur. */
+export interface ActiveSession {
+  id: string;
+  createdAt: string;
+  authenticatedAt: string;
+  expiresAt: string;
+  userAgent: string | null;
+  current: boolean;
+}
+
+export const listSessions = () => call<ActiveSession[]>('/auth/sessions', 'GET');
+
+/** Le `sid` est encodé : c'est un segment de chemin. Réponse 204, 404 si la session n'est plus là. */
+export const revokeSession = (sid: string) =>
+  call<Record<string, never>>(`/auth/sessions/${encodeURIComponent(sid)}`, 'DELETE');
+
+/** Route sans corps (S32) : ferme toutes les sessions sauf la courante. */
+export const revokeOtherSessions = () =>
+  call<{ revoked: number }>('/auth/sessions/revoke-others', 'POST');

@@ -58,6 +58,7 @@ describe('S18.2 : routes interdites en session d’impersonation', () => {
     [AuthController, 'disableMfa'],
     [AuthController, 'regenerateRecoveryCodes'],
     [AuthController, 'revokeSession'],
+    [AuthController, 'revokeOtherSessions'],
     [AdminController, 'getOverview'],
     [AdminController, 'impersonateUser'],
     // S18.2-bis : accès persistant aux espaces de la cible
@@ -184,6 +185,7 @@ describe('S18.2 : routes interdites en session d’impersonation', () => {
           '/auth/github/unlink',
           '/auth/firebase/unlink',
           '/auth/sessions/:sid',
+          '/auth/sessions/revoke-others',
           '/admin/overview',
           '/projects/workspaces/:workspaceId/invitations',
           '/projects/:id/members',

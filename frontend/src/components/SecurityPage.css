@@ -103,3 +103,10 @@
   align-items: center;
   gap: 12px;
 }
+
+.security-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+}

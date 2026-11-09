@@ -3242,3 +3242,69 @@ Aucun commit, aucune migration, aucun changement cassant. P9-S et P9-R non comme
 #### Revue architecte (r31-bis) — P13-g
 
 **VALIDÉ.** J'ai extrait le bloc `run` réel de `ci.yml` (lecture YAML) et je l'ai exécuté sous `bash --noprofile --norc -eo pipefail` dans des répertoires de test : sans paquet, exit 2 (échec) ; build propre, exit 0 ; paquet contenant `mock/login` ou « Simuler une session », exit 1 (échec). Sur le `frontend/dist` réel du dépôt : exit 0. Feu vert de commit du lot r29 + r30 + P13-g confirmé.
+
+## Lot P9-S (fixeur) — écran « Sessions actives »
+
+Source : `rapport-audit.md`, constat P9 (r4), Revue r29 (exigences P9-S), Revue r30 (« Exigences complémentaires »), règle de la Revue r31 (segments encodés, valeurs lues validées). P9-R non commencé.
+
+### P9-S — Sessions actives : liste, révocation ciblée, « fermer les autres »
+
+**Statut** : CORRIGÉ – À REVOIR
+
+**Backend**
+- `backend/src/auth/auth.controller.ts` : `DELETE /auth/sessions/:sid` reçoit `ParseUUIDPipe` (400 si `sid` n'est pas un UUID, `familyId` étant un `randomUUID()`), `@Throttle` 10/min et un 409 « Utilisez Se déconnecter » pour la session courante. Le `sid` est mis en minuscules avant comparaison et recherche : le pipe accepte les majuscules et une collation MySQL insensible à la casse aurait sinon permis de contourner le 409 en révoquant la session courante.
+- Nouvelle route `POST /auth/sessions/revoke-others` (sans corps, 200, `{ revoked: n }`, `@ForbiddenInImpersonation()`, `@Throttle` 5/min, sans réauthentification).
+- `backend/src/auth/auth.service.ts` : `revokeOtherSessions(userId, sid)` = `revokeAllForUser(userId, sid)` + entrée `AuditLog` `SESSIONS_REVOKED` (`changes: { count, sid }`, aucun jeton).
+- Isolation : inchangée, `revokeOwnSession` et `listForUser` filtrent par `userId` (404 pour la session d'autrui). Révocation effective : `revoke()` invalide le cache Redis (S7-a).
+
+**Frontend**
+- `frontend/src/security-api.ts` : `listSessions`, `revokeSession(sid)` (`encodeURIComponent`), `revokeOtherSessions` (POST sans corps) ; `call` accepte `DELETE`.
+- `frontend/src/components/SessionsSection.tsx` (nouveau) : navigateur et système tirés de `userAgent` (repli tronqué à 120), dates d'ouverture, de dernière authentification et d'expiration, badge « Cette session », « Révoquer » avec confirmation sur les autres sessions seulement, « Fermer les autres sessions » (notice « n sessions fermées »), relecture de la liste après chaque action et après une erreur (404 compris). Actions masquées si `planner_admin_original_session` existe (impersonation), la liste reste visible.
+- `frontend/src/App.tsx` : `SessionsSection` sous les identités dans l'onglet `security`.
+- `frontend/src/components/SecurityPage.tsx` : après l'activation de la MFA (une fois les codes de récupération enregistrés), carte « Fermer les autres sessions ? » ; prop `onSessionsClosed` qui fait relire la liste.
+- `frontend/src/App.link-notice.spec.tsx` : le stub de `fetch` répond `[]` à `/auth/sessions` (l'écran appelle désormais cette route).
+
+**Tests ajoutés**
+- Backend `tests/http/session-lifecycle.spec.ts` (bloc « P9-S », 9 tests) : `sid` invalide (4 formes) -> 400 sans appel au service ; courante -> 409 (aussi en majuscules), session toujours active ; inconnue ou déjà révoquée -> 404 ; jeton d'accès de la session révoquée refusé au tour suivant, cache chaud ; `revoke-others` ferme les autres, garde la courante (refresh encore possible), n'affecte pas un autre utilisateur ; audit (nombre, sid, sans jeton) et cas 0 ; liste sans fuite inter-utilisateur ; impersonation (liste 200, DELETE et revoke-others 403) ; limites 5/min et 10/min.
+- Backend `tests/unit/auth/impersonation-routes.spec.ts` : `revokeOtherSessions` dans la liste paramétrée, `/auth/sessions/revoke-others` dans le balayage méta (déjà couvert par `^/auth/sessions/`).
+- Frontend `SessionsSection.spec.tsx` (10 tests) et `SecurityPage.spec.tsx` (+1) : rendu, badge, pas de « Révoquer » sur la courante, DELETE avec `sid` encodé puis relecture, annulation, 404 -> erreur + relecture, revoke-others sans corps + notice, bouton absent sans autre session, impersonation, `refreshKey`, erreur de chargement, analyse du `User-Agent`, invitation après activation de la MFA.
+
+**Contre-mutations** (fichier restauré après chaque essai, md5sum identique vérifié) : sans `ParseUUIDPipe` -> 1 échec ; 409 supprimé -> 1 échec ; comparaison sans minuscules -> 1 échec ; `revokeAllForUser` sans `sid` exclu -> 2 échecs ; décorateur d'impersonation retiré de `revoke-others` -> 3 échecs ; action d'audit modifiée -> 1 échec ; limite 5/min modifiée -> 1 échec ; frontend : `encodeURIComponent` retiré -> 1 échec, masquage d'impersonation retiré -> 2, « Révoquer » sur la courante -> 5, invitation post-MFA retirée -> 3.
+
+**Mesures**
+| Commande | Résultat |
+| --- | --- |
+| `cd backend && env -u DATABASE_URL npx jest` | **85/85 suites, 2462/2462** (2450 avant) |
+| `nest build` | exit 0 |
+| `cd frontend && pnpm test:run` | **25 fichiers, 156/156** (145 avant) |
+| `tsc --noEmit -p .` ; `pnpm build` (frontend) | exit 0 ; build OK |
+| `pnpm lint` racine | 0 erreur, 53 avertissements (inchangé) |
+| Prettier sur les fichiers de code touchés | conforme |
+
+**Migration** : aucune. **Changement cassant** : `DELETE /auth/sessions/:sid` répond 400 pour un `sid` non UUID (aucun appelant existant) et 409 pour la session courante (auparavant 204 : l'appel laissait des cookies orphelins).
+
+**Écart par rapport au rapport** : aucun. `revoke-others` répond 200 (`@HttpCode(200)`, le rapport ne précise pas le code ; défaut Nest 201 jugé peu pertinent).
+
+**Questions pour l'architecte**
+1. Les sessions d'impersonation (15 min, sans refresh) sont des lignes `RefreshToken` du compte cible : elles apparaissent dans sa liste et `revoke-others` les ferme. Cela paraît souhaitable (visibilité et coupure par l'utilisateur), mais il n'existe aucun champ pour les distinguer dans la liste. Faut-il ajouter un indicateur (migration) ou accepter en l'état ?
+2. Le masquage des actions en impersonation côté client repose sur la clé `planner_admin_original_session` (présence seulement, aucune valeur lue). Le serveur reste l'autorité (403). Acceptable ?
+3. `revokeOwnSession` n'exclut pas les sessions expirées non révoquées (elles sont absentes de la liste, donc non atteignables par l'interface). Sans effet de sécurité, laissé tel quel.
+
+#### Revue architecte (r32) — P9-S
+
+Détail dans `rapport-audit.md`, section « Revue r32 ».
+
+**VALIDÉ.** Toutes les exigences de r29, r30 et r31 sont satisfaites (S7-a et S18.2 compris). Contre-mutations de l'architecte : 27 sur 27 détectées, les deux témoins sans mutation sont verts et les noms des tests en échec ont été vérifiés. Écarts acceptés : `revoke-others` répond 200 (la remédiation est mise à jour) ; `DELETE` répond 400 pour un `sid` non UUID et 409 sur la session courante, avec une normalisation en minuscules jugée nécessaire.
+
+**Réponses** :
+
+1. Sessions d'impersonation indistinguables : accepté en l'état. L'indicateur (`impersonatedBy` sur `RefreshToken`, migration) est reporté à S18, en Phase 4 ; le drapeau d'impersonation reste désactivé d'ici là.
+2. Masquage fondé sur `planner_admin_original_session` : accepté comme ergonomie, le serveur reste l'autorité (403). Avec S18, l'information viendra du serveur (`impersonated` sur la session courante de `GET /auth/sessions`).
+3. `revokeOwnSession` sur une session expirée : accepté, sans effet.
+
+**Nouveaux constats (non bloquants)** :
+
+- **P9-S-a** : `revokeAllForUser` compte les sessions expirées non révoquées, donc la notice et l'audit peuvent annoncer plus de sessions fermées que la liste n'en montrait. Ajouter `expiresAt: { gt: new Date() }` au filtre, avec un test (`{ revoked: 1 }` en présence d'une session expirée).
+- **O20** : quand les deux suites tournent ensemble sur une machine chargée, des tests dépassent le délai de 5 s. Passer `testTimeout` à 15000 dans les configurations Jest et Vitest.
+
+**Commit** : feu vert pour le lot P9-S.

@@ -17,6 +17,7 @@ import { FinancesView } from './components/FinancesView';
 import { AdminConsole } from './components/AdminConsole';
 import { SecurityPage } from './components/SecurityPage';
 import { IdentitiesSection } from './components/IdentitiesSection';
+import { SessionsSection } from './components/SessionsSection';
 import { GitHubLinkConfirm } from './components/GitHubLinkConfirm';
 import { OnboardingModal } from './components/OnboardingModal';
 import {
@@ -93,6 +94,7 @@ function AppWithSession() {
     state: string;
   } | null>(null);
   const [linkNotice, setLinkNotice] = useState('');
+  const [sessionsVersion, setSessionsVersion] = useState(0);
   const isPlatformAdmin =
     user?.platformRole === 'SUPER_ADMIN' || user?.platformRole === 'PLATFORM_ADMIN';
 
@@ -214,12 +216,13 @@ function AppWithSession() {
       case 'security':
         return (
           <>
-            <SecurityPage />
+            <SecurityPage onSessionsClosed={() => setSessionsVersion((v) => v + 1)} />
             <IdentitiesSection
               accountEmail={user.email}
               notice={linkNotice}
               onNoticeShown={() => setLinkNotice('')}
             />
+            <SessionsSection refreshKey={sessionsVersion} />
           </>
         );
       default:

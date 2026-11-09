@@ -98,6 +98,43 @@ describe('SecurityPage : MFA (P9)', () => {
     expect(calls()).toHaveLength(3);
   });
 
+  it("après l'activation, propose de fermer les autres sessions (POST sans corps), puis prévient l'écran", async () => {
+    reply(
+      { body: { mfaEnabled: false, hasPassword: true } },
+      {
+        body: {
+          secret: 'JBSWY3DPEHPK3PXP',
+          authUri: 'otpauth://totp/P:a@x.com?secret=JBSWY3DPEHPK3PXP',
+        },
+      },
+      { body: { mfaEnabled: true, recoveryCodes: CODES } },
+      { body: { revoked: 1 } },
+    );
+    const onSessionsClosed = vi.fn();
+    render(<SecurityPage onSessionsClosed={onSessionsClosed} />);
+    await screen.findByText("Activer l'authentification à deux facteurs");
+    type('Mot de passe', 'Secret-12345');
+    fireEvent.click(screen.getByText("Activer l'authentification à deux facteurs"));
+    await screen.findByText('JBSWY3DPEHPK3PXP');
+    type(/Code à 6 chiffres/, '123456');
+    fireEvent.click(screen.getByText("Confirmer l'activation"));
+    await screen.findByText('AAAA-1111');
+    // L'invitation n'apparaît qu'une fois les codes enregistrés
+    expect(screen.queryByText('Fermer les autres sessions ?')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText(/J'ai conservé ces codes/));
+    fireEvent.click(screen.getByText('Terminer'));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Fermer les autres sessions' }));
+    expect(await screen.findByText('1 session fermée.')).toBeInTheDocument();
+    expect(calls()[3]).toMatchObject({
+      path: '/auth/sessions/revoke-others',
+      method: 'POST',
+      body: undefined,
+    });
+    expect(onSessionsClosed).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('Fermer les autres sessions ?')).not.toBeInTheDocument();
+  });
+
   it('propose le téléchargement des codes en .txt', async () => {
     reply(
       { body: { mfaEnabled: false, hasPassword: true } },

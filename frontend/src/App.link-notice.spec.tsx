@@ -49,7 +49,11 @@ describe('App : notice de liaison (P9-L-c)', () => {
     vi.mocked(global.fetch).mockImplementation(async (url) => {
       const path = new URL(String(url)).pathname;
       const body =
-        path === '/auth/github/link' ? { githubUsername: 'ada-gh', repoAccess: false } : identities;
+        path === '/auth/github/link'
+          ? { githubUsername: 'ada-gh', repoAccess: false }
+          : path === '/auth/sessions'
+            ? []
+            : identities;
       return { ok: true, status: 200, json: async () => body } as Response;
     });
     window.history.replaceState({}, '', '/?code=gh-code&state=gh-state');

@@ -5,6 +5,7 @@ import {
   Delete,
   Body,
   Param,
+  ParseUUIDPipe,
   Query,
   Req,
   Res,
@@ -311,16 +312,39 @@ export class AuthController {
   }
 
   /**
-   * Révoque une session du compte connecté (jamais celle d'un autre compte : 404).
+   * Révoque une session du compte connecté (jamais celle d'un autre compte : 404). Le `sid` doit
+   * être un UUID (400 sinon). La session courante se ferme par la déconnexion (409), pour ne pas
+   * laisser des cookies orphelins.
    */
   @ForbiddenInImpersonation()
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Delete('sessions/:sid')
   @HttpCode(204)
-  async revokeSession(@Param('sid') sid: string, @Req() req: AuthenticatedUserRequest) {
-    const revoked = await this.sessionService.revokeOwnSession(req.user.id, sid);
+  async revokeSession(
+    @Param('sid', new ParseUUIDPipe()) sid: string,
+    @Req() req: AuthenticatedUserRequest,
+  ) {
+    // Les identifiants sont en minuscules : une casse différente ne doit pas contourner le 409
+    const target = sid.toLowerCase();
+    if (target === req.user.sid?.toLowerCase()) {
+      throw new ConflictException('Utilisez « Se déconnecter » pour fermer la session courante.');
+    }
+    const revoked = await this.sessionService.revokeOwnSession(req.user.id, target);
     if (!revoked) {
       throw new NotFoundException('Session introuvable.');
     }
+  }
+
+  /**
+   * Ferme toutes les autres sessions du compte (action de protection : sans réauthentification).
+   * Route sans corps (S32) ; la session courante est conservée.
+   */
+  @ForbiddenInImpersonation()
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Post('sessions/revoke-others')
+  @HttpCode(200)
+  async revokeOtherSessions(@Req() req: AuthenticatedUserRequest) {
+    return this.authService.revokeOtherSessions(req.user.id, req.user.sid);
   }
 
   /**

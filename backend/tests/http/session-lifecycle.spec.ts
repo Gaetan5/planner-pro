@@ -76,6 +76,7 @@ describe('A3/S7 : cycle de vie des sessions (HTTP)', () => {
   beforeEach(async () => {
     prisma.user.rows = [];
     prisma.refreshToken.rows = [];
+    prisma.auditLog.rows = [];
     redis.store.clear();
     redis.ttls.length = 0;
     await prisma.user.create({
@@ -396,6 +397,136 @@ describe('A3/S7 : cycle de vie des sessions (HTTP)', () => {
     });
     expect(attack.status).toBe(404);
     expect((await getProtected({ accessToken: eve.accessToken })).status).toBe(200);
+  });
+
+  // P9-S : sessions actives (révocation ciblée et « fermer les autres »)
+  describe('P9-S : sessions actives', () => {
+    const sidOf = (jar: Record<string, string>) =>
+      (new JwtService({ secret: JWT_SECRET }).decode(jar.accessToken) as { sid: string }).sid;
+    const call = (method: 'GET' | 'POST' | 'DELETE', path: string, jar: Record<string, string>) =>
+      fetch(`${baseUrl}${path}`, {
+        method,
+        headers: { Cookie: asHeader(jar), Origin: FRONT_ORIGIN },
+      });
+    const addEve = async () => {
+      await prisma.user.create({
+        data: {
+          id: 'user-2',
+          email: 'eve@corp.com',
+          passwordHash: await hashPassword('Autre!2026xx'),
+        },
+      });
+      return app.get(SessionService).issue({ id: 'user-2', email: 'eve@corp.com', name: null });
+    };
+
+    it('DELETE /auth/sessions/:sid : sid qui n’est pas un UUID -> 400, sans accès à la base', async () => {
+      const { jar } = await login();
+      const spy = jest.spyOn(app.get(SessionService), 'revokeOwnSession');
+      for (const bad of ['abc', '1%27%20OR%201%3D1', '..%2F..%2Fadmin', '%7B%22not%22%3A1%7D']) {
+        expect((await call('DELETE', `/auth/sessions/${bad}`, jar)).status).toBe(400);
+      }
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it('DELETE sur la session courante : 409, la session reste active (même en majuscules)', async () => {
+      const { jar } = await login();
+      const sid = sidOf(jar);
+      expect((await call('DELETE', `/auth/sessions/${sid}`, jar)).status).toBe(409);
+      expect((await call('DELETE', `/auth/sessions/${sid.toUpperCase()}`, jar)).status).toBe(409);
+      redis.store.clear();
+      expect((await getProtected(jar)).status).toBe(200);
+      expect((await refresh(jar)).status).toBe(201);
+    });
+
+    it('DELETE sur une session inconnue ou déjà révoquée : 404', async () => {
+      const { jar } = await login();
+      const gone = await login();
+      expect((await call('DELETE', `/auth/sessions/${sidOf(gone.jar)}`, jar)).status).toBe(204);
+      expect((await call('DELETE', `/auth/sessions/${sidOf(gone.jar)}`, jar)).status).toBe(404);
+      expect(
+        (await call('DELETE', '/auth/sessions/00000000-0000-4000-8000-000000000000', jar)).status,
+      ).toBe(404);
+    });
+
+    it('DELETE : le jeton d’accès de la session révoquée est refusé à la requête suivante, cache chaud compris', async () => {
+      const mine = await login();
+      const other = await login();
+      expect((await getProtected(other.jar)).status).toBe(200); // remplit le cache Redis
+      expect((await call('DELETE', `/auth/sessions/${sidOf(other.jar)}`, mine.jar)).status).toBe(
+        204,
+      );
+      expect((await getProtected(other.jar)).status).toBe(401);
+      expect((await refresh(other.jar)).status).toBe(401);
+      expect((await getProtected(mine.jar)).status).toBe(200);
+    });
+
+    it('POST /auth/sessions/revoke-others : ferme les autres sessions, garde la courante, ignore autrui', async () => {
+      const mine = await login();
+      const second = await login();
+      const third = await login();
+      const eve = await addEve();
+      expect((await getProtected(second.jar)).status).toBe(200); // cache chaud
+
+      const res = await call('POST', '/auth/sessions/revoke-others', mine.jar);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ revoked: 2 });
+
+      expect((await getProtected(second.jar)).status).toBe(401);
+      expect((await getProtected(third.jar)).status).toBe(401);
+      expect((await refresh(third.jar)).status).toBe(401);
+      expect((await getProtected(mine.jar)).status).toBe(200);
+      expect((await refresh(mine.jar)).status).toBe(201);
+      expect((await getProtected({ accessToken: eve.accessToken })).status).toBe(200);
+      expect(
+        prisma.refreshToken.rows.filter((r) => r.userId === 'user-2' && !r.revokedAt),
+      ).toHaveLength(1);
+    });
+
+    it('revoke-others : audit SESSIONS_REVOKED (nombre et sid courant), sans jeton ; 0 si aucune autre session', async () => {
+      const mine = await login();
+      const none = await call('POST', '/auth/sessions/revoke-others', mine.jar);
+      expect(await none.json()).toEqual({ revoked: 0 });
+      await login();
+      await call('POST', '/auth/sessions/revoke-others', mine.jar);
+      const logs = prisma.auditLog.rows.filter((r) => r.action === 'SESSIONS_REVOKED');
+      expect(logs).toHaveLength(2);
+      expect(logs[1]).toEqual(
+        expect.objectContaining({
+          userId: 'user-1',
+          changes: { count: 1, sid: sidOf(mine.jar) },
+        }),
+      );
+      expect(JSON.stringify(logs)).not.toMatch(/accessToken|refreshToken|hashedToken/);
+    });
+
+    it('GET /auth/sessions : n’expose jamais les sessions d’un autre utilisateur', async () => {
+      const mine = await login();
+      const eve = await addEve();
+      const list = (await (await call('GET', '/auth/sessions', mine.jar)).json()) as Array<{
+        id: string;
+      }>;
+      expect(list.map((s) => s.id)).toEqual([sidOf(mine.jar)]);
+      expect(JSON.stringify(list)).not.toContain(eve.sid);
+    });
+
+    it('impersonation : la liste reste lisible, DELETE et revoke-others répondent 403', async () => {
+      const { jar } = await login();
+      const imp = await app
+        .get(SessionService)
+        .issue({ id: 'user-1', email: 'ada@corp.com', name: 'Ada' }, { impersonatedBy: 'admin-9' });
+      const asImp = { accessToken: imp.accessToken };
+      expect((await call('GET', '/auth/sessions', asImp)).status).toBe(200);
+      expect((await call('POST', '/auth/sessions/revoke-others', asImp)).status).toBe(403);
+      expect((await call('DELETE', `/auth/sessions/${sidOf(jar)}`, asImp)).status).toBe(403);
+      expect((await getProtected(jar)).status).toBe(200);
+    });
+
+    it('limites de débit : 5/min pour revoke-others, 10/min pour DELETE', () => {
+      const limit = (name: keyof AuthController) =>
+        Reflect.getMetadata('THROTTLER:LIMITdefault', AuthController.prototype[name] as object);
+      expect(limit('revokeOtherSessions')).toBe(5);
+      expect(limit('revokeSession')).toBe(10);
+    });
   });
 
   it('Redis indisponible : la vérification de session retombe sur la base (pas d’indisponibilité)', async () => {

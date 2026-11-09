@@ -978,6 +978,24 @@ export class AuthService {
   }
 
   /**
+   * Ferme les autres sessions du compte (P9-S) et journalise le nombre de sessions fermées et le
+   * `sid` courant (aucun jeton).
+   */
+  async revokeOtherSessions(userId: string, sid: string | undefined): Promise<{ revoked: number }> {
+    const revoked = await this.sessionService.revokeAllForUser(userId, sid);
+    await this.prisma.auditLog.create({
+      data: {
+        userId,
+        action: 'SESSIONS_REVOKED',
+        entityType: 'User',
+        entityId: userId,
+        changes: { count: revoked, sid: sid ?? null },
+      },
+    });
+    return { revoked };
+  }
+
+  /**
    * Délie l'identité Firebase ou GitHub (S31). Même réauthentification que la liaison ; refus
    * (409) si c'est la dernière méthode de connexion ; les autres sessions sont révoquées et le
    * jeton GitHub effacé.
