@@ -4682,3 +4682,78 @@ Changements cassants : `sync` rejette un corps non conforme et un dépôt inacce
 2. Non bloquant r30 : jeton d'invitation dans le corps de `check` et `accept`.
 3. S30, actions d'exploitation 1 à 4.
 4. Phases 4 à 6 : S18 (avec les compléments r32 et r33 : masquer « Connecter un dépôt » en impersonation), S19 à S26 (hors volet `mock/login`), A5 à A9, P2, P5, P7, P8, Q-2, O10 à O17. Décision `myRole` / `canManage` à prendre avec S18 ou A5 à A9 (confirmation utilisateur).
+
+
+## Revue r35 — non bloquants r26 (`ssoUid`) et r30 (S27, jeton dans le corps) : VALIDÉS ; feu vert pour le commit (2026-11-09)
+
+Revue de la section « Lot r34 (fixeur) » du journal (working tree, rien de commité). Code relu (`auth.service.ts` : `hasActiveSso`, `hasOtherLoginMethod`, `unlinkIdentity`, `getIdentities` ; `invitations.controller.ts` ; `invitation-token.dto.ts` ; `AppContext.tsx`), mesures relancées, contre-mutations jouées hors dépôt. `md5sum` des 10 fichiers du working tree (sans le dossier d'agent local) identique avant et après.
+
+Incident d'outillage : trois processus `cp -i` bloqués (alias interactif) et leur shell parent, restes de ma revue précédente, étaient encore en attente (ils auraient pu réécrire `auth.service.ts` avec une ancienne copie). Je les ai tués, vérifié que le fichier n'avait pas été modifié (`md5sum` conforme), et rejoué mes mutations avec `/bin/cp -f` dans un script `bash`. Aucun processus de restauration ne reste en attente à la fin.
+
+### Mesures (relancées par l'architecte)
+
+| Commande | Résultat |
+| --- | --- |
+| `cd backend && env -u DATABASE_URL npx jest` | **87/87 suites, 2522/2522** |
+| `cd frontend && pnpm test:run` | **28 fichiers, 197/197** |
+| `nest build` ; `tsc --noEmit -p tests/tsconfig.json` ; frontend `tsc --noEmit -p .` ; `pnpm build` | exit 0 partout |
+| `grep -l -e "mock/login" -e "Simuler une session" frontend/dist/assets/*.js` | vide (exit 1) |
+| `pnpm lint` racine ; Prettier sur les fichiers de code modifiés | 0 erreur (53 avertissements préexistants) ; conforme |
+
+### Contre-mutations de l'architecte
+
+| ID | Mutation | Résultat |
+| --- | --- | --- |
+| M1 | `OR` SQL de l'`updateMany` : `ssoUid not null` toujours présent (condition `ssoActive` retirée) | Non détectée, **jugée équivalente** (voir ci-dessous) |
+| M2 | `hasActiveSso` : `toLowerCase()` retiré sur l'adresse | Non détectée (mineur, voir ci-dessous) |
+| M3 | DTO : `{64}` remplacé par `{60,70}` | **Détectée** (1) |
+| M4 | `hasActiveSso` : renvoie vrai quand il n'y a pas de `ssoUid` | Non détectée, équivalente (`hasOtherLoginMethod` exige déjà `Boolean(ssoUid)`) |
+| M5 | `check` non public | **Détectée** (8) |
+| M6 | Frontend : `check` en `GET` | **Détectée** (la suite frontend échoue, corps et méthode vérifiés) |
+
+Les mutations propres du fixeur (retrait de `enabled`, `domainVerifiedAt`, du filtre de domaine, `ssoActive` forcé dans `getIdentities` / `unlinkIdentity`, DTO, `accept`, client) ont toutes été détectées selon son journal ; M3 et M5 recoupent les siennes.
+
+**Jugement de la mutation M1 : acceptée.** La lecture qui précède renvoie déjà 409 quand `ssoActive` est faux et qu'aucune autre méthode n'existe ; quand une autre méthode existe, le `OR` est vrai sans `ssoUid`. La branche ne joue donc que sur une course (configuration SSO changée entre lecture et écriture), et même dans ce cas le SQL ne peut pas vérifier l'état de `SSOConfiguration` (autre table) : le « miroir » reste partiel par construction. Documenter l'équivalence suffit ; pas de test de concurrence artificiel à exiger.
+
+### Verdict
+
+| Constat | Verdict | Preuve |
+| --- | --- | --- |
+| Non bloquant r26 : `ssoUid` ne compte que si le SSO du domaine est utilisable (`enabled`, `domainVerifiedAt`, domaine de l'adresse), règle unique pour `unlinkIdentity` et `canUnlink` | **VALIDÉ** | Mêmes critères que `SsoService.findUsableConfig` (ligne 135) ; 4 cas négatifs + 1 positif + cas avec mot de passe ; mutations du fixeur et M3 |
+| Non bloquant r30 (S27) : jeton d'invitation dans le corps de `check` (public, 200) et `accept` (authentifié, 200), format `^[a-f0-9]{64}$` côté DTO, anciennes routes 404, plus aucun jeton dans l'URL | **VALIDÉ** | 14 tests HTTP réels, tests frontend, M3, M5, M6 ; seul le frontend du dépôt appelle ces routes (grep) |
+
+### Réponses aux questions du fixeur
+
+1. **Domaine de l'adresse actuelle pour « SSO actif » : accepté.** C'est la règle de connexion SSO (S10-a) : un compte dont l'adresse a changé de domaine ne peut plus se connecter par ce SSO, donc son `ssoUid` n'est plus une méthode utilisable. Le message 409 existant suffit. *Décision produit à confirmer par l'utilisateur* : aucune action requise si l'on retient cette lecture.
+2. **`@Throttle` sur `POST invitations/check` : non nécessaire.** Un `AppThrottlerGuard` global (60 requêtes par minute) s'applique déjà à la route publique, et le jeton (256 bits, format fixé par le DTO) n'est pas énumérable. Pas de limite dédiée. À reprendre en P5 seulement pour vérifier que l'adresse IP vue par le garde est bien celle du client derrière le proxy (`trust proxy`) et envisager une limite plus basse sur les routes publiques d'invitation. *Recommandation, décision d'exploitation à confirmer par l'utilisateur.*
+3. **Suppression sans alias : confirmée.** Aucun client externe, et un alias `GET check/:token` réintroduirait le jeton dans les journaux. Déployer backend et frontend ensemble ; un onglet ouvert avec l'ancien bundle verra une erreur sur l'écran d'invitation jusqu'au rechargement (les liens `?token=` des courriels restent valides). *Décision d'exploitation à confirmer par l'utilisateur.*
+
+### Constat mineur (non bloquant, à traiter avec le prochain lot touchant `auth.service.ts`)
+
+- **r35-m1** (Amélioration) : ajouter un test où l'adresse du compte est en casse mixte (`Alice@ACME.com`) avec une configuration au domaine en minuscules, pour couvrir `toLowerCase()` de `hasActiveSso` (M2). Aucun risque de sécurité, simple protection contre une régression.
+
+### Statut des constats
+
+| Constat | Statut |
+| --- | --- |
+| Non bloquant r26, configuration SSO pour `ssoUid` | **VALIDÉ, clos** |
+| Non bloquant r30 (S27), jeton d'invitation dans le corps | **VALIDÉ, clos** |
+| S27 | **Clos** |
+| r35-m1 (test de casse) | Ouvert, mineur |
+
+### Commit : feu vert, un seul commit
+
+Les 10 entrées du working tree (sans le dossier d'agent local, qui reste hors de git) :
+
+- Backend source (3) : `backend/src/auth/auth.service.ts`, `backend/src/projects/invitations.controller.ts`, `backend/src/projects/dto/invitation-token.dto.ts` (nouveau).
+- Backend tests (3) : `backend/tests/unit/auth/identity-linking.spec.ts`, `backend/tests/unit/authz/public-routes.spec.ts`, `backend/tests/http/invitation-token-body.spec.ts` (nouveau).
+- Frontend (2) : `frontend/src/context/AppContext.tsx`, `frontend/src/context/AppContext.invitation.spec.tsx`.
+- Documentation (3) : `docs/DOSSIER_ARCHITECTURE_TECHNIQUE.md`, `docs/security/rapport-audit.md`, `docs/security/journal-corrections.md`.
+
+Changements cassants : `GET /projects/invitations/check/:token` et `POST /projects/invitations/accept/:token` supprimées (404), remplacées par `POST /projects/invitations/check` et `/accept` avec `{ "token": "<64 hex>" }` (400 si format invalide) ; un compte dont le seul autre moyen est un `ssoUid` sans SSO actif du domaine ne peut plus délier GitHub/Firebase (409). **Migration : aucune.** Le message de commit ne doit mentionner aucun assistant.
+
+### Constats ouverts, dans l'ordre de traitement
+
+1. r35-m1 (mineur, test de casse), à joindre au prochain lot.
+2. S30, actions d'exploitation 1 à 4.
+3. Phases 4 à 6 : S18 (avec les compléments r32 et r33 : masquer « Connecter un dépôt » en impersonation), S19 à S26 (hors volet `mock/login`), A5 à A9, P2, P5 (dont `trust proxy` et limites des routes publiques), P7, P8, Q-2, O10 à O17. Décision `myRole` / `canManage` à prendre avec S18 ou A5 à A9 (confirmation utilisateur).

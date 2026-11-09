@@ -13,6 +13,7 @@ import { InvitationsService } from './invitations.service';
 import { Public } from '../auth/public.decorator';
 import { ForbiddenInImpersonation } from '../auth/forbidden-in-impersonation.decorator';
 import { CreateInvitationDto } from './dto/create-invitation.dto';
+import { InvitationTokenDto } from './dto/invitation-token.dto';
 
 interface AuthenticatedRequest {
   user: {
@@ -64,20 +65,22 @@ export class InvitationsController {
   }
 
   /**
-   * Endpoint public pour vérifier un token d'invitation (affichage de l'écran d'accueil).
+   * Endpoint public pour vérifier un token d'invitation (affichage de l'écran d'accueil). Le jeton
+   * est dans le corps, jamais dans le chemin (S27).
    */
   @Public()
-  @Get('invitations/check/:token')
-  checkInvitation(@Param('token') token: string) {
-    return this.invitationsService.checkInvitation(token);
+  @Post('invitations/check')
+  @HttpCode(HttpStatus.OK)
+  checkInvitation(@Body() body: InvitationTokenDto) {
+    return this.invitationsService.checkInvitation(body.token);
   }
 
   /**
-   * Accepte une invitation pour l'utilisateur actuellement connecté.
+   * Accepte une invitation pour l'utilisateur actuellement connecté. Jeton dans le corps (S27).
    */
-  @Post('invitations/accept/:token')
+  @Post('invitations/accept')
   @HttpCode(HttpStatus.OK)
-  acceptInvitation(@Req() req: AuthenticatedRequest, @Param('token') token: string) {
-    return this.invitationsService.validateAndAcceptInvitation(token, req.user);
+  acceptInvitation(@Req() req: AuthenticatedRequest, @Body() body: InvitationTokenDto) {
+    return this.invitationsService.validateAndAcceptInvitation(body.token, req.user);
   }
 }

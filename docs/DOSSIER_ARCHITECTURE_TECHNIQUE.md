@@ -257,7 +257,7 @@ Le système d'invitation garantit qu'aucun lien d'invitation ne puisse être dev
 
 1. **Entropie Cryptographique** : Le jeton brut `rawToken` est généré par `crypto.randomBytes(32).toString('hex')`, offrant un espace d'états de $2^{256}$, éliminant tout risque d'attaque par force brute ou collision.
 2. **Hachage Unidirectionnel en Base** : Seul le digest `crypto.createHash('sha256').update(rawToken).digest('hex')` est stocké en base de données. Même avec un accès administrateur direct à la table MySQL `invitations`, un attaquant ne peut pas reconstituer le lien magique à présenter à l'API.
-3. **Idempotence & Anti-Replay** : Dès qu'une invitation est consommée via l'endpoint `/projects/invitations/accept/:token`, son statut est basculé à `ACCEPTED` avec horodatage `acceptedAt = NOW()`. Toute tentative ultérieure de réutilisation est immédiatement rejetée avec une exception HTTP 400 (`Cette invitation a déjà été acceptée`).
+3. **Idempotence & Anti-Replay** : Dès qu'une invitation est consommée via l'endpoint `POST /projects/invitations/accept` (jeton dans le corps), son statut est basculé à `ACCEPTED` avec horodatage `acceptedAt = NOW()`. Toute tentative ultérieure de réutilisation est immédiatement rejetée avec une exception HTTP 400 (`Cette invitation a déjà été acceptée`).
 
 ---
 

@@ -34,7 +34,7 @@ const PUBLIC_ROUTES_ALLOWLIST = [
   'PUT /scim/v2/Users/:id',
   'PATCH /scim/v2/Users/:id',
   'DELETE /scim/v2/Users/:id',
-  'GET /projects/invitations/check/:token',
+  'POST /projects/invitations/check',
   'POST /projects/webhooks/github',
 ].sort();
 

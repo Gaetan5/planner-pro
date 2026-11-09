@@ -423,7 +423,20 @@ describe('S31 : liaison et déliaison d’identités externes', () => {
   describe('canUnlink et ssoUid (P9-L-a)', () => {
     const gh = { githubId: '4242', githubUsername: 'ada-gh' };
 
-    it('sans mot de passe, avec ssoUid et GitHub : canUnlink vrai et la déliaison réussit', async () => {
+    const seedSsoConfig = (extra: Record<string, unknown> = {}) =>
+      prisma.sSOConfiguration.create({
+        data: {
+          id: 'sso-cfg-1',
+          workspaceId: 'ws-1',
+          verifiedDomain: 'corp.com',
+          domainVerifiedAt: new Date(),
+          enabled: true,
+          ...extra,
+        },
+      });
+
+    it('sans mot de passe, avec ssoUid, SSO actif du domaine et GitHub : canUnlink vrai et la déliaison réussit', async () => {
+      await seedSsoConfig();
       await seed({ ...gh, ssoUid: 'sso-1' }, false);
       const res = await service.getIdentities('user-1');
       expect(res.canUnlink).toEqual({ firebase: false, github: true });
@@ -431,6 +444,32 @@ describe('S31 : liaison et déliaison d’identités externes', () => {
       const fresh = await session();
       await service.unlinkIdentity('user-1', 'github', {}, fresh.sid);
       expect(row().githubId).toBeNull();
+    });
+
+    // Non bloquant r26 : un ssoUid hérité ne compte que si le SSO du domaine est encore utilisable
+    it.each([
+      ['aucune configuration', null],
+      ['configuration désactivée', { enabled: false }],
+      ['domaine non prouvé', { domainVerifiedAt: null }],
+      ['configuration d’un autre domaine', { verifiedDomain: 'autre.com' }],
+    ])(
+      'ssoUid sans SSO utilisable (%s) : canUnlink faux, déliaison 409, rien d’écrit',
+      async (_label, config) => {
+        if (config) await seedSsoConfig(config);
+        await seed({ ...gh, ssoUid: 'sso-1' }, false);
+        expect((await service.getIdentities('user-1')).canUnlink.github).toBe(false);
+        const fresh = await session();
+        await expect(service.unlinkIdentity('user-1', 'github', {}, fresh.sid)).rejects.toThrow(
+          ConflictException,
+        );
+        expect(row().githubId).toBe('4242');
+        expect(mail.sendIdentityUnlinkedEmail).not.toHaveBeenCalled();
+      },
+    );
+
+    it('ssoUid sans SSO utilisable mais avec un mot de passe : déliaison permise', async () => {
+      await seed({ ...gh, ssoUid: 'sso-1' });
+      expect((await service.getIdentities('user-1')).canUnlink.github).toBe(true);
     });
 
     it('sans mot de passe ni ssoUid, une seule identité : canUnlink faux, déliaison 409', async () => {

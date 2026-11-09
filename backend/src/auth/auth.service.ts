@@ -136,6 +136,9 @@ interface GitHubRepoResponse {
  * Reste-t-il un autre moyen de se connecter une fois `provider` délié ? Mot de passe, SSO ou
  * l'autre identité externe. Règle unique : contrôle de `unlinkIdentity` et `canUnlink` de
  * `getIdentities` (P9-L-a). L'écriture conditionnelle de `unlinkIdentity` en est le miroir SQL.
+ * Un `ssoUid` ne compte que si le SSO du domaine de l'adresse est encore utilisable (`ssoActive`,
+ * voir `hasActiveSso`) : un identifiant hérité d'une configuration supprimée ou désactivée ne
+ * permet plus de se connecter.
  */
 function hasOtherLoginMethod(
   account: {
@@ -145,10 +148,11 @@ function hasOtherLoginMethod(
     githubId: string | null;
   },
   provider: 'firebase' | 'github',
+  ssoActive: boolean,
 ): boolean {
   return (
     Boolean(account.passwordHash) ||
-    Boolean(account.ssoUid) ||
+    (Boolean(account.ssoUid) && ssoActive) ||
     Boolean(provider === 'firebase' ? account.githubId : account.firebaseUid)
   );
 }
@@ -954,6 +958,21 @@ export class AuthService {
     }
   }
 
+  /**
+   * Le compte peut-il encore se connecter par SSO ? Oui s'il porte un `ssoUid` et si une
+   * configuration SSO **active** (`enabled`) au domaine **prouvé** (`domainVerifiedAt`) existe pour
+   * le domaine de son adresse : mêmes critères que `SsoService.findUsableConfig` (S10-a).
+   */
+  private async hasActiveSso(account: { email: string; ssoUid: string | null }): Promise<boolean> {
+    if (!account.ssoUid) return false;
+    const domain = account.email.toLowerCase().trim().split('@')[1];
+    if (!domain) return false;
+    const config = await this.prisma.sSOConfiguration.findUnique({
+      where: { verifiedDomain: domain },
+    });
+    return Boolean(config && config.enabled && config.domainVerifiedAt);
+  }
+
   /** Compte et champs nécessaires à la réauthentification et à la protection de la dernière méthode. */
   private async loadIdentityAccount(userId: string) {
     const account = await this.prisma.user.findUnique({
@@ -1063,7 +1082,8 @@ export class AuthService {
         `Aucun compte ${provider === 'firebase' ? 'Firebase' : 'GitHub'} n'est lié.`,
       );
     }
-    if (!hasOtherLoginMethod(account, provider)) {
+    const ssoActive = await this.hasActiveSso(account);
+    if (!hasOtherLoginMethod(account, provider, ssoActive)) {
       throw new ConflictException(
         'Impossible de retirer la dernière méthode de connexion : définissez un mot de passe ou liez une autre identité.',
       );
@@ -1078,7 +1098,9 @@ export class AuthService {
         ...(provider === 'firebase' ? { firebaseUid: { not: null } } : { githubId: { not: null } }),
         OR: [
           { passwordHash: { not: null } },
-          { ssoUid: { not: null } },
+          // Miroir de `ssoActive` (évalué à la lecture ci-dessus) : sans SSO utilisable, le
+          // `ssoUid` n'est pas une méthode de connexion
+          ...(ssoActive ? [{ ssoUid: { not: null } }] : []),
           provider === 'firebase' ? { githubId: { not: null } } : { firebaseUid: { not: null } },
         ],
       },
@@ -1105,6 +1127,7 @@ export class AuthService {
   /** Identités liées du compte connecté, pour l'écran « Sécurité du compte » (S31, point 5). */
   async getIdentities(userId: string) {
     const account = await this.loadIdentityAccount(userId);
+    const ssoActive = await this.hasActiveSso(account);
     return {
       firebase: { linked: Boolean(account.firebaseUid), email: account.firebaseEmail },
       github: { linked: Boolean(account.githubId), username: account.githubUsername },
@@ -1112,8 +1135,9 @@ export class AuthService {
       mfaEnabled: account.mfaEnabled,
       // Règle unique, partagée avec la déliaison : le client ne la recalcule pas (P9-L-a)
       canUnlink: {
-        firebase: Boolean(account.firebaseUid) && hasOtherLoginMethod(account, 'firebase'),
-        github: Boolean(account.githubId) && hasOtherLoginMethod(account, 'github'),
+        firebase:
+          Boolean(account.firebaseUid) && hasOtherLoginMethod(account, 'firebase', ssoActive),
+        github: Boolean(account.githubId) && hasOtherLoginMethod(account, 'github', ssoActive),
       },
     };
   }

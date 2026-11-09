@@ -1484,9 +1484,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const checkInvitation = async (token: string) => {
     if (!isInviteToken(token)) throw new Error("Lien d'invitation invalide ou expiré.");
-    const res = await fetch(
-      `${BACKEND_URL}/projects/invitations/check/${encodeURIComponent(token)}`,
-    );
+    // Le jeton voyage dans le corps, jamais dans le chemin (S27)
+    const res = await fetch(`${BACKEND_URL}/projects/invitations/check`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ token }),
+    });
     if (!res.ok) {
       throw await invitationErrorFrom(res, "Lien d'invitation invalide ou expiré.");
     }
@@ -1495,13 +1498,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const acceptInvitation = async (token: string) => {
     if (!isInviteToken(token)) throw new Error("Lien d'invitation invalide ou expiré.");
-    const res = await fetch(
-      `${BACKEND_URL}/projects/invitations/accept/${encodeURIComponent(token)}`,
-      {
-        method: 'POST',
-        headers: getHeaders(),
-      },
-    );
+    const res = await fetch(`${BACKEND_URL}/projects/invitations/accept`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ token }),
+    });
     if (!res.ok) {
       throw await invitationErrorFrom(res, "Impossible d'accepter l'invitation.");
     }

@@ -3456,3 +3456,69 @@ Code relu : GitHub 401 -> 403, autre statut non 200 -> 503, jeton absent -> 400 
 F12 (affichage de la réponse du serveur) et F13 (`refreshData` appelé exactement une fois) : mutations F12, F13 et F13b détectées.
 
 **P9-R : VALIDÉ.** Mesures relancées : jest 86/86 (2503), vitest 28 fichiers (197), nest build, tsc (backend tests et frontend), `pnpm build` et grep du build (vide), lint (0 erreur), Prettier conforme sur le code. `md5sum` des 36 fichiers identique avant et après mes essais. **Feu vert pour un commit unique** (liste, changements cassants et état migration : « Revue r34 » du rapport ; migration : aucune). Constats ouverts : voir la fin de « Revue r34 ».
+
+## Lot r34 (fixeur)
+
+Périmètre : constats ouverts de « Revue r34 » du rapport, dans l'ordre : (1) non bloquant r26 « configuration SSO pour `ssoUid` » ; (2) non bloquant r30 « jeton d'invitation dans le corps de `check` et `accept` » (S27). Exigences d'origine : Revue r26, « Points non bloquants » (« vérifier aussi qu'une configuration SSO active existe pour le domaine ») ; Revue r30, réponse 2 (`POST /projects/invitations/check` et `/accept` avec `{ token }`) ; règle de r31 (valeurs lues validées par format, segments encodés) ; parcours P13. Aucun commit.
+
+### Non bloquant r26 — `ssoUid` compte comme « autre méthode » seulement si le SSO du domaine est utilisable
+
+**Statut** : CORRIGÉ – À REVOIR
+
+**Changement** : `backend/src/auth/auth.service.ts` :
+- nouvelle méthode privée `hasActiveSso(account)` : vrai si le compte porte un `ssoUid` **et** si `sSOConfiguration.findUnique({ verifiedDomain: <domaine de l'adresse> })` renvoie une configuration `enabled` avec `domainVerifiedAt` (mêmes critères que `SsoService.findUsableConfig`, S10-a) ;
+- `hasOtherLoginMethod(account, provider, ssoActive)` : `ssoUid` compte seulement si `ssoActive`. Règle toujours unique, partagée par `unlinkIdentity` et `getIdentities` (`canUnlink`) ;
+- le `OR` SQL de l'`updateMany` de `unlinkIdentity` n'inclut `{ ssoUid: { not: null } }` que si `ssoActive` (miroir de la règle).
+
+**Tests** : `tests/unit/auth/identity-linking.spec.ts` : `ssoUid` + configuration active du domaine : `canUnlink` vrai et déliaison réussie (test existant, la configuration est maintenant semée) ; `ssoUid` sans configuration, configuration désactivée, domaine non prouvé, configuration d'un autre domaine : `canUnlink` faux, 409, rien d'écrit, aucun courriel (4 cas) ; `ssoUid` sans SSO utilisable mais avec mot de passe : déliaison permise.
+
+**Contre-mutations** (fichier restauré, md5sum identique vérifié après chacune) : `ssoUid` compté sans `ssoActive` -> 4 échecs ; `enabled` ignoré -> 1 ; `domainVerifiedAt` ignoré -> 1 ; domaine ignoré (`findFirst` sans filtre) -> 1 ; `getIdentities` avec `ssoActive = true` -> 4 ; `unlinkIdentity` avec `ssoActive = true` -> 4.
+**Mutation non détectée (équivalente en séquentiel)** : retirer la condition `ssoActive` du `OR` SQL. La lecture qui précède renvoie déjà 409 ; le miroir SQL ne joue que si la configuration SSO change entre la lecture et l'écriture, ce que le faux Prisma ne permet pas de simuler sans test de concurrence artificiel. Couverture : revue de code.
+
+### Non bloquant r30 (S27) — jeton d'invitation dans le corps de `check` et `accept`
+
+**Statut** : CORRIGÉ – À REVOIR
+
+**Changement** :
+- `backend/src/projects/dto/invitation-token.dto.ts` (nouveau) : `InvitationTokenDto { token }`, `@Matches(/^[a-f0-9]{64}$/)` (format émis par `createInvitation`, identique à `isInviteToken` du frontend) ; 400 sinon.
+- `backend/src/projects/invitations.controller.ts` : `GET invitations/check/:token` remplacé par `POST invitations/check` (public, 200, corps `{ token }`) ; `POST invitations/accept/:token` remplacé par `POST invitations/accept` (authentifié, 200, corps `{ token }`). Les anciennes routes sont **supprimées** (404).
+- `frontend/src/context/AppContext.tsx` : `checkInvitation` et `acceptInvitation` envoient `POST` avec `{ token }` en JSON ; la validation `isInviteToken` avant tout `fetch` (S32) est conservée ; le jeton n'apparaît plus dans l'URL. Aucun autre appelant (`InvitationAcceptance`, `App` passent par ces deux fonctions ; le jeton en attente P13 reste dans `sessionStorage`, inchangé).
+- `docs/DOSSIER_ARCHITECTURE_TECHNIQUE.md` : route d'acceptation mise à jour.
+- `tests/unit/authz/public-routes.spec.ts` : liste blanche `GET /projects/invitations/check/:token` -> `POST /projects/invitations/check`.
+
+**Tests** : `backend/tests/http/invitation-token-body.spec.ts` (nouveau, 14, HTTP réel) : `check` valide 200 sans session ; jeton absent, objet d'opérateurs, `../../auth/logout`, majuscules, trop court, trop long : 400 sans appel au service ; `accept` valide 200 avec l'utilisateur, sans session 401, 3 jetons invalides 400 ; anciennes routes GET/POST avec jeton dans le chemin : 404. Frontend `AppContext.invitation.spec.tsx` : le test « jeton valide » vérifie `POST` sur `/projects/invitations/check` et `/accept`, corps `{ token }`, et qu'aucune URL ne contient le jeton ; les 5 jetons dangereux sont toujours refusés sans `fetch`.
+
+**Contre-mutations** (md5sum vérifié) : format retiré du DTO -> 6 échecs ; `check` non public -> 7 ; `accept` redevenu `accept/:token` -> 6 ; frontend `check` avec jeton dans l'URL -> 1 ; `accept` sans corps -> 1 ; validation de format retirée côté client -> 5.
+
+### Mesures (suites lancées ensemble, après Prettier final)
+| Commande | Résultat |
+| --- | --- |
+| `cd backend && env -u DATABASE_URL npx jest` | **87/87 suites, 2522/2522** (2503 avant) |
+| `cd frontend && pnpm test:run` | **28 fichiers, 197/197** |
+| `nest build` ; `tsc --noEmit -p tests/tsconfig.json` ; frontend `tsc --noEmit -p .` ; `pnpm build` | exit 0 partout |
+| `grep -l -e "mock/login" -e "Simuler une session" frontend/dist/assets/*.js` | vide (exit 1) |
+| `pnpm lint` racine ; Prettier sur les fichiers de code modifiés | 0 erreur (53 avertissements inchangés) ; conforme |
+
+Aucun processus de restauration en attente à la fin du lot.
+
+**Migration** : aucune.
+**Changements cassants** : (1) `GET /projects/invitations/check/:token` et `POST /projects/invitations/accept/:token` n'existent plus ; remplacés par `POST /projects/invitations/check` et `/accept` avec `{ "token": "<64 hex>" }` (400 si le format est invalide). Seul le frontend de ce dépôt les appelle ; les liens d'invitation `?token=` envoyés par courriel sont inchangés. Un frontend ancien déployé avec ce backend verrait 404 sur l'écran d'invitation : déployer ensemble. (2) Un compte dont le seul autre moyen de connexion est un `ssoUid` sans SSO actif du domaine ne peut plus délier GitHub/Firebase (409 « dernière méthode »), et `canUnlink` vaut faux.
+
+**Écart par rapport au rapport** : aucun. Le rapport proposait aussi d'exclure les chemins des journaux du proxy ; devenu inutile puisque le jeton n'est plus dans le chemin.
+
+**Questions pour l'architecte** :
+1. Le domaine retenu pour « SSO actif » est celui de l'adresse du compte (`verifiedDomain` unique), cohérent avec S10-a ; un compte dont l'adresse a changé de domaine depuis sa liaison perd donc la valeur de son `ssoUid`. Acceptable ?
+2. `POST invitations/check` public n'a pas de `@Throttle` dédié (comme l'ancienne route GET) ; limitation de débit à traiter en Phase 5 (P5) ?
+3. Les anciennes routes sont supprimées sans période de transition (aucun client externe connu). Confirmer, ou prévoir un alias temporaire ?
+
+
+## Revue architecte (r35)
+
+Verdict sur le lot r34 : **VALIDÉ** pour les deux points ; feu vert de commit (10 fichiers, détail dans « Revue r35 » du rapport). Mesures relancées : jest 87/87 suites, 2522/2522 ; vitest 28 fichiers, 197/197 ; `nest build`, deux `tsc`, `pnpm build` en exit 0 ; aucun `mock/login` ni « Simuler une session » dans `dist` ; lint 0 erreur ; Prettier conforme. `md5sum` du working tree identique avant et après mes mutations.
+
+- **Non bloquant r26 (`ssoUid`)** : **VALIDÉ**. Mutation non détectée déclarée (condition `ssoActive` du `OR` SQL) : jugée équivalente et acceptée, le SQL ne pouvant de toute façon pas vérifier l'état de `SSOConfiguration`. Mutation supplémentaire non détectée de mon côté : `toLowerCase()` retiré de `hasActiveSso` (nouveau constat mineur r35-m1 : test avec adresse en casse mixte).
+- **Non bloquant r30 (S27)** : **VALIDÉ**. Mes mutations (regex du DTO, `check` non public, `check` en `GET` côté client) sont détectées.
+
+**Réponses** : (1) domaine de l'adresse actuelle : accepté, cohérent avec S10-a. (2) pas de `@Throttle` dédié : le garde global (60 requêtes par minute) couvre la route, jeton de 256 bits ; à revoir en P5 avec `trust proxy`. (3) suppression sans alias : confirmée, déploiement simultané backend et frontend. Les points 1 et 3 sont des décisions produit / exploitation, recommandations à confirmer par l'utilisateur.
+
+**Ouverts** : r35-m1 (mineur), S30 actions 1 à 4, puis phases 4 à 6.

@@ -21,6 +21,7 @@ const VALID = 'e'.repeat(64);
 describe('AppContext : invitations, aucune valeur externe dans le chemin (S32)', () => {
   let ctx: ReturnType<typeof useApp>;
   let urls: string[];
+  let calls: Array<{ url: string; init?: RequestInit }>;
 
   const Probe = () => {
     ctx = useApp();
@@ -31,10 +32,12 @@ describe('AppContext : invitations, aucune valeur externe dans le chemin (S32)',
     localStorage.clear();
     sessionStorage.clear();
     urls = [];
+    calls = [];
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         urls.push(String(input));
+        calls.push({ url: String(input), init });
         return {
           ok: true,
           status: 200,
@@ -54,8 +57,6 @@ describe('AppContext : invitations, aucune valeur externe dans le chemin (S32)',
     vi.unstubAllGlobals();
   });
 
-  const invitationCalls = () => urls.filter((u) => u.includes('/projects/invitations/'));
-
   it.each(['../../../auth/logout', '..%2F..%2Fauth%2Flogout', 'a/b', '', 'D'.repeat(64)])(
     'jeton %j : checkInvitation et acceptInvitation refusent sans émettre de requête',
     async (token) => {
@@ -67,17 +68,21 @@ describe('AppContext : invitations, aucune valeur externe dans le chemin (S32)',
     },
   );
 
-  it('jeton valide : seules des routes /projects/invitations/ sont appelées, jeton encodé', async () => {
-    const before = urls.length;
+  it('jeton valide : POST sur /projects/invitations/check|accept, jeton dans le corps et jamais dans l’URL', async () => {
+    const before = calls.length;
     await act(async () => {
       await ctx.checkInvitation(VALID);
       await ctx.acceptInvitation(VALID);
     });
-    const mine = urls.slice(before).filter((u) => u.includes(VALID));
+    const mine = calls.slice(before).filter((c) => c.url.includes('/projects/invitations/'));
     expect(mine).toHaveLength(2);
-    expect(mine[0]).toMatch(new RegExp(`/projects/invitations/check/${VALID}$`));
-    expect(mine[1]).toMatch(new RegExp(`/projects/invitations/accept/${VALID}$`));
-    expect(invitationCalls().every((u) => !u.includes('..'))).toBe(true);
+    expect(mine[0].url).toMatch(/\/projects\/invitations\/check$/);
+    expect(mine[1].url).toMatch(/\/projects\/invitations\/accept$/);
+    for (const call of mine) {
+      expect(call.init?.method).toBe('POST');
+      expect(JSON.parse(String(call.init?.body))).toEqual({ token: VALID });
+    }
+    expect(urls.some((u) => u.includes(VALID))).toBe(false);
   });
 });
 
