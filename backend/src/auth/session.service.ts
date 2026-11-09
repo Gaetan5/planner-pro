@@ -50,6 +50,8 @@ export interface SessionSummary {
   expiresAt: Date;
   userAgent: string | null;
   current: boolean;
+  /** Session ouverte par un administrateur (impersonation, S18). L'identité de l'acteur n'est pas exposée. */
+  impersonated: boolean;
 }
 
 function sha256(value: string): string {
@@ -111,6 +113,7 @@ export class SessionService {
         authenticatedAt: options.authenticatedAt ?? now,
         expiresAt,
         userAgent: options.userAgent?.slice(0, 255) ?? null,
+        impersonatedBy: options.impersonatedBy ?? null,
       },
     });
 
@@ -326,7 +329,11 @@ export class SessionService {
   }
 
   /** Sessions actives d'un compte (page « Sessions actives », P6). */
-  async listForUser(userId: string, currentSid?: string): Promise<SessionSummary[]> {
+  async listForUser(
+    userId: string,
+    currentSid?: string,
+    currentImpersonated = false,
+  ): Promise<SessionSummary[]> {
     const rows = (await this.prisma.refreshToken.findMany({
       where: { userId, revokedAt: null, expiresAt: { gt: new Date() } },
       select: {
@@ -335,6 +342,7 @@ export class SessionService {
         authenticatedAt: true,
         expiresAt: true,
         userAgent: true,
+        impersonatedBy: true,
       },
       orderBy: { createdAt: 'desc' },
     })) as Array<{
@@ -343,6 +351,7 @@ export class SessionService {
       authenticatedAt: Date;
       expiresAt: Date;
       userAgent: string | null;
+      impersonatedBy: string | null;
     }>;
 
     return rows.map((r) => ({
@@ -352,6 +361,8 @@ export class SessionService {
       expiresAt: r.expiresAt,
       userAgent: r.userAgent,
       current: r.familyId === currentSid,
+      // Colonne pour toute la liste ; pour la session courante, le jeton d'accès fait aussi foi
+      impersonated: Boolean(r.impersonatedBy) || (r.familyId === currentSid && currentImpersonated),
     }));
   }
 

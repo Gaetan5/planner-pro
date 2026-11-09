@@ -52,6 +52,7 @@ interface AuthenticatedUserRequest {
   user: {
     id: string;
     sid?: string;
+    impersonatedBy?: string;
   };
 }
 
@@ -308,7 +309,11 @@ export class AuthController {
    */
   @Get('sessions')
   async listSessions(@Req() req: AuthenticatedUserRequest) {
-    return this.sessionService.listForUser(req.user.id, req.user.sid);
+    return this.sessionService.listForUser(
+      req.user.id,
+      req.user.sid,
+      Boolean(req.user.impersonatedBy),
+    );
   }
 
   /**

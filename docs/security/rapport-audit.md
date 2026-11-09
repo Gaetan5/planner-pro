@@ -4757,3 +4757,101 @@ Changements cassants : `GET /projects/invitations/check/:token` et `POST /projec
 1. r35-m1 (mineur, test de casse), à joindre au prochain lot.
 2. S30, actions d'exploitation 1 à 4.
 3. Phases 4 à 6 : S18 (avec les compléments r32 et r33 : masquer « Connecter un dépôt » en impersonation), S19 à S26 (hors volet `mock/login`), A5 à A9, P2, P5 (dont `trust proxy` et limites des routes publiques), P7, P8, Q-2, O10 à O17. Décision `myRole` / `canManage` à prendre avec S18 ou A5 à A9 (confirmation utilisateur).
+
+
+## Revue r36 — S18 (indicateur d'impersonation) et r35-m1 : VALIDÉS ; S18 clos côté code ; feu vert pour le commit (2026-11-09)
+
+Revue de la section « Lot r35 (fixeur) » du journal. Le working tree contient 13 entrées (11 fichiers modifiés, la migration et `useImpersonatedSession.ts`), sans le dossier d'agent local. J'ai relu intégralement `git diff` et les fichiers nouveaux, relancé les mesures et rejoué 12 contre-mutations hors dépôt (sauvegardes dans le bac à sable de session, restauration par `/bin/cp -f`). `md5sum` des 13 fichiers identiques avant et après ; aucun stash ; worktree temporaire supprimé.
+
+### Incident de méthode : aucune mutation résiduelle
+
+Chaque ligne du diff est voulue : colonne et schéma, écriture dans `issue()`, lecture et `impersonated` dans `listForUser`, transmission par le contrôleur, type client, libellé et `readOnly` dans `SessionsSection`, hook, garde du panneau, tests. Rien de plus (`auth.service.ts` est identique à HEAD, absent du diff). `git diff --name-only` : 11 fichiers, tous dans `git status`. Les tests ne contiennent aucun `.only`, `.skip` ni assertion affaiblie. Incident accepté ; consigne : toujours sauvegarder dans un tableau quoté (zsh ne découpe pas `$VAR`) et vérifier `md5sum -c` avant de rendre.
+
+### Mesures relancées
+
+| Commande | Résultat |
+| --- | --- |
+| `cd backend && env -u DATABASE_URL npx jest` | 87/87 suites, 2529/2529 |
+| `nest build` ; `tsc --noEmit -p tests/tsconfig.json` ; `-p tsconfig.build.json` ; frontend `tsc --noEmit` ; `pnpm build` | exit 0 |
+| `cd frontend && npx vitest run` | 28 fichiers, 202/202 |
+| `grep -l -e "mock/login" -e "Simuler une session" frontend/dist/assets/*.js` | vide |
+| `pnpm lint` ; Prettier sur les fichiers modifiés | 0 erreur (53 avertissements) ; conforme |
+| `prisma validate` | valide |
+| `tsc --noEmit -p tsconfig.json` (backend) | erreur `rootDir` TS6059 sur `tracking.gateway.spec.ts` : **préexistante**, reproduite sur HEAD dans un worktree propre |
+
+L'erreur `rootDir` vient du `rootDir: src` du `tsconfig.json` principal, alors que le spec importe `tests/support/session.test-support.ts`. Sans effet : le build utilise `tsconfig.build.json` et les tests leur propre `tsconfig`. Constat **O21** (Amélioration, hygiène) : exclure `src/**/*.spec.ts` de ce `tsconfig` ou déplacer l'import ; avec A9 (CI).
+
+### Migration `20261114000000_s18_refresh_token_impersonated_by`
+
+`ALTER TABLE RefreshToken ADD COLUMN impersonatedBy VARCHAR(191) NULL` : additive, nullable, sans valeur par défaut ni reprise, cohérente avec le schéma (`String? @db.VarChar(191)`, la taille des identifiants), `prisma validate` OK. Sur MySQL/MariaDB l'ajout d'une colonne nullable est léger. Pas de rotation à traiter : une session d'impersonation est une ligne unique de 15 minutes sans secret remis, donc `refresh()` n'a rien à reporter.
+
+### Contre-mutations de l'architecte
+
+| ID | Mutation | Résultat |
+| --- | --- | --- |
+| M1 | `listForUser` ignore la colonne | Détectée (1) |
+| M2 | drapeau du jeton ignoré pour la session courante | Détectée (1) |
+| M3 | drapeau du jeton appliqué à toutes les lignes | Détectée (1) |
+| M4 | contrôleur ne transmet plus le drapeau | Détectée (1) |
+| M5 | `issue()` n'écrit plus la colonne | Détectée (2) |
+| M6 | `select` sans `impersonatedBy` | Détectée (erreur de types) |
+| M7 | `readOnly` ne regarde plus `current` | Détectée (1) |
+| M8 | `readOnly` toujours faux | Détectée (2) |
+| M9 | panneau : `impersonated !== true` (visible pendant le chargement) | Détectée (1) |
+| M10 | hook : échec de lecture traité comme impersonation | **Non détectée** |
+| M11 | hook : `some(impersonated)` au lieu de l'élément `current` | **Non détectée** |
+| M12 | `hasActiveSso` : `toLowerCase()` retiré (r35-m1) | Détectée (1) |
+
+M10 et M11 : **r36-m1** (Amélioration, non bloquant). Ajouter deux tests au panneau : (a) `listSessions` rejeté, le bouton s'affiche (le serveur reste l'autorité) ; (b) session courante ordinaire et autre session d'assistance dans la liste, le bouton s'affiche. M11 est un vrai défaut de précision possible : sans le test, un refactoring pourrait masquer le bouton à tort pour toute personne qui a une session d'assistance ouverte ailleurs.
+
+### Verdicts
+
+| Constat | Verdict | Remarque |
+| --- | --- | --- |
+| S18-a : colonne `impersonatedBy` et migration | **VALIDÉ** | additive, 2 échecs si `issue()` n'écrit plus |
+| S18-a : champ `impersonated` dans `GET /auth/sessions` | **VALIDÉ** | identité de l'administrateur jamais exposée (test sur le corps brut) |
+| S18-a : `SessionsSection` sans `planner_admin_original_session`, libellé | **VALIDÉ** | nouvel onglet couvert ; clé seule ne désactive rien |
+| S18-a : hook et masquage de « Connecter un dépôt » | **VALIDÉ** | M9 détectée ; réserve r36-m1 |
+| r35-m1 : test de casse | **VALIDÉ** | M12 détectée |
+| **S18 (global)** | **Clos côté code** | reste le drapeau `FEATURE_IMPERSONATION_ENABLED`, éteint, subordonné à A8 |
+
+### Les 3 écarts
+
+1. **Booléen seulement côté client : accepté.** Exposer l'identité de l'administrateur à la personne ciblée n'apporte rien à l'interface et élargit la surface ; l'attribution fine relève de l'`AuditLog` (A8) et du `PlatformAuditLog`. *Décision produit : à confirmer par l'utilisateur* si l'on veut montrer « par qui » à la personne ciblée (déconseillé avant A8).
+2. **OU colonne + jeton pour la session courante : accepté.** Le jeton couvre une ligne antérieure à la migration ; la colonne couvre les autres lignes. Les deux tests le verrouillent (M2, M3). Sans risque : les deux sources sont émises par le serveur.
+3. **Masquage tant que le serveur n'a pas répondu : accepté.** Sûr par défaut (échec côté prudent), au prix d'un bouton qui apparaît après une requête. Le serveur reste l'autorité (403). *À confirmer par l'utilisateur* si l'attente est jugée gênante (alternative : désactiver le bouton avec un état de chargement).
+
+### Réponses aux questions du fixeur
+
+1. **`AdminConsole` et « Quitter l'impersonation » : ne pas modifier.** La clé `planner_admin_original_session` n'y est pas un indicateur d'état mais le support de la restauration de la session de l'administrateur dans cet onglet ; le serveur ne la fournit pas (et ne doit pas). Un onglet sans clé ne peut pas « quitter » : il faut une nouvelle connexion, ce qui est acceptable pour une fonction désactivée. À revoir seulement à l'ouverture du drapeau (parcours complet, avec A8).
+2. **`myRole` / `canManage` : non implémenté, accepté.** S18 n'en dépend pas. Recommandation inchangée (exposer `canManage` par projet, calculé par `PolicyService`), à traiter avec A5 à A9. *Décision à confirmer par l'utilisateur* : lot dédié ou différé.
+3. **Attribution `AuditLog` reportée à A8 : acceptée**, condition de r17 maintenue : ne pas ouvrir `FEATURE_IMPERSONATION_ENABLED` avant A8 ; sinon risque accepté et consigné.
+
+### Statut des constats
+
+| Constat | Statut |
+| --- | --- |
+| S18 (compléments r32 et r33), r35-m1 | **VALIDÉ, clos** |
+| r36-m1 (deux tests du panneau) | Ouvert, mineur, à joindre au prochain lot front |
+| O21 (`tsconfig.json` backend, `rootDir`) | Ouvert, Amélioration, avec A9 |
+
+### Commit : feu vert, un seul commit
+
+14 entrées après la présente revue (les 13 du fixeur plus `rapport-audit.md`), sans le dossier d'agent local :
+
+- Backend source (4) : `backend/prisma/schema/auth.prisma`, `backend/prisma/migrations/20261114000000_s18_refresh_token_impersonated_by/migration.sql` (nouveau), `backend/src/auth/auth.controller.ts`, `backend/src/auth/session.service.ts`.
+- Backend tests (2) : `backend/tests/http/session-lifecycle.spec.ts`, `backend/tests/unit/auth/identity-linking.spec.ts`.
+- Frontend (6) : `frontend/src/security-api.ts`, `frontend/src/useImpersonatedSession.ts` (nouveau), `frontend/src/components/SessionsSection.tsx`, `frontend/src/components/SessionsSection.spec.tsx`, `frontend/src/components/IntegrationsPanel.tsx`, `frontend/src/components/IntegrationsPanel.spec.tsx`.
+- Documentation (2) : `docs/security/rapport-audit.md`, `docs/security/journal-corrections.md`.
+
+`git status` affiche 14 entrées, la migration comptant pour une (son dossier). Ajouter les chemins explicitement, jamais `git add -A`.
+
+**Changements cassants** : aucun. `GET /auth/sessions` gagne `impersonated` (additif) ; un ancien frontend continue de fonctionner avec le nouveau backend. Un nouveau frontend avec l'ancien backend ne recevrait pas `impersonated` : le hook y verrait `false` et afficherait le bouton (le serveur refuserait en 403 en impersonation, drapeau éteint). Déployer backend et frontend ensemble.
+**Migration** : une, additive, à appliquer avant le démarrage du nouveau backend (`prisma migrate deploy`), sinon le `select` de `impersonatedBy` échoue sur `GET /auth/sessions` et `issue()`. Pas de reprise, pas de retour arrière nécessaire (colonne ignorée par l'ancien code). Le message de commit ne doit mentionner aucun assistant.
+
+### Constats ouverts, dans l'ordre de traitement
+
+1. r36-m1 (mineur, tests du panneau), à joindre au prochain lot front.
+2. S30, actions d'exploitation 1 à 4.
+3. **Phase 5 (durcissement)**, ordre proposé : S19, S20, S21, S22 (surfaces exposées, en-têtes, CORS, secrets), puis S23 à S25, S26 (hors volet `mock/login`, déjà fait), A5, A6, A7, P5 (dont `trust proxy` et limites des routes publiques), P8, O10 à O17. Chaque constat en lot séparé, revue à chaque lot.
+4. **Phase 6** : A8 (`AuditLog` avec attribution de l'acteur réel en impersonation, prérequis de l'ouverture du drapeau), A9 (CI, pnpm 10, O21), P2, P7, Q-2. Décision `myRole` / `canManage` avec A5 à A9 (confirmation utilisateur).

@@ -467,6 +467,16 @@ describe('S31 : liaison et déliaison d’identités externes', () => {
       },
     );
 
+    // r35-m1 : le domaine de l'adresse est comparé en minuscules à `verifiedDomain`
+    it('adresse en casse mixte et configuration SSO au domaine en minuscules : le ssoUid compte', async () => {
+      await seedSsoConfig({ verifiedDomain: 'acme.com' });
+      await seed({ ...gh, email: 'Alice@ACME.com', ssoUid: 'sso-1' }, false);
+      expect((await service.getIdentities('user-1')).canUnlink.github).toBe(true);
+      const fresh = await session();
+      await service.unlinkIdentity('user-1', 'github', {}, fresh.sid);
+      expect(row().githubId).toBeNull();
+    });
+
     it('ssoUid sans SSO utilisable mais avec un mot de passe : déliaison permise', async () => {
       await seed({ ...gh, ssoUid: 'sso-1' });
       expect((await service.getIdentities('user-1')).canUnlink.github).toBe(true);

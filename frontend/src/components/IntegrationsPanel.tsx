@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { GitHubRepoConnector } from './GitHubRepoConnector';
+import { useImpersonatedSession } from '../useImpersonatedSession';
 import './IntegrationsPanel.css';
 
 const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
@@ -55,6 +56,9 @@ export const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
     getCalendarConflicts,
     refreshData,
   } = useApp();
+
+  // En impersonation, « Connecter un dépôt » est masqué (le serveur refuse aussi : 403, S18.2)
+  const impersonated = useImpersonatedSession();
 
   const getHeaders = () => ({
     'Content-Type': 'application/json',
@@ -246,7 +250,7 @@ export const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
         <GitHubRepoConnector
           projectId={project.id}
           currentRepo={project.githubRepo}
-          canManage={canManageProject}
+          canManage={canManageProject && impersonated === false}
           autoOpen={autoOpenRepoPicker}
           onAutoOpened={onRepoPickerOpened}
           onLinked={() => refreshData?.()}

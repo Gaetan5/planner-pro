@@ -45,9 +45,6 @@ const formatDate = (iso: string) => {
   return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('fr-FR');
 };
 
-/** Session d'impersonation en cours (l'administrateur garde une copie de sa propre session). */
-const isImpersonating = () => sessionStorage.getItem('planner_admin_original_session') !== null;
-
 /**
  * Sessions actives du compte (P9-S). Révoquer une session ou fermer toutes les autres n'exige pas
  * de réauthentification : c'est une action de protection. Les actions sont masquées en
@@ -62,7 +59,6 @@ export const SessionsSection: React.FC<{
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState<string | null>(null);
-  const readOnly = isImpersonating();
 
   const refresh = useCallback(async () => {
     try {
@@ -119,6 +115,8 @@ export const SessionsSection: React.FC<{
   }
 
   const hasOthers = sessions.some((s) => !s.current);
+  // Information fournie par le serveur (S18) : valable aussi dans un onglet ouvert pendant l'impersonation
+  const readOnly = sessions.some((s) => s.current && s.impersonated);
 
   return (
     <div className="security-page">
@@ -141,6 +139,9 @@ export const SessionsSection: React.FC<{
             <li className="security-identity" key={s.id}>
               <strong>{describeUserAgent(s.userAgent)}</strong>
               {s.current && <span className="security-badge">Cette session</span>}
+              {s.impersonated && (
+                <span className="security-badge">Session d'assistance d'un administrateur</span>
+              )}
               <small>
                 Ouverte le {formatDate(s.createdAt)} · dernière authentification le{' '}
                 {formatDate(s.authenticatedAt)} · expire le {formatDate(s.expiresAt)}

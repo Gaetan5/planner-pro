@@ -367,6 +367,73 @@ describe('A3/S7 : cycle de vie des sessions (HTTP)', () => {
     expect(JSON.stringify(sessions)).not.toMatch(/hashedToken|refreshToken/);
   });
 
+  // S18 : indicateur de session d'impersonation
+  describe('S18 : sessions d’impersonation dans la liste', () => {
+    type Item = { id: string; current: boolean; impersonated: boolean };
+    const listWith = async (headers: Record<string, string>) => {
+      const res = await fetch(`${baseUrl}/auth/sessions`, { headers });
+      expect(res.status).toBe(200);
+      return { items: (await res.json()) as Item[] };
+    };
+    const impersonate = () =>
+      app
+        .get(SessionService)
+        .issue({ id: 'user-1', email: 'ada@corp.com', name: 'Ada' }, { impersonatedBy: 'admin-9' });
+
+    it('issue() enregistre l’administrateur dans la colonne impersonatedBy ; absente sinon', async () => {
+      const issued = await impersonate();
+      await login();
+      const rows = prisma.refreshToken.rows;
+      expect(rows.find((r) => r.familyId === issued.sid)!.impersonatedBy).toBe('admin-9');
+      expect(rows.filter((r) => r.familyId !== issued.sid).map((r) => r.impersonatedBy)).toEqual([
+        null,
+      ]);
+    });
+
+    it('la session courante d’impersonation est marquée impersonated:true, les autres false', async () => {
+      await login();
+      const issued = await impersonate();
+      const { items } = await listWith({ Cookie: `accessToken=${issued.accessToken}` });
+      expect(items).toHaveLength(2);
+      expect(items.find((s) => s.current)).toMatchObject({ id: issued.sid, impersonated: true });
+      expect(items.find((s) => !s.current)!.impersonated).toBe(false);
+    });
+
+    it('depuis une session ordinaire : la session d’impersonation est signalée, la courante non', async () => {
+      const ordinary = await login();
+      const issued = await impersonate();
+      const { items } = await listWith({ Cookie: asHeader(ordinary.jar), Origin: FRONT_ORIGIN });
+      expect(items.find((s) => s.current)!.impersonated).toBe(false);
+      expect(items.find((s) => s.id === issued.sid)).toMatchObject({
+        current: false,
+        impersonated: true,
+      });
+    });
+
+    it('session ordinaire seule : impersonated:false', async () => {
+      const ordinary = await login();
+      const { items } = await listWith({ Cookie: asHeader(ordinary.jar), Origin: FRONT_ORIGIN });
+      expect(items).toHaveLength(1);
+      expect(items[0].impersonated).toBe(false);
+    });
+
+    it('la session courante est marquée d’après le jeton, même si la colonne est vide', async () => {
+      const issued = await impersonate();
+      prisma.refreshToken.rows.find((r) => r.familyId === issued.sid)!.impersonatedBy = null;
+      const { items } = await listWith({ Cookie: `accessToken=${issued.accessToken}` });
+      expect(items[0].impersonated).toBe(true);
+    });
+
+    it('l’identité de l’administrateur n’est jamais exposée', async () => {
+      const issued = await impersonate();
+      const res = await fetch(`${baseUrl}/auth/sessions`, {
+        headers: { Cookie: `accessToken=${issued.accessToken}` },
+      });
+      const text = await res.text();
+      expect(text).not.toMatch(/admin-9|impersonatedBy/);
+    });
+  });
+
   it('DELETE /auth/sessions/:sid révoque une autre session du compte, jamais celle d’autrui (404)', async () => {
     const mine = await login();
     const other = await login();

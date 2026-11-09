@@ -3522,3 +3522,108 @@ Verdict sur le lot r34 : **VALIDÉ** pour les deux points ; feu vert de commit (
 **Réponses** : (1) domaine de l'adresse actuelle : accepté, cohérent avec S10-a. (2) pas de `@Throttle` dédié : le garde global (60 requêtes par minute) couvre la route, jeton de 256 bits ; à revoir en P5 avec `trust proxy`. (3) suppression sans alias : confirmée, déploiement simultané backend et frontend. Les points 1 et 3 sont des décisions produit / exploitation, recommandations à confirmer par l'utilisateur.
 
 **Ouverts** : r35-m1 (mineur), S30 actions 1 à 4, puis phases 4 à 6.
+
+
+## Lot r35 (fixeur) — S18 (indicateur d'impersonation, S18-a) et r35-m1
+
+### Inventaire S18 avant intervention (relu dans `rapport-audit.md` et dans le code)
+
+**Déjà fait et VALIDÉ** : S18 étape 0 (drapeau `FEATURE_IMPERSONATION_ENABLED`, désactivé par défaut : `features.ts:19-23`, route d'impersonation en 404 et bouton masqué tant qu'il est éteint), S18.1 (escalade `PLATFORM_ADMIN` vers `SUPER_ADMIN`), S18.2 (`@ForbiddenInImpersonation()` + balayage méta), S18.2-bis, S18.2-ter, S18.3 (plafond 12 h, MFA, révocation de la session administrateur), P4, S17. S18 est « clos côté code » (r18 à r19) ; l'ouverture du drapeau reste subordonnée à A8 (attribution des actions dans `AuditLog`, décision 5).
+
+**Restait ouvert (compléments r32 et r33)** :
+1. colonne `impersonatedBy` sur `RefreshToken` (migration) et libellé « Session d'assistance d'un administrateur » dans la liste des sessions : **fait dans ce lot** ;
+2. champ `impersonated` sur l'élément `current` de `GET /auth/sessions` (depuis `req.user.impersonatedBy`, sans migration), et le client cesse de lire `planner_admin_original_session` : **fait** pour `SessionsSection` et pour le nouveau masquage ci-dessous ;
+3. masquer « Connecter un dépôt » en impersonation, d'après l'information du serveur : **fait** ;
+4. attribution des actions sous impersonation dans `AuditLog` : reporté à A8, hors de ce lot ;
+5. décision `myRole` / `canManage` : **non implémentée** (non confirmée par l'utilisateur). S18 n'en dépend pas : le masquage en impersonation s'ajoute à `canManageProject` existant, sans le changer.
+
+**Découpage** : tout le reste de S18 tient dans ce lot ; pas de S18-b. Le drapeau d'impersonation n'est **pas** réactivé (valeur par défaut `false` inchangée).
+
+### S18-a — Indicateur de session d'impersonation et information fournie par le serveur
+
+**Statut** : CORRIGÉ – À REVOIR
+
+**Changement** :
+- `backend/prisma/schema/auth.prisma` (`RefreshToken.impersonatedBy String? @db.VarChar(191)`) et migration `backend/prisma/migrations/20261114000000_s18_refresh_token_impersonated_by/migration.sql` (`ALTER TABLE ... ADD COLUMN ... NULL`).
+- `backend/src/auth/session.service.ts` : `issue()` écrit `impersonatedBy` ; `listForUser(userId, currentSid, currentImpersonated)` renvoie `impersonated` pour chaque élément (colonne, ou, pour la session courante, drapeau issu du jeton d'accès) ; `SessionSummary.impersonated`. L'identifiant de l'administrateur n'est jamais renvoyé.
+- `backend/src/auth/auth.controller.ts` : `GET /auth/sessions` transmet `Boolean(req.user.impersonatedBy)`.
+- `frontend/src/security-api.ts` : `ActiveSession.impersonated`.
+- `frontend/src/components/SessionsSection.tsx` : plus de lecture de `planner_admin_original_session` ; lecture seule si l'élément `current` est `impersonated` ; libellé « Session d'assistance d'un administrateur » sur toute session signalée.
+- `frontend/src/useImpersonatedSession.ts` (nouveau) : lit `GET /auth/sessions` ; `null` en attente, `false` si la lecture échoue (le serveur reste l'autorité, 403).
+- `frontend/src/components/IntegrationsPanel.tsx` : `canManage={canManageProject && impersonated === false}` (bouton masqué pendant le chargement et en impersonation).
+
+**Tests** (écrits avec les correctifs ; contre-mutations ci-dessous) :
+- `backend/tests/http/session-lifecycle.spec.ts` (+6, HTTP réel, bloc « S18 ») : colonne écrite par `issue()` et NULL pour une session ordinaire ; session courante d'impersonation `impersonated:true`, autres `false` ; depuis une session ordinaire la session d'assistance est signalée et la courante non ; session seule `false` ; session courante signalée d'après le jeton même si la colonne est vide ; aucune fuite de l'identifiant de l'administrateur.
+- `frontend/.../SessionsSection.spec.tsx` : test d'impersonation réécrit sur la réponse serveur (libellé, aucune action) ; nouvel onglet sans clé de stockage ; la clé de stockage seule ne désactive rien ; libellé d'une autre session d'assistance, encore révocable.
+- `frontend/.../IntegrationsPanel.spec.tsx` (+2) : bouton masqué en impersonation sans clé de stockage ; masqué tant que le serveur n'a pas répondu ; `listSessions` simulé pour les autres tests.
+
+**Contre-mutations** (fichier restauré par `/bin/cp -f`, `md5sum -c` : 0 écart à la fin ; aucun processus en attente) :
+
+| Mutation | Résultat |
+| --- | --- |
+| `issue()` n'écrit plus `impersonatedBy` | 2 échecs |
+| `impersonated` ne lit plus la colonne | 1 |
+| drapeau du jeton ignoré pour la session courante | 1 |
+| drapeau du jeton appliqué à toutes les lignes | 1 |
+| `impersonatedBy` exposé dans la liste | 1 |
+| contrôleur ne transmet plus le drapeau | 1 |
+| `SessionsSection` relit `planner_admin_original_session` | 3 |
+| libellé retiré | 2 |
+| `readOnly` toujours faux | 2 |
+| hook : test inversé (`=== false`) | 3 |
+| panneau : `impersonated !== true` (visible pendant le chargement) | 1 |
+| panneau : garde retirée | 2 |
+
+Incident de méthode, corrigé : un premier passage de mutations a été lancé avec une liste de fichiers non découpée par zsh, donc sans sauvegarde ; les mutations se sont cumulées dans le working tree. Les fichiers ont été remis à l'état voulu (`auth.service.ts` par `git checkout`, qu'aucune modification légitime ne touchait ; les autres à la main, vérifiés par `git diff`), puis toutes les mutations ont été rejouées avec sauvegardes et `md5sum -c` (résultats ci-dessus). Les sauvegardes d'un ancien fichier `scratchpad/orig` (fichier, pas dossier) n'ont pas été touchées.
+
+**Migration** : `20261114000000_s18_refresh_token_impersonated_by`, additive et nullable, sans reprise : les sessions existantes restent à NULL (ordinaires) ; une session d'impersonation créée avant le déploiement (15 min au plus, drapeau éteint) ne serait pas libellée. `prisma validate` et `generate` OK. Note : `prisma format` reformate tous les fichiers de schéma ; non appliqué (les autres schémas ont été restaurés).
+**Changements cassants** : `GET /auth/sessions` ajoute `impersonated` à chaque élément (additif). Le client ne lit plus `planner_admin_original_session` pour `SessionsSection` ; `AdminConsole` la lit encore pour le bouton « Quitter l'impersonation » (usage de bascule de session, hors périmètre). Un frontend ancien avec ce backend continue de fonctionner.
+**Écart par rapport au rapport** : (1) la colonne enregistre l'administrateur, mais le client ne reçoit qu'un booléen (identité non exposée) ; (2) pour la session courante, le drapeau du jeton et la colonne sont combinés par OU, le rapport ne demandant que le jeton ; (3) pendant le chargement de l'information, « Connecter un dépôt » est masqué (choix de sûreté, à confirmer).
+**Questions pour l'architecte** :
+1. Faut-il aussi dériver le bouton « Quitter l'impersonation » de la console admin de l'information serveur ? Il dépend encore de la clé de stockage (nécessaire à la restauration de la session de l'administrateur) ; non modifié.
+2. La décision `myRole` / `canManage` reste en attente de l'utilisateur ; ce lot ne la préjuge pas.
+3. Ouverture du drapeau toujours subordonnée à A8 (décision 5) : inchangé.
+
+### r35-m1 — Test de casse de `hasActiveSso`
+
+**Statut** : CORRIGÉ – À REVOIR
+
+**Changement** : aucun code produit (test seul).
+**Tests** : `backend/tests/unit/auth/identity-linking.spec.ts` (+1) : adresse `Alice@ACME.com`, configuration SSO au domaine `acme.com` en minuscules, sans mot de passe : `canUnlink.github` vrai et déliaison réussie. Contre-mutation : `toLowerCase()` retiré de `hasActiveSso` -> 1 échec (restauré, md5 vérifié).
+**Écart par rapport au rapport** : aucun. **Questions** : aucune.
+
+### Mesures (après Prettier final)
+| Commande | Résultat |
+| --- | --- |
+| `cd backend && env -u DATABASE_URL npx jest` | **87/87 suites, 2529/2529** (2522 avant) |
+| `nest build` ; `tsc --noEmit -p tests/tsconfig.json` ; `tsc --noEmit -p tsconfig.build.json` ; frontend `tsc --noEmit` ; `pnpm build` | exit 0 partout |
+| `cd frontend && vitest run` | **28 fichiers, 202/202** (197 avant) |
+| `grep -l -e "mock/login" -e "Simuler une session" frontend/dist/assets/*.js` | vide (exit 1) |
+| `pnpm lint` racine ; Prettier sur les fichiers modifiés | 0 erreur (53 avertissements inchangés) ; conforme |
+
+`tsc --noEmit -p tsconfig.json` (backend) signale une erreur `rootDir` sur `src/tracking/tracking.gateway.spec.ts`, sans lien avec ce lot (fichier non touché).
+
+
+## Revue architecte (r36)
+
+Revue du « Lot r35 (fixeur) » : voir `rapport-audit.md`, section « Revue r36 ». Mesures relancées (jest 87/87 suites, 2529 tests ; vitest 28 fichiers, 202 tests ; builds, `tsc`, lint, Prettier, `prisma validate` OK ; `mock/login` absent du bundle). `git diff` relu en entier : aucune mutation résiduelle de l'incident, 13 entrées, `auth.service.ts` identique à HEAD. 12 contre-mutations de l'architecte, `md5sum` identique avant et après.
+
+#### Revue architecte — S18-a : **VALIDÉ** (S18 clos côté code)
+
+Migration additive et nullable, champ `impersonated` sans fuite de l'identité, `SessionsSection` sans lecture du stockage, masquage de « Connecter un dépôt » fondé sur le serveur. Les 3 écarts sont acceptés (booléen seul ; OU colonne et jeton ; masquage pendant le chargement, à confirmer par l'utilisateur). Réponses : (1) ne pas toucher `AdminConsole`, la clé sert à restaurer la session administrateur ; (2) `myRole` / `canManage` reste en attente de l'utilisateur, avec A5 à A9 ; (3) attribution `AuditLog` à A8, drapeau éteint jusqu'alors. Réserve mineure **r36-m1** : M10 (échec de lecture traité comme impersonation) et M11 (`some` au lieu de `current`) non détectées, deux tests à ajouter au panneau.
+
+#### Revue architecte — r35-m1 : **VALIDÉ**
+
+M12 (`toLowerCase()` retiré de `hasActiveSso`) détectée.
+
+#### Nouveau constat
+
+O21 (Amélioration) : l'erreur `rootDir` de `tsc --noEmit -p tsconfig.json` est préexistante (reproduite sur HEAD) ; à traiter avec A9.
+
+#### Feu vert de commit
+
+Un seul commit, 14 entrées de `git status` (les 13 du fixeur plus `rapport-audit.md`) hors dossier d'agent local (liste dans le rapport). Aucun changement cassant. Une migration additive à appliquer avant le nouveau backend ; déployer backend et frontend ensemble.
+
+#### Constats encore ouverts
+
+r36-m1 (mineur) ; S30 (actions d'exploitation 1 à 4) ; Phase 5 (S19 à S26 hors `mock/login`, A5 à A7, P5, P8, O10 à O17) ; Phase 6 (A8, A9 avec O21, P2, P7, Q-2).

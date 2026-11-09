@@ -32,6 +32,7 @@ const session = (id: string, extra: Record<string, unknown> = {}) => ({
   expiresAt: '2026-11-08T10:00:00.000Z',
   userAgent: CHROME_LINUX,
   current: false,
+  impersonated: false,
   ...extra,
 });
 
@@ -131,13 +132,38 @@ describe('SessionsSection (P9-S)', () => {
     expect(screen.queryByRole('button', { name: 'Fermer les autres sessions' })).toBeNull();
   });
 
-  it('en impersonation : liste visible, aucune action', async () => {
+  // S18 : l'état d'impersonation vient du serveur, pas du stockage du navigateur
+  it('en impersonation (session courante signalée par le serveur) : liste visible, aucune action', async () => {
+    reply({ body: [session(CURRENT, { current: true, impersonated: true }), session(OTHER)] });
+    render(<SessionsSection />);
+    expect(await screen.findAllByText('Chrome sur Linux')).toHaveLength(2);
+    expect(screen.getByText("Session d'assistance d'un administrateur")).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Révoquer' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Fermer les autres sessions' })).toBeNull();
+    expect(screen.getByText(/gestion des sessions est désactivée/)).toBeInTheDocument();
+  });
+
+  it('nouvel onglet : sans la clé de stockage, l’impersonation signalée par le serveur désactive quand même les actions', async () => {
+    sessionStorage.clear();
+    reply({ body: [session(CURRENT, { current: true, impersonated: true }), session(OTHER)] });
+    render(<SessionsSection />);
+    await screen.findByText('Cette session');
+    expect(screen.queryByRole('button', { name: 'Révoquer' })).toBeNull();
+  });
+
+  it('la clé de stockage seule ne désactive rien : le serveur fait foi', async () => {
     sessionStorage.setItem('planner_admin_original_session', '{}');
     reply({ body: [session(CURRENT, { current: true }), session(OTHER)] });
     render(<SessionsSection />);
-    expect(await screen.findAllByText('Chrome sur Linux')).toHaveLength(2);
-    expect(screen.queryByRole('button', { name: 'Révoquer' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Fermer les autres sessions' })).toBeNull();
+    expect(await screen.findByRole('button', { name: 'Révoquer' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Fermer les autres sessions' })).toBeInTheDocument();
+  });
+
+  it('session ordinaire : une autre session d’assistance est libellée, et reste révocable', async () => {
+    reply({ body: [session(CURRENT, { current: true }), session(OTHER, { impersonated: true })] });
+    render(<SessionsSection />);
+    expect(await screen.findByText("Session d'assistance d'un administrateur")).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Révoquer' })).toBeInTheDocument();
   });
 
   it('relit la liste quand refreshKey change', async () => {

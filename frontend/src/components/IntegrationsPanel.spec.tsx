@@ -1,10 +1,15 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useApp } from '../context/AppContext';
 import { IntegrationsPanel } from './IntegrationsPanel';
+import { listSessions } from '../security-api';
 
 vi.mock('../context/AppContext', () => ({
   useApp: vi.fn(),
+}));
+vi.mock('../security-api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../security-api')>()),
+  listSessions: vi.fn(),
 }));
 
 const refreshData = vi.fn();
@@ -23,6 +28,17 @@ const mockIntegrations = (integrations: unknown[]) =>
 describe('IntegrationsPanel : état réel des intégrations (P1)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(listSessions).mockResolvedValue([
+      {
+        id: 's-1',
+        createdAt: '',
+        authenticatedAt: '',
+        expiresAt: '',
+        userAgent: null,
+        current: true,
+        impersonated: false,
+      },
+    ]);
   });
 
   it('affiche « Non configuré » pour une intégration sans source réelle', async () => {
@@ -104,5 +120,35 @@ describe('IntegrationsPanel : état réel des intégrations (P1)', () => {
     await screen.findByText(/Dépôt lié : acme\/web/);
     expect(refreshData).toHaveBeenCalledTimes(1);
     vi.unstubAllGlobals();
+  });
+  // S18 : en impersonation, « Connecter un dépôt » est masqué (information fournie par le serveur)
+  it('« Connecter un dépôt » : masqué en impersonation, y compris sans clé de stockage', async () => {
+    const project = { id: '3f2b8c1e-5a4d-4e6f-9b7a-1c2d3e4f5a6b', githubRepo: 'acme/api' };
+    sessionStorage.clear();
+    vi.mocked(listSessions).mockResolvedValue([
+      {
+        id: 's-1',
+        createdAt: '',
+        authenticatedAt: '',
+        expiresAt: '',
+        userAgent: null,
+        current: true,
+        impersonated: true,
+      },
+    ]);
+    mockIntegrations([]);
+    render(<IntegrationsPanel workspaceId="ws-1" project={project} canManageProject />);
+    expect(await screen.findByText(/Dépôt lié : acme\/api/)).toBeInTheDocument();
+    await waitFor(() => expect(listSessions).toHaveBeenCalled());
+    expect(screen.queryByRole('button', { name: 'Connecter un dépôt' })).toBeNull();
+  });
+
+  it('« Connecter un dépôt » : masqué tant que le serveur n’a pas répondu', async () => {
+    const project = { id: '3f2b8c1e-5a4d-4e6f-9b7a-1c2d3e4f5a6b', githubRepo: null };
+    vi.mocked(listSessions).mockReturnValue(new Promise(() => {}));
+    mockIntegrations([]);
+    render(<IntegrationsPanel workspaceId="ws-1" project={project} canManageProject />);
+    await screen.findByText('Aucun dépôt lié à ce projet.');
+    expect(screen.queryByRole('button', { name: 'Connecter un dépôt' })).toBeNull();
   });
 });

@@ -97,6 +97,8 @@ export interface ActiveSession {
   expiresAt: string;
   userAgent: string | null;
   current: boolean;
+  /** Session ouverte par un administrateur (impersonation, S18). */
+  impersonated: boolean;
 }
 
 export const listSessions = () => call<ActiveSession[]>('/auth/sessions', 'GET');

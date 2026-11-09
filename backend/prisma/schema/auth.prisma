@@ -84,6 +84,9 @@ model RefreshToken {
   // Renseigné quand le jeton est consommé par une rotation (tolérance de rejeu, détection de vol)
   rotatedAt   DateTime?
   userAgent   String?   @db.VarChar(255)
+  // Administrateur à l'origine d'une session d'impersonation (S18) ; NULL pour une session ordinaire.
+  // Jamais exposé au client : seul le drapeau `impersonated` l'est.
+  impersonatedBy String? @db.VarChar(191)
   createdAt   DateTime  @default(now())
 
   @@index([userId])
