@@ -6,8 +6,13 @@ export class FakeRedisService {
   /** TTL (en secondes) demandés à chaque écriture : permet de vérifier les caches bornés. */
   readonly ttls: Array<{ key: string; ttl?: number }> = [];
   private readonly expiries = new Map<string, number>();
-  /** 'reject' : chaque commande échoue ; 'hang' : chaque commande reste sans réponse. */
-  mode: 'ok' | 'reject' | 'hang' = 'ok';
+  /**
+   * 'reject' : chaque commande échoue ; 'hang' : chaque commande reste sans réponse ;
+   * 'write-then-mute' : `setIfAbsent` écrit puis ne répond jamais (réponse perdue), le reste fonctionne.
+   */
+  mode: 'ok' | 'reject' | 'hang' | 'write-then-mute' = 'ok';
+  /** Clés dont la suppression a été demandée (même si la commande n'a pas abouti). */
+  readonly delRequests: string[] = [];
 
   private async availability(): Promise<void> {
     if (this.mode === 'reject') throw new Error('Connection is closed.');
@@ -35,10 +40,12 @@ export class FakeRedisService {
   async setIfAbsent(key: string, value: string, ttlSeconds: number): Promise<boolean> {
     if ((await this.get(key)) !== null) return false;
     await this.set(key, value, ttlSeconds);
+    if (this.mode === 'write-then-mute') await new Promise<never>(() => undefined);
     return true;
   }
 
   async del(key: string): Promise<number> {
+    this.delRequests.push(key);
     await this.availability();
     this.expiries.delete(key);
     return this.store.delete(key) ? 1 : 0;

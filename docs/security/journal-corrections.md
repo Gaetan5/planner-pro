@@ -4020,3 +4020,65 @@ Vérifié dans le code, pas dans la description : HMAC sur `req.rawBody` (format
 **Actions d'exploitation** : recenser les webhooks clients, prévenir avant le 410, régénérer et saisir secret et URL par projet, Redis disponible, vérifier en préproduction `GET /projects` (déjà confirmé sur MySQL 8 local, à refaire sur MariaDB de production).
 
 **Constats encore ouverts** : r40-m1, r40-m2, r40-a1, puis S22 + O16, S30, S23 à S25, S26, A5 à A7, P5, P8, O10 à O17, O21, Phase 6.
+
+
+## Lot r40 (fixeur) — r40-m1, r40-m2, r40-a1 (partie i)
+
+### r40-m1 — `@ForbiddenInImpersonation` de la régénération du secret non couvert
+
+**Statut** : CORRIGÉ – À REVOIR
+
+**Changement** : aucun changement de code (le décorateur était en place, `github-webhook.controller.ts`, route `POST :projectId/webhooks/github/secret`). Tests seuls.
+
+**Tests** :
+- `tests/http/github-webhook.spec.ts`, « refuse (403) en session d'impersonation, secret inchangé » : jeton avec `impersonatedBy`, 403, secret en base inchangé, `project.update` non appelé ; le même propriétaire hors impersonation obtient 201 (le refus vient bien du décorateur).
+- `tests/unit/auth/impersonation-routes.spec.ts` : `GitHubWebhookController.regenerateSecret` ajouté à la liste `forbidden` (403 avec impersonation, autorisé sans), contrôleur ajouté au balayage méta, motif `POST /projects/:projectId/webhooks/github/secret` ajouté à `PERSISTENT_ACCESS`, route ajoutée à la liste attendue du balayage.
+- Contre-mutation (décorateur retiré) : 3 tests échouent (HTTP, garde unitaire, balayage méta). Fichier restauré, `cmp` identique.
+
+**Écart par rapport au rapport** : aucun.
+
+### r40-m2 — clé anti-rejeu laissée après un SET dont la réponse s'est perdue
+
+**Statut** : CORRIGÉ – À REVOIR
+
+**Changement** : `backend/src/projects/github-webhook.service.ts` (`handle`) : si l'appel `setIfAbsent` échoue ou dépasse le délai, un `del` best-effort de la clé est tenté, borné par le même `withRedisTimeout` et ses erreurs avalées, puis le 503 est renvoyé. La latence maximale du 503 passe donc à 2 délais (4 s en production). Un rejeu normal (clé déjà posée, `setIfAbsent` renvoie `false`) ne supprime rien.
+`backend/tests/http/fake-redis.ts` : mode `write-then-mute` (écrit puis ne répond jamais) et trace `delRequests`.
+
+**Tests** (`github-webhook.spec.ts`, bloc anti-rejeu) : (1) SET abouti mais muet : 503, clé supprimée, un « Redeliver » du même identifiant est ensuite traité ; (2) Redis muet pour tout (`hang`) : 503 en moins de 1,5 s (délai de test 200 ms), nettoyage tenté ; (3) Redis en erreur (`reject`) : 503 inchangé, nettoyage tenté ; (4) un rejeu normal ne déclenche aucun `del`.
+Contre-mutations : sans le `del` : 3 échecs (1, 2, 3) ; `del` non borné : le test de temps borné échoue. Fichiers restaurés, `cmp` identique.
+
+**Écart par rapport au rapport** : aucun. Limite connue : si Redis reste muet pendant le `del`, la clé peut subsister jusqu'à 24 h (un « Redeliver » est alors ignoré) ; best-effort demandé, non fermable sans transaction avec le client Redis.
+
+### r40-a1 (i) — confinement de `githubWebhookSecret`
+
+**Statut** : CORRIGÉ – À REVOIR (volets ii à iv non traités ici, voir ci-dessous)
+
+**Changement** : nouveau test `backend/tests/unit/webhook-secret-confinement.spec.ts` : parcourt `backend/src` et exige que seuls ces fichiers contiennent `githubWebhookSecret` (la liste ne doit ni dépasser ni périmer) :
+- `projects/github-webhook.service.ts` : vérification de signature et régénération (seul lecteur, `omit: { githubWebhookSecret: false }`) ;
+- `auth/auth.service.ts` : liaison du dépôt, création du secret et suppression de la propriété de la réponse ;
+- `prisma/prisma.service.ts` : définition de l'omission globale `PRISMA_OMIT` (ajout par rapport à la liste du rapport, justifié : le nom y est nécessairement). Le schéma Prisma est hors de `src`.
+Test texte (et non règle ESLint) : il couvre aussi `select` et `omit: false` qui contournent l'omission, sans plugin.
+Contre-mutations : une occurrence ajoutée dans `projects.service.ts` : 2 échecs ; une entrée inexistante dans la liste : 1 échec. Restaurés (`cmp` identique) ; entrée fictive retirée.
+
+**Volets ii à iv** : ils sont consignés dans « Revue r40 » (r40-a1), mais les sections S23 (l.478) et S24 (l.486) du rapport ne les mentionnent pas, ni la section O16/S22 (`no-store` sur `/auth/github/sync` et la route du secret ; O16 couvre déjà `/auth/*` donc la première, pas `/projects/:id/webhooks/github/secret`). Rien n'a été modifié dans le rapport (écrit par l'architecte).
+
+**Écart par rapport au rapport** : ajout de `prisma.service.ts` à la liste autorisée.
+
+### Mesures (état final)
+- Jest backend (`env -u DATABASE_URL`) : 97 suites, 2776/2776 (avant : 96 suites, 2765). `nest build` OK. `tsc --noEmit -p tsconfig.test.json` OK, `tsconfig.build.json` OK. ESLint et Prettier sur les 5 fichiers touchés : propres.
+- `tsc --noEmit -p tsconfig.json` signale TS6059 (`tracking.gateway.spec.ts` importe `tests/support`, hors `rootDir`) : préexistant, identique sur l'arbre sans mes changements (vérifié par `git stash`).
+- Vitest frontend 232/232 ; `pnpm build` OK ; aucune occurrence de `mock/login` ni `Simuler une session` dans `dist`.
+
+**Questions pour l'architecte** :
+1. Rattacher explicitement les volets ii à iv de r40-a1 dans les sections S22/O16 (route du secret hors `/auth/*`), S23 (limite de corps dédiée) et S24 (429) du rapport : à toi de les y reporter si tu veux qu'ils soient suivis à cet endroit.
+2. `prisma.service.ts` dans la liste autorisée : accepté ?
+3. Le test de confinement est textuel : un commentaire mentionnant le nom dans un autre fichier échoue aussi (voulu).
+
+**Fichiers modifiés ou créés** (aucun commit) : `backend/src/projects/github-webhook.service.ts`, `backend/tests/http/fake-redis.ts`, `backend/tests/http/github-webhook.spec.ts`, `backend/tests/unit/auth/impersonation-routes.spec.ts`, `backend/tests/unit/webhook-secret-confinement.spec.ts` (nouveau), `docs/security/journal-corrections.md`.
+
+
+## Revue architecte (r41) — lot r40
+
+- **r40-m1 : VALIDÉ. r40-m2 : VALIDÉ. r40-a1 (i) : VALIDÉ.** Jest 97 suites 2776/2776, nest build, tsc (build et test), ESLint, Prettier propres. Contre-mutations : `del` non borné (2 échecs), `del` sur rejeu normal (1 échec), commentaire dans un autre fichier (2 échecs) ; restaurations vérifiées.
+- Réponses : (1) volets ii à iv reportés par l'architecte dans S22, O16, S23, S24 du rapport ; (2) `prisma.service.ts` accepté ; (3) test textuel strict accepté. Risques déclarés (503 jusqu'à 2 délais, clé jusqu'à 24 h si Redis muet pendant le `del`) acceptés.
+- Ouverts : S22 + O16, S30, exploitation, S23 à S25, S26, A5 à A7, P5, P8, O10 à O17, O21, Phase 6. Commit autorisé (liste dans « Revue r41 » du rapport).

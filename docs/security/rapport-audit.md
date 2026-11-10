@@ -474,6 +474,7 @@ Risque principal : **prise de contrôle de comptes inter-tenants (ATO) et contou
 - **Localisation** : `frontend/nginx.prod.conf` : ni CSP, ni HSTS, ni `X-Frame-Options`/`frame-ancestors`, ni `Referrer-Policy`, ni `Permissions-Policy`, ni `X-Content-Type-Options`. Helmet ne protège que les réponses de l'API (`main.ts:9`).
 - **Remédiation attendue** : ajouter dans `nginx.prod.conf` (avec `always`) : `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' <API> wss://<API> https://*.googleapis.com https://*.firebaseio.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'` (à ajuster aux domaines Firebase réellement utilisés), `Strict-Transport-Security: max-age=31536000; includeSubDomains`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy: camera=(), geolocation=(), microphone=(self)`. Ne pas redéfinir de `add_header` dans le bloc des assets sans répéter les en-têtes (nginx n'hérite pas).
 - **Critère et test** : script `scripts/check-headers.sh` (ou test CI avec un conteneur nginx) qui vérifie la présence de chaque en-tête sur `/` et sur un asset `.js`.
+- **Complément r41 (r40-a1 ii)** : `Cache-Control: no-store` (et `Pragma: no-cache`) aussi sur `POST /projects/:projectId/webhooks/github/secret`, hors `/auth/*` donc non couverte par l'intercepteur d'O16 : prévoir un motif explicite ou un `@Header` sur la route ; et sur la réponse de `POST /auth/github/sync` (déjà sous `/auth/*`, à vérifier par test). **Test** : ces deux réponses portent `Cache-Control: no-store`.
 
 #### S23 : corps de requête non validés (types inline et interfaces contournant le ValidationPipe)
 
@@ -482,6 +483,7 @@ Risque principal : **prise de contrôle de comptes inter-tenants (ATO) et contou
 - **Cause** : `ValidationPipe` ne valide que les classes décorées.
 - **Remédiation attendue** : un DTO classe par corps, avec bornes de taille (`@MaxLength`, `@ArrayMaxSize`) ; `ParseUUIDPipe` sur tous les `:id` ; `ParseEnumPipe` pour `:status` ; `ParseIntPipe` + `@Max` pour `limit` ; `json` limité (par exemple `app.useBodyParser('json', { limit: '1mb' })`). Ajouter une règle ESLint (ou un test) qui interdit `@Body()` sur un type non classe.
 - **Test attendu** : test « méta » qui parcourt les métadonnées Nest (`Reflect.getMetadata('design:paramtypes', ...)`) de tous les contrôleurs et échoue si un `@Body()` a pour type `Object` ou une interface. Plus des tests 400 ciblés sur les routes sensibles.
+- **Complément r41 (r40-a1 iii)** : limite de corps JSON explicite. La valeur par défaut d'Express (100 ko) renvoie 413 aux livraisons GitHub volumineuses (jusqu'à 25 Mo). Prévoir une limite dédiée à la route des livraisons GitHub (valeur choisie et documentée), le défaut restant bas ailleurs. **Test** : une livraison signée de plus de 100 ko mais sous la limite dédiée est acceptée ; au-delà, 413 ; une autre route garde la limite par défaut.
 
 #### S24 : limitation de débit inefficace (proxy, mémoire locale, routes non couvertes)
 
@@ -489,6 +491,7 @@ Risque principal : **prise de contrôle de comptes inter-tenants (ATO) et contou
 - **Localisation** : `src/main.ts` (pas de `app.set('trust proxy', ...)` alors que le backend est derrière un reverse proxy : `docker-compose.prod.yml` lie `127.0.0.1:3003`, donc tous les clients partagent l'IP du proxy, d'où un déni de service global des routes `@Throttle(5/min)` ou, inversement, une protection nulle) ; `app.module.ts:21-26` (stockage en mémoire, inefficace en multi-instance) ; `auth.controller.ts:133-136` (`mock/login` sans `@Throttle` spécifique, voir S26) ; brute-force du code MFA limité par IP mais pas par compte ni par ticket (S3) ; gateways en `@SkipThrottle()`.
 - **Remédiation attendue** : `app.getHttpAdapter().getInstance().set('trust proxy', 1)` (nombre de sauts paramétrable par `TRUST_PROXY_HOPS`) ; stockage Redis du throttler (`@nest-lab/throttler-storage-redis` ou équivalent) ; limites **par compte** (clé `email`) sur login et MFA en plus de l'IP ; verrouillage progressif après 10 échecs ; limitation de débit WS (S16).
 - **Tests attendus** : e2e avec `X-Forwarded-For` différents : deux IP distinctes ont des compteurs distincts ; six tentatives de login sur le même e-mail depuis six IP : la sixième renvoie 429.
+- **Complément r41 (r40-a1 iv)** : la route publique `POST /projects/:projectId/webhooks/github/:deliveryRoute` (livraisons GitHub) subit le throttler global : GitHub peut recevoir des 429 et perdre des livraisons. Prévoir un `@SkipThrottle` dédié (la signature HMAC par projet est le contrôle) ou une limite par `projectId` et non par IP. **Test** : N livraisons signées valides depuis une même IP ne renvoient jamais 429 ; une signature invalide reste limitée.
 
 #### S25 : dépendances vulnérables (hors mariadb, traité en S4)
 
@@ -3105,6 +3108,7 @@ Revue de l'entrée « P9-MFA » du journal (statut « CORRIGÉ – À REVOIR »)
 - **Cause** : les réponses qui portent le secret TOTP (`POST /auth/mfa/setup`), les codes de secours (`/auth/mfa/confirm`, `/auth/mfa/recovery-codes`) et l'état du compte (`GET /auth/mfa/status`, `/auth/sessions`) ne portent pas d'en-tête d'interdiction de cache. Un `GET` peut être conservé par le navigateur ou par un proxy intermédiaire (avec un ETag Express). Le risque est faible pour les `POST`, mais il n'est pas exclu par contrat.
 - **Sévérité** : Mineur. CVSS 3.1 : 2.5 (AV:L/AC:H/PR:L/UI:N/S:U/C:L/I:N/A:N). ASVS V8.2.1.
 - **Remédiation attendue (Phase 5, avec S22)** : intercepteur ou middleware qui pose `Cache-Control: no-store` et `Pragma: no-cache` sur `/auth/*` et `/admin/*`. **Test** : `session-lifecycle.spec.ts`, `POST /auth/mfa/setup` et `GET /auth/mfa/status` renvoient `Cache-Control: no-store`.
+- **Complément r41 (r40-a1 ii)** : l'intercepteur doit aussi couvrir `POST /projects/:projectId/webhooks/github/secret` (hors `/auth/*`, réponse portant le secret en clair). Voir S22.
 
 #### O17 : lien « Activer la MFA » de la console d'administration détecté par le texte du message
 
@@ -5069,3 +5073,29 @@ Fichiers, chemins explicites, sans `.claude/` ni `.env*` :
 1. r40-m1, r40-m2, r40-a1 (petit lot, peut suivre S22), 2. **S22 + O16** (en-têtes frontend, `no-store`), 3. S30, actions d'exploitation (dont recensement des webhooks clients), recensement S19/S20, 4. S23 à S25, S26, A5 à A7, P5, P8, O10 à O17, O21, Phase 6.
 
 **Décision utilisateur (2026-11-10), S21** : la régénération du secret de webhook reste sur `project.manage` (propriétaire ou créateur au moins MEMBER, OWNER/ADMIN de l'espace de travail, MANAGER désignés par `ProjectMembership`), comme la liaison du dépôt. Recommandation r40 retenue ; pas d'action dédiée.
+
+
+## Revue r41 — lot r40 (r40-m1, r40-m2, r40-a1 i) : VALIDÉ
+
+**Mesures relancées** : jest backend (`env -u DATABASE_URL`) 97 suites, 2776/2776 ; `nest build`, `tsc` (build et test), ESLint et Prettier sur les 5 fichiers : propres. Aucune mutation résiduelle (`git diff` du code produit : uniquement le `try/catch` + `del` borné).
+
+**Contre-mutations (à moi)** : `del` non borné : 2 échecs ; `del` aussi sur rejeu normal : 1 échec ; commentaire contenant `githubWebhookSecret` dans un autre fichier de `src` : 2 échecs. Fichiers restaurés (`cmp` identique).
+
+- **r40-m1 : VALIDÉ.** **r40-m2 : VALIDÉ.** **r40-a1 (i) : VALIDÉ.**
+- Risques déclarés acceptés : latence du 503 jusqu'à 2 délais (4 s) : acceptable (GitHub attend 10 s) ; clé pouvant subsister 24 h si Redis reste muet pendant le `del` : résiduel accepté, non fermable sans transaction.
+- Questions du fixeur : (1) volets ii à iv **reportés par mes soins** dans S22, O16, S23, S24 (compléments r41, avec tests attendus) ; (2) `prisma.service.ts` dans la liste : **accepté** ; (3) test textuel strict : **accepté** (voulu).
+- Aucun nouveau constat.
+
+### Constats ouverts, dans l'ordre
+1. **S22 + O16** (en-têtes frontend, `no-store` dont la route du secret), 2. S30, actions d'exploitation (recensement des webhooks clients), recensement S19/S20, 3. S23 (dont limite de corps des livraisons GitHub), S24 (dont 429 de la route publique), S25, S26, A5 à A7, P5, P8, O10 à O17, O21, Phase 6.
+
+### Informations à obtenir de l'utilisateur avant S22 + O16
+- Domaine exact de l'API de production (confirmer `api.planner-pro.boukarou-os.com`) et du frontend.
+- Valeur réelle de `VITE_FIREBASE_AUTH_DOMAIN`.
+- Connexion Google par popup ou par redirection (`frame-src`, `script-src`).
+- Police : auto-hébergement (préféré) ou autorisation de `fonts.googleapis.com` / `fonts.gstatic.com`.
+- Accord sur `Content-Security-Policy-Report-Only` d'abord puis blocage, et qui valide la connexion Google réelle.
+- HSTS : tous les sous-domaines en HTTPS avant `includeSubDomains`.
+
+### Feu vert de commit
+`backend/src/projects/github-webhook.service.ts`, `backend/tests/http/fake-redis.ts`, `backend/tests/http/github-webhook.spec.ts`, `backend/tests/unit/auth/impersonation-routes.spec.ts`, `backend/tests/unit/webhook-secret-confinement.spec.ts` (nouveau), `docs/security/journal-corrections.md`, `docs/security/rapport-audit.md`.

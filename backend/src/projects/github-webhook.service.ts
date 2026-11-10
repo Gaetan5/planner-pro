@@ -91,9 +91,17 @@ export class GitHubWebhookService {
     if (typeof deliveryId !== 'string' || !DELIVERY_ID.test(deliveryId)) throw this.unauthorized();
 
     const key = `github-webhook:${projectId}:${deliveryId}`;
-    const first = await this.withRedisTimeout(() =>
-      this.redis.setIfAbsent(key, '1', WEBHOOK_DELIVERY_TTL_SECONDS),
-    );
+    let first: boolean;
+    try {
+      first = await this.withRedisTimeout(() =>
+        this.redis.setIfAbsent(key, '1', WEBHOOK_DELIVERY_TTL_SECONDS),
+      );
+    } catch (error) {
+      // Le SET a pu aboutir alors que la réponse s'est perdue : sans nettoyage, un « Redeliver »
+      // serait pris pour un rejeu et ignoré. Suppression au mieux, bornée par le même délai.
+      await this.withRedisTimeout(() => this.redis.del(key)).catch(() => undefined);
+      throw error;
+    }
     if (!first) return []; // rejeu : ignoré
 
     try {

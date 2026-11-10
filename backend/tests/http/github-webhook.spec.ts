@@ -46,6 +46,7 @@ describe('S21 : webhook GitHub par projet', () => {
   let failNextTaskUpdate = false;
   const audit: any[] = [];
   const tokens = {} as Record<Persona, string>;
+  let impersonationToken: string;
 
   const sign = (secret: string, body: string) =>
     'sha256=' + createHmac('sha256', secret).update(body).digest('hex');
@@ -92,6 +93,13 @@ describe('S21 : webhook GitHub par projet', () => {
         sid: STUB_SID,
       });
     }
+    // Session d'impersonation (S18) : un administrateur agit au nom du propriétaire
+    impersonationToken = tokenService.signAccessToken({
+      sub: USERS.owner,
+      email: 'owner@x.com',
+      sid: STUB_SID,
+      impersonatedBy: 'platform-admin-1',
+    });
     redis = new FakeRedisService();
     ({ app, baseUrl } = await startHttpTestApp({
       controllers: [GitHubWebhookController],
@@ -195,6 +203,7 @@ describe('S21 : webhook GitHub par projet', () => {
     redis.store.clear();
     redis.ttls.length = 0;
     redis.mode = 'ok';
+    redis.delRequests.length = 0;
     audit.length = 0;
     failNextTaskUpdate = false;
     prisma.task.update.mockClear();
@@ -353,6 +362,41 @@ describe('S21 : webhook GitHub par projet', () => {
       expect(JSON.parse(retry.text).closedTaskIds).toEqual([TASK_P2]);
     });
 
+    it('SET abouti mais réponse perdue : 503, clé supprimée, un « Redeliver » est traité (r40-m2)', async () => {
+      const body = pushBody(`fixes #${TASK_P2}`);
+      redis.mode = 'write-then-mute';
+      const lost = await deliver('P2', body, { delivery: 'delivery-1111' });
+      expect(lost.status).toBe(503);
+      expect(redis.delRequests).toEqual(['github-webhook:P2:delivery-1111']);
+      expect(redis.store.has('github-webhook:P2:delivery-1111')).toBe(false);
+      redis.mode = 'ok';
+      const redelivered = await deliver('P2', body, { delivery: 'delivery-1111' });
+      expect(JSON.parse(redelivered.text).closedTaskIds).toEqual([TASK_P2]);
+    });
+
+    it('Redis muet y compris pour la suppression : 503 en temps borné (2 délais au plus)', async () => {
+      redis.mode = 'hang';
+      const started = Date.now();
+      const res = await deliver('P2', pushBody(`fixes #${TASK_P2}`));
+      expect(res.status).toBe(503);
+      expect(redis.delRequests).toHaveLength(1); // nettoyage tenté
+      expect(Date.now() - started).toBeLessThan(1500); // délai de test 200 ms, deux appels
+    });
+
+    it('Redis en erreur : la suppression échoue aussi, 503 inchangé', async () => {
+      redis.mode = 'reject';
+      const res = await deliver('P2', pushBody(`fixes #${TASK_P2}`));
+      expect(res.status).toBe(503);
+      expect(redis.delRequests).toHaveLength(1);
+    });
+
+    it('un rejeu normal (clé déjà posée) ne déclenche aucune suppression', async () => {
+      const body = pushBody(`fixes #${TASK_P2}`);
+      await deliver('P2', body, { delivery: 'delivery-1111' });
+      await deliver('P2', body, { delivery: 'delivery-1111' });
+      expect(redis.delRequests).toEqual([]);
+    });
+
     it.each(['reject', 'hang'] as const)(
       'Redis indisponible (%s) : livraison refusée en 503, rien de fermé',
       async (mode) => {
@@ -439,6 +483,19 @@ describe('S21 : webhook GitHub par projet', () => {
         expect(prisma.project.update).not.toHaveBeenCalled();
       },
     );
+
+    it('refuse (403) en session d’impersonation, secret inchangé (r40-m1)', async () => {
+      const before = prisma.data.projects.find((p: any) => p.id === 'P2').githubWebhookSecret;
+      const res = await fetch(`${baseUrl}/projects/P2/webhooks/github/secret`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${impersonationToken}` },
+      });
+      expect(res.status).toBe(403);
+      expect(prisma.data.projects.find((p: any) => p.id === 'P2').githubWebhookSecret).toBe(before);
+      expect(prisma.project.update).not.toHaveBeenCalled();
+      // Même jeton hors impersonation : la route reste utilisable (le blocage vient bien du décorateur)
+      expect((await regenerate('P2', 'owner')).status).toBe(201);
+    });
 
     it('exige une session (401 sans jeton)', async () => {
       expect((await regenerate('P2')).status).toBe(401);

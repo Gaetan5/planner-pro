@@ -8,6 +8,7 @@ import { JwtAuthGuard } from '../../../src/auth/jwt.guard';
 import { IS_PUBLIC_KEY } from '../../../src/auth/public.decorator';
 import { SsoController } from '../../../src/auth/sso/sso.controller';
 import { ScimController } from '../../../src/auth/scim/scim.controller';
+import { GitHubWebhookController } from '../../../src/projects/github-webhook.controller';
 import { InvitationsController } from '../../../src/projects/invitations.controller';
 import { ProjectsController } from '../../../src/projects/projects.controller';
 
@@ -71,6 +72,8 @@ describe('S18.2 : routes interdites en session d’impersonation', () => {
     [SsoController, 'deleteWorkspaceSSO'],
     [ProjectsController, 'createIntegration'],
     [ProjectsController, 'handleOAuthCallback'],
+    // r40-m1 : la régénération renvoie un secret en clair (accès durable aux livraisons du projet)
+    [GitHubWebhookController, 'regenerateSecret'],
   ];
 
   it.each(forbidden)(
@@ -139,6 +142,10 @@ describe('S18.2 : routes interdites en session d’impersonation', () => {
         pattern: /^\/projects\/workspaces\/:workspaceId\/invitations$/,
       },
       { method: [RequestMethod.POST], pattern: /^\/projects\/:id\/members$/ },
+      {
+        method: [RequestMethod.POST],
+        pattern: /^\/projects\/:projectId\/webhooks\/github\/secret$/,
+      },
       { method: [RequestMethod.DELETE], pattern: /^\/projects\/:id\/members\/:userId$/ },
       { method: [RequestMethod.POST], pattern: /^\/workspaces\/:workspaceId\/scim\/keys$/ },
       {
@@ -162,6 +169,7 @@ describe('S18.2 : routes interdites en session d’impersonation', () => {
       ScimController,
       InvitationsController,
       ProjectsController,
+      GitHubWebhookController,
     ].flatMap(routesOf);
     const sensitive = all.filter(
       (r) =>
@@ -193,6 +201,7 @@ describe('S18.2 : routes interdites en session d’impersonation', () => {
           '/projects/workspaces/:workspaceId/invitations',
           '/projects/:id/members',
           '/projects/:id/members/:userId',
+          '/projects/:projectId/webhooks/github/secret',
           '/workspaces/:workspaceId/scim/keys',
           '/workspaces/:workspaceId/sso',
           '/workspaces/:workspaceId/sso/verify-domain',
