@@ -117,6 +117,13 @@ describe('S22 : CSP et en-têtes générés', () => {
         'https://api.exemple.test:8443',
         'wss://api.exemple.test:8443',
       ],
+      ['https://api.exemple.test:1', 'https://api.exemple.test:1', 'wss://api.exemple.test:1'],
+      [
+        'https://api.exemple.test:65535',
+        'https://api.exemple.test:65535',
+        'wss://api.exemple.test:65535',
+      ],
+      ['http://[::1]:8080', 'http://[::1]:8080', 'ws://[::1]:8080'],
     ])('%s', (url, http, ws) => {
       const conf = generate({ VITE_API_URL: url }).conf;
       const connect = directive(lineOf(conf, 'Content-Security-Policy-Report-Only'), 'connect-src');
@@ -130,6 +137,17 @@ describe('S22 : CSP et en-têtes générés', () => {
       ['ftp://api.exemple.test'],
       ["https://api.exemple.test; script-src 'unsafe-inline'"],
       ['https://api.exemple.test"; add_header X-Evil 1; "'],
+      ['https://a.example.test\nhttps://b.example.test'],
+      ['https://a.example.test\n'],
+      ['https://a.example.test\r\nX-Evil: 1'],
+      ['https://a.example.test\t'],
+      ['https://a.example.test\u0001'],
+      ['https://a.example.test:0'],
+      ['https://a.example.test:65536'],
+      ['https://a.example.test:99999'],
+      ['https://a.example.test:00080'],
+      ['https://a.example.test:123456'],
+      ['http://[::1]:70000'],
     ])('valeur invalide %j : refus de démarrer', (url) => {
       const { status, conf } = generate({ VITE_API_URL: url });
       expect(status).not.toBe(0);
@@ -146,6 +164,9 @@ describe('S22 : CSP et en-têtes générés', () => {
       expect(conf).toContain('; report-uri https://reports.exemple.test/csp"');
     });
     it.each([
+      ['https://r.test/x\nhttps://evil.test'],
+      ['https://r.test/x\r\nX-Evil: 1'],
+      ['https://r.test/x\u0007'],
       ['https://r.test/x;script-src *'],
       ['https://r.test/"x'],
       ['https://r.test/$host'],
@@ -182,6 +203,13 @@ describe('S22 : configuration nginx et sources', () => {
     expect(includes).toHaveLength(2);
     const assets = nginx.slice(nginx.indexOf('location ~*'));
     expect(assets).toContain('security-headers.conf');
+  });
+
+  it('r42-a2 : le bloc des assets émet un seul Cache-Control (pas d’expires en plus)', () => {
+    const assets = nginx.slice(nginx.indexOf('location ~*'));
+    expect(assets).not.toMatch(/^\s*expires\s/m);
+    expect(assets.match(/add_header Cache-Control /g) ?? []).toHaveLength(1);
+    expect(assets).toContain('add_header Cache-Control "public, max-age=31536000, immutable"');
   });
 
   it('aucun domaine de production codé en dur', () => {

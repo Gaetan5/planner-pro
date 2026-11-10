@@ -58,6 +58,10 @@ else
   echo "Asset : $BASE$ASSET"
   ASSET_HEADERS=$(curl -sS -o /dev/null -D - "$BASE$ASSET" | tr -d '\r')
   check "$ASSET_HEADERS" "$ASSET"
+  # Un seul Cache-Control, long et immuable (r42-a2 : plus de doublon expires + add_header)
+  CACHE_COUNT=$(printf '%s\n' "$ASSET_HEADERS" | grep -ciE '^cache-control:' || true)
+  [ "$CACHE_COUNT" = "1" ] && ok "$ASSET : un seul Cache-Control" || ko "$ASSET : $CACHE_COUNT en-têtes Cache-Control (1 attendu)"
+  printf '%s\n' "$ASSET_HEADERS" | grep -qiE '^cache-control: public, max-age=31536000, immutable$' && ok "$ASSET : Cache-Control public, immutable, 1 an" || ko "$ASSET : Cache-Control inattendu"
 fi
 
 if [ "$FAILED" -ne 0 ]; then

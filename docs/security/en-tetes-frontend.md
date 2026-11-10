@@ -17,6 +17,9 @@ en-têtes sans les remplacer ni les dupliquer.
 | `CSP_MODE`                      | `report-only` (signale sans bloquer) ou `enforce` (bloque)                                                         | `report-only`                           |
 | `CSP_REPORT_URI`                | facultatif ; URL qui reçoit les rapports de violation                                                              | vide                                    |
 
+`VITE_API_URL` et `CSP_REPORT_URI` sont validés au démarrage : tout saut de ligne ou caractère de
+contrôle est refusé, et le port de `VITE_API_URL` doit être compris entre 1 et 65535.
+
 Exemples à vérifier par l'exploitation (non codés en dur) : frontend
 `https://planner-pro.boukarou-os.com`, API `https://api.planner-pro.boukarou-os.com`.
 
@@ -45,13 +48,24 @@ includeSubDomains` (sans `preload`), `X-Content-Type-Options: nosniff`, `X-Frame
 `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy: camera=(),
 geolocation=(), microphone=(self)`.
 
-### Connexion Google : état du code
+### Connexion Google et initialisation de Firebase Auth
 
-Le frontend n'implémente pas de connexion Google : `Login.tsx` et `IdentitiesSection.tsx`
-n'utilisent que `signInWithEmailAndPassword`. Si une connexion par popup est ajoutée
-(`signInWithPopup`), la CSP devra être complétée, d'abord en Report-Only :
-`frame-src https://<VITE_FIREBASE_AUTH_DOMAIN>`, `script-src https://apis.google.com`, et
-`https://accounts.google.com` si Google le demande ; vérifier alors les rapports.
+Décision de l'utilisateur (2026-11-10) : pas de connexion Google par popup via Firebase ; le SSO
+Google Workspace existant (redirection pleine page côté backend) suffit. Le frontend n'utilise que
+`signInWithEmailAndPassword`.
+
+`frontend/src/firebase-auth.ts` initialise donc Firebase Auth avec `initializeAuth(app, { persistence })`
+et **sans résolveur popup/redirection** (r42-m1). `getAuth()` branchait `browserPopupRedirectResolver`,
+qui sur mobile, Safari et iOS charge de lui-même `https://apis.google.com/js/api.js` et l'iframe
+`https://<authDomain>/__/auth/iframe` (`_shouldInitProactively`, `@firebase/auth` 1.10.8). La
+persistance est identique à celle de `getAuth()` (IndexedDB, puis localStorage, puis sessionStorage) :
+les sessions existantes sont conservées. La chaîne `apis.google.com` reste présente dans le bundle
+(enregistrement du chargeur du SDK) mais n'est jamais appelée ; un test le vérifie.
+
+La CSP ci-dessus reste valable, sans `frame-src` ni `script-src` supplémentaires. Si une connexion
+par popup est un jour ajoutée, elle devra réintroduire le résolveur et compléter la CSP, d'abord en
+Report-Only : `frame-src https://<VITE_FIREBASE_AUTH_DOMAIN>`, `script-src https://apis.google.com`,
+et `https://accounts.google.com` si Google le demande.
 
 ## Déploiement et bascule en blocage
 
@@ -59,7 +73,8 @@ n'utilisent que `signInWithEmailAndPassword`. Si une connexion par popup est ajo
 2. Vérifier : `scripts/check-headers.sh https://<frontend>` (page d'entrée et un asset `.js`).
 3. Parcourir l'application avec la console du navigateur ouverte (filtre « Content Security Policy ») :
    connexion e-mail/mot de passe Firebase, connexion locale, MFA (QR code), temps réel (socket.io),
-   notification de mention, pages d'administration. Chaque violation signalée est soit une
+   notification de mention, pages d'administration. À faire sur desktop **et** sur mobile/Safari
+   (iOS), console ouverte : aucune violation attendue liée à `apis.google.com` ou à l'iframe d'authentification. Chaque violation signalée est soit une
    source légitime à ajouter, soit un défaut à corriger. Si `CSP_REPORT_URI` est renseigné, les
    rapports y sont aussi envoyés.
 4. Après une période sans violation légitime (au moins la connexion réelle de chaque mode utilisé

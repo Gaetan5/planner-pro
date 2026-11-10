@@ -28,13 +28,28 @@ case "$MODE" in
 esac
 
 [ -n "$API" ] || fail "VITE_API_URL est obligatoire (origine de l'API pour connect-src)"
+# `sed` valide ligne par ligne : une valeur multiligne passerait la validation avec une CSP tronquée
+case "$API" in
+  *[[:cntrl:]]*) fail "VITE_API_URL contient un saut de ligne ou un caractère de contrôle" ;;
+esac
 SCHEME=$(printf '%s' "$API" | sed -nE 's#^(https?)://.*#\1#p')
 HOSTPORT=$(printf '%s' "$API" | sed -nE 's#^https?://([A-Za-z0-9.-]+|\[[0-9a-fA-F:]+\])(:[0-9]{1,5})?(/[^[:space:]]*)?$#\1\2#p')
 [ -n "$SCHEME" ] && [ -n "$HOSTPORT" ] || fail "VITE_API_URL invalide : attendu http(s)://hôte[:port][/chemin]"
+PORT=$(printf '%s' "$HOSTPORT" | sed -nE 's#^.*:([0-9]+)$#\1#p')
+if [ -n "$PORT" ]; then
+  # Port décimal sans zéro initial, de 1 à 65535
+  case "$PORT" in
+    0*) fail "VITE_API_URL : port invalide ($PORT), attendu 1 à 65535" ;;
+  esac
+  [ "${#PORT}" -le 5 ] && [ "$PORT" -le 65535 ] || fail "VITE_API_URL : port invalide ($PORT), attendu 1 à 65535"
+fi
 if [ "$SCHEME" = "https" ]; then WS_SCHEME="wss"; else WS_SCHEME="ws"; fi
 
 REPORT_DIRECTIVE=""
 if [ -n "$REPORT_URI" ]; then
+  case "$REPORT_URI" in
+    *[[:cntrl:]]*) fail "CSP_REPORT_URI contient un saut de ligne ou un caractère de contrôle" ;;
+  esac
   # Caractères qui sortiraient de la directive CSP ou de la chaîne nginx (injection d'en-tête)
   case "$REPORT_URI" in
     *[!A-Za-z0-9._~:/?\#@\&=%+,-]*) fail "CSP_REPORT_URI contient un caractère interdit" ;;

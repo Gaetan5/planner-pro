@@ -1,5 +1,12 @@
 import { getApp, getApps, initializeApp } from 'firebase/app';
-import { getAuth, signOut, type Auth } from 'firebase/auth';
+import {
+  browserLocalPersistence,
+  browserSessionPersistence,
+  indexedDBLocalPersistence,
+  initializeAuth,
+  signOut,
+  type Auth,
+} from 'firebase/auth';
 import { firebaseConfig, isFirebaseAuthConfigured } from './firebase-config';
 
 let firebaseAuth: Auth | undefined;
@@ -14,7 +21,14 @@ export function getFirebaseAuth(): Auth {
     const app = getApps().some((registeredApp) => registeredApp.name === appName)
       ? getApp(appName)
       : initializeApp(firebaseConfig, appName);
-    firebaseAuth = getAuth(app);
+    // Pas de `getAuth()` : il branche le résolveur popup/redirection, qui charge de lui-même
+    // `apis.google.com/js/api.js` et l'iframe `<authDomain>/__/auth/iframe` sur mobile et Safari
+    // (r42-m1). Seul `signInWithEmailAndPassword` est utilisé. La persistance reprend celle de
+    // `getAuth()` (même stockage, sessions existantes conservées). Ne pas réintroduire de
+    // `popupRedirectResolver` sans compléter la CSP (docs/security/en-tetes-frontend.md).
+    firebaseAuth = initializeAuth(app, {
+      persistence: [indexedDBLocalPersistence, browserLocalPersistence, browserSessionPersistence],
+    });
   }
 
   return firebaseAuth;

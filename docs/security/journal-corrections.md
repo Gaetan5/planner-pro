@@ -4164,3 +4164,46 @@ CSP émise : `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-in
 - **Commit autorisé** (liste exacte dans le rapport). `CSP_MODE=enforce` interdit tant que r42-m1 n'est pas traité et le parcours mobile/Safari consigné.
 
 Constats ouverts : r42-m1, r42-m2, r42-a1, r42-a2, puis S30, S23 à S26, A5 à A7, P5, P8, O10 à O15, O17, O21, Phase 6.
+
+## Lot r42 (fixeur) — r42-m1, r42-m2, r42-a1, r42-a2
+
+**Décision de l'utilisateur (2026-11-10)** : pas de connexion Google par popup via Firebase ; le SSO Google Workspace existant (redirection pleine page) suffit. Cela corrige la réponse « popup » donnée pour S22 : la CSP dimensionnée sur le code réel (sans `frame-src` ni `script-src` Google) est la bonne.
+
+### r42-m1 — Firebase Auth sans résolveur popup/redirection
+**Statut** : CORRIGÉ – À REVOIR
+**Cause confirmée** : `@firebase/auth` 1.10.8, `index-35c79a8a.js` : `getAuth()` (l. 11085) passe `popupRedirectResolver: browserPopupRedirectResolver` ; `_initializeWithPersistence` (l. 2674) appelle `_initialize` si `_shouldInitProactively` (l. 10653 : mobile, Safari, iOS), ce qui charge gapi et l'iframe d'auth. Sans résolveur (`_popupRedirectResolver` reste `null`), ce bloc est sauté. `initializeCurrentUser` ne lit le redirect que si un résolveur existe ; `signOut` gère l'absence. `signInWithEmailAndPassword`, `reauthenticateWithCredential`, `linkWithCredential` n'exigent pas de résolveur (seuls les `*WithPopup/Redirect` l'assertent, l. 9250).
+**Changement** : `frontend/src/firebase-auth.ts` : `initializeAuth(app, { persistence: [indexedDBLocalPersistence, browserLocalPersistence, browserSessionPersistence] })`, soit exactement la persistance de `getAuth()` (même stockage, clés `firebase:authUser:*` inchangées, sessions existantes conservées). `frontend/vite.config.ts` : alias de test de `firebase/auth` vers le build navigateur (`esm2017`), car vitest chargeait le build Node, où `getAuth` n'a pas de résolveur et où le test n'aurait rien prouvé. `docs/security/en-tetes-frontend.md` : section Connexion Google réécrite (décision, `initializeAuth`, CSP inchangée), parcours manuel desktop et mobile/Safari conservé avant `enforce`.
+**Tests** : `frontend/src/firebase-auth.spec.ts` (6) : source sans `getAuth`/`popupRedirectResolver`, persistance identique, aucun module de `src` n'utilise `getAuth`, résolveur ou `*WithPopup/Redirect` (détecte la réintroduction) ; vrai SDK avec user-agent iPhone : `_popupRedirectResolver === null`, aucun `<script apis.google.com>` ni `<iframe>` ; `signInWithEmailAndPassword` + réauthentification + liaison (fetch simulé) n'appellent que `googleapis.com`, session persistée en `firebase:authUser:*`. Contre-mutation (sauvegarde scratchpad, `/bin/cp -f`, `cmp`) : retour à `getAuth(app)` : 3 échecs (dont le test iOS, qui expire car gapi se charge) ; restauré.
+**Écart** : la chaîne `https://apis.google.com/js/api.js` reste dans le bundle (`index.esm-*.js`, enregistrement du chargeur externe du SDK, effet de bord non éliminable) mais n'est jamais appelée. Un `grep apis.google.com dist` reste donc positif ; le critère fiable est le test comportemental. **Action utilisateur** : parcours Report-Only sur desktop et mobile/Safari avant `CSP_MODE=enforce`.
+**Questions** : aucune.
+
+### r42-m2 — validation de VITE_API_URL / CSP_REPORT_URI
+**Statut** : CORRIGÉ – À REVOIR
+**Changement** : `frontend/docker-entrypoint.d/40-security-headers.sh` : refus de `[[:cntrl:]]` dans `VITE_API_URL` et `CSP_REPORT_URI` (la liste blanche de `CSP_REPORT_URI` les refusait déjà ; message explicite ajouté) ; port extrait puis refusé s'il commence par `0`, dépasse 5 chiffres ou 65535.
+**Tests** : `security-headers.spec.ts` (47 au total) : URL multiligne, `\n` final, `\r\n`, tabulation, `\u0001`, ports 0, 65536, 99999, 00080, 123456, IPv6 `:70000` refusés ; ports 1, 65535 et `[::1]:8080` acceptés ; `CSP_REPORT_URI` multiligne/CRLF/`\u0007` refusés. Contre-mutation : ancien script restauré depuis `HEAD` : 7 échecs ; nouveau script restauré, `cmp` OK. Vérifié aussi sous busybox ash (`nginx:1.27-alpine`) : multiligne rc=1, port 70000 rc=1, 8080 rc=0.
+**Questions** : aucune.
+
+### r42-a1 — son de mention hébergé localement
+**Statut** : À VALIDER PAR L'ARCHITECTE (non fait, licence incertaine)
+Rien n'a été téléchargé, `media-src https://assets.mixkit.co` est conservé. Le texte officiel de la « Sound Effects Free License » n'est pas récupérable (`mixkit.co/license/` l'affiche dans une fenêtre chargée dynamiquement). La page d'information officielle `mixkit.co/llm-info/` décrit une licence gratuite pour projets commerciaux mais interdit de « vendre des copies sans les avoir modifiées » et de « sous-licencier / exploiter commercialement » les éléments ; elle ne dit pas qu'embarquer le fichier tel quel dans une application est permis, ni que la licence gratuite s'applique aux effets sonores. Héberger `2869-500.wav` dans `frontend/public` serait une redistribution du fichier original.
+**Question** : l'utilisateur choisit-il (a) de garder la source tierce (état actuel, fuite d'IP/Referer vers Mixkit), (b) de lire la licence dans la fenêtre « View License » de mixkit.co/license et de confirmer par écrit que l'embarquement est permis, ou (c) de remplacer le son par un fichier à licence claire (CC0 / création interne) ? Si (b) ou (c), le fichier va dans `frontend/public`, `AppContext.tsx:723` pointe vers `/…`, `media-src` perd `https://assets.mixkit.co` (script, doc et test) : changement de 10 lignes.
+
+### r42-a2 — doublon de Cache-Control sur les assets
+**Statut** : CORRIGÉ – À REVOIR
+**Changement** : `frontend/nginx.prod.conf` : `expires 1y` supprimé, un seul `add_header Cache-Control "public, max-age=31536000, immutable"` (sans `always` : les 404 d'assets ne sont pas mis en cache un an) ; l'include des en-têtes de sécurité reste dans le bloc (pas d'héritage `add_header`). `scripts/check-headers.sh` : vérifie un seul `Cache-Control` et sa valeur sur l'asset.
+**Tests** : `security-headers.spec.ts` : bloc d'assets sans `expires`, un seul `add_header Cache-Control`. Nginx 1.27-alpine jetable (supprimé) : `nginx -t` OK, `check-headers.sh` OK (CSP, HSTS et le reste sur `/` et sur l'asset, un seul Cache-Control), 404 d'asset avec les en-têtes de sécurité et sans Cache-Control. Contre-mutation : `expires 1y` remis : `check-headers.sh` « 2 en-têtes Cache-Control » et le test vitest échouent ; restauré, `cmp` OK.
+**Remarque** : le bloc cible aussi `png/svg/ico` non hachés (ex. logo) servis en `immutable` 1 an : comportement préexistant, hors périmètre ; à restreindre à `/assets/` si le logo doit pouvoir changer.
+
+### Mesures
+jest backend (`env -u DATABASE_URL`) 98 suites, 2798/2798 ; `nest build` OK ; `tsc -p tests` OK ; vitest 32 fichiers, 285/285 ; `tsc --noEmit` frontend OK ; `pnpm build` OK, aucun `mock/login`, `Simuler une session`, `fonts.googleapis` dans `dist` ; `pnpm lint` 0 erreur (51 avertissements préexistants) ; Prettier propre sur `src`, `vite.config.ts` et la doc modifiée. Aucun conteneur ni processus en attente.
+
+**Fichiers** (aucun commit) : `frontend/src/firebase-auth.ts`, `frontend/src/firebase-auth.spec.ts` (nouveau), `frontend/vite.config.ts`, `frontend/docker-entrypoint.d/40-security-headers.sh`, `frontend/nginx.prod.conf`, `frontend/src/security-headers.spec.ts`, `scripts/check-headers.sh`, `docs/security/en-tetes-frontend.md`, `docs/security/journal-corrections.md`.
+
+## Revue architecte (r43) — lot r42
+
+- **r42-m1 : VALIDÉ.** Persistance identique à `getAuth()` (même liste, même ordre), résolveur absent, aucun appel `*Popup/*Redirect/getRedirectResult` dans `frontend/src`. Alias limité à `test.alias` (pas d'effet sur le build). Contre-mutations : retour à `getAuth` = 5/6 échecs ; persistance réduite = 1 échec ; restaurés (`cmp` OK). Écart `apis.google.com` dans le bundle : accepté (constante inerte). Limite connue : ordre de persistance vérifié par regex, Safari réel non couvert (parcours manuel).
+- **r42-m2 : VALIDÉ.** 18 cas rejoués sous busybox ash : aucune injection résiduelle (seuls schéma et hôte:port validés entrent dans la CSP).
+- **r42-a2 : VALIDÉ.** Un seul `Cache-Control`, pas d'`always`, en-têtes de sécurité dans tous les blocs (nginx 1.27-alpine jetable supprimé). Restriction à `/assets/` facultative.
+- **r42-a1 : décision utilisateur** (a/b/c), recommandation (c). Voir `rapport-audit.md`, « Revue r43 ».
+- Mesures : jest 2798/2798, vitest 285/285, tsc, build (grep propre), lint 0 erreur, Prettier OK.
+- **Feu vert de commit** : liste des 10 fichiers dans le rapport. Constats encore ouverts pour le fixeur : aucun dans ce lot (r42-a1 en attente de l'utilisateur) ; prochain lot probable S23 à S25.
