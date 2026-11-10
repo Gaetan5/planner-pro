@@ -14,3 +14,16 @@ allowBuilds:
 # l'override de package.json est conservé pour pnpm 9 (packageManager). Garder les deux identiques.
 overrides:
   mariadb: '>=3.5.4 <4'
+  multer: '>=2.5.0 <3'
+  'socket.io-parser': '>=4.2.7 <5'
+  'engine.io': '>=6.6.10 <7'
+  ws: '>=8.21.0 <9'
+  body-parser: '>=1.20.9 <2'
+  qs: '>=6.16.1 <7'
+  lodash: '>=4.18.0 <5'
+  mysql2: '>=3.23.1 <4'
+  fast-uri: '>=3.1.9 <4'
+  '@grpc/grpc-js': '>=1.13.6 <2'
+  deepmerge-ts: '>=8.0.0 <9'
+  valibot: '>=1.4.2 <2'
+  file-type: '>=21.3.2 <22'
