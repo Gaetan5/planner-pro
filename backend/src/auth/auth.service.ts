@@ -13,6 +13,7 @@ import { createHash, randomBytes, randomInt, randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 import { encrypt, decrypt, hashPassword, verifyPassword } from './encryption.util';
+import { generateWebhookSecret } from '../projects/github-webhook.util';
 import { FirebaseIdentityService } from './firebase-identity.service';
 import { generateTotpSecret, verifyTotpStep, getTotpAuthUri } from './totp.util';
 import { DisableMfaDto, RegenerateRecoveryCodesDto, SetupMfaDto } from './dto/mfa.dto';
@@ -626,10 +627,28 @@ export class AuthService {
       throw new BadRequestException('Réponse GitHub inattendue.');
     }
 
-    return this.prisma.project.update({
+    // Secret de webhook (S21) : généré à la première liaison et à chaque changement de dépôt,
+    // conservé si le même dépôt est relié de nouveau. Montré une seule fois : jamais relu ensuite.
+    const current = await this.prisma.project.findFirst({
       where: { id: projectId },
-      data: { githubRepo: canonical },
+      omit: { githubWebhookSecret: false },
     });
+    const needsSecret =
+      !current?.githubWebhookSecret ||
+      current.githubRepo?.toLowerCase() !== canonical.toLowerCase();
+    const webhookSecret = needsSecret ? generateWebhookSecret() : undefined;
+
+    const saved = await this.prisma.project.update({
+      where: { id: projectId },
+      data: {
+        githubRepo: canonical,
+        ...(webhookSecret ? { githubWebhookSecret: encrypt(webhookSecret) } : {}),
+      },
+    });
+    // Le secret chiffré ne quitte jamais le serveur : retiré même si le client Prisma le renvoyait
+    const project: Record<string, unknown> = { ...saved };
+    delete project.githubWebhookSecret;
+    return webhookSecret ? { ...project, webhookSecret } : project;
   }
 
   /**

@@ -7,7 +7,9 @@ import { AppValidationPipe } from './common/app-validation.pipe';
 import { originCheckMiddleware } from './auth/origin-guard';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    rawBody: true, // HMAC du webhook GitHub calculé sur le corps exact reçu (S21)
+  });
   // Les IdP SCIM envoient application/scim+json (RFC 7644 §3.1) : corps JSON à analyser aussi
   app.useBodyParser('json', { type: ['application/json', 'application/scim+json'] });
   app.use(helmet());

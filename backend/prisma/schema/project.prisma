@@ -3,6 +3,9 @@ model Project {
   name        String
   description String?   @db.Text
   githubRepo  String?   // Ex: "gaetan/planner-pro"
+  // Secret HMAC du webhook GitHub (S21) : chiffré par encrypt(), montré une seule fois, jamais relu
+  // sauf demande explicite (omis globalement par PrismaService).
+  githubWebhookSecret String? @db.Text
   status      ProjectStatus @default(PLANNING)
   startDate   DateTime?
   dueDate     DateTime?

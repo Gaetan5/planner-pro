@@ -5051,3 +5051,21 @@ Fichiers, chemins explicites, sans `.claude/` ni `.env*` :
 - Police : auto-hébergement (préféré) ou autorisation de `fonts.googleapis.com` / `fonts.gstatic.com`.
 - Accord sur le déploiement en `Content-Security-Policy-Report-Only` d'abord, puis passage en blocage, et sur qui valide la connexion Google réelle.
 - HSTS : confirmer que tous les sous-domaines sont servis en HTTPS avant `includeSubDomains`.
+
+
+## Revue r40 — S21 (webhook GitHub signé par projet)
+
+**Statut S21 : VALIDÉ** (mesures relancées : jest 96 suites 2765/2765, nest build, tsc, prisma validate, ESLint, Prettier, vitest 232/232, pnpm build sans `mock/login` ni `Simuler une session`). Omission Prisma vérifiée sur MySQL 8 réel (conteneur jetable, supprimé) : `create`, `update`, `upsert`, `findMany/First/Unique`, `include` imbriqués, `$transaction` (tableau et interactive) ne renvoient jamais `githubWebhookSecret` ; il n'est lu qu'avec `omit: { githubWebhookSecret: false }` (ou un `select` explicite).
+
+**Écart à la décision utilisateur, à trancher par l'utilisateur** : la régénération est branchée sur `project.manage` (propriétaire/créateur MEMBER, OWNER/ADMIN, plus les MANAGER désignés par `ProjectMembership`). Recommandation : garder `project.manage`, car ces MANAGER peuvent déjà relier un autre dépôt (`/auth/github/sync`, même action) et obtenir ainsi un nouveau secret ; une action dédiée n'ajouterait pas de protection réelle. Si l'utilisateur veut strictement « propriétaire + OWNER/ADMIN », créer une action dédiée (ex. `project.webhook.regenerate`) et l'appliquer aussi à la liaison. À confirmer par l'utilisateur.
+
+### Nouveaux constats (non bloquants)
+- **r40-m1** (Mineur, CVSS 3.1) : `@ForbiddenInImpersonation()` de `POST /projects/:id/webhooks/github/secret` n'est couvert par aucun test (contre-mutation « décorateur retiré » : 1644 tests verts). Remédiation : test HTTP avec session d'impersonation sur la régénération : 403, secret inchangé.
+- **r40-m2** (Mineur, CVSS 3.7) : si l'appel Redis `SET NX` dépasse 2 s alors que l'écriture a abouti, la clé reste posée et la livraison rejouée à la main (« Redeliver ») est ignorée comme un rejeu (perte silencieuse). Remédiation : sur erreur/délai du `SET`, tenter un `del` best-effort avant le 503 ; test avec faux Redis « écrit puis muet ».
+- **r40-a1** (Amélioration) : (i) test/lint qui interdit `githubWebhookSecret` (et `omit: ... false`) hors `github-webhook.service.ts` et `auth.service.ts` (un `select` explicite contourne `omit`) ; (ii) rattacher à **S22 + O16** `Cache-Control: no-store` sur `POST /auth/github/sync` et `.../webhooks/github/secret` (réponses portant le secret) ; (iii) rattacher à **S23** une limite de corps JSON explicite : la valeur par défaut d'Express (100 ko) rejette en 413 les livraisons GitHub volumineuses (GitHub peut en envoyer jusqu'à 25 Mo) ; prévoir une limite dédiée à cette route ; (iv) rattacher à **S24** le 429 possible sur la route publique (proposer un `@SkipThrottle` dédié ou une limite par `projectId`).
+- **Préexistant, hors S21** : le dossier local vide `backend/prisma/migrations/20261026024000_firestore_sync_outbox/` (non suivi par git) fait échouer `prisma migrate deploy` en P3015 sur une base vierge ; le supprimer localement (absent du dépôt, donc sans effet en production).
+
+### Constats ouverts, dans l'ordre
+1. r40-m1, r40-m2, r40-a1 (petit lot, peut suivre S22), 2. **S22 + O16** (en-têtes frontend, `no-store`), 3. S30, actions d'exploitation (dont recensement des webhooks clients), recensement S19/S20, 4. S23 à S25, S26, A5 à A7, P5, P8, O10 à O17, O21, Phase 6.
+
+**Décision utilisateur (2026-11-10), S21** : la régénération du secret de webhook reste sur `project.manage` (propriétaire ou créateur au moins MEMBER, OWNER/ADMIN de l'espace de travail, MANAGER désignés par `ProjectMembership`), comme la liaison du dépôt. Recommandation r40 retenue ; pas d'action dédiée.

@@ -1,4 +1,4 @@
-import { Injectable, ForbiddenException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotesService } from '../notes/notes.service';
 import { IntegrationService } from './integration.service';
@@ -16,7 +16,6 @@ import {
   DependencyType,
   DeliveryStatus,
 } from '@prisma/client';
-import * as crypto from 'crypto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { FirestoreSyncService } from '../firestore-sync/firestore-sync.service';
@@ -26,7 +25,7 @@ import { RealtimeService } from '../realtime/realtime.service';
 /**
  * ProjectsService — Façade d'Orchestration
  *
- * Responsabilités propres : Workspace, Memberships, Projects CRUD, GitHub Webhooks.
+ * Responsabilités propres : Workspace, Memberships, Projects CRUD (le webhook GitHub est dans GitHubWebhookService, S21).
  * Délègue aux sous-services spécialisés pour tâches, dépendances, timeblocks, jalons, ressources, finances.
  *
  * Expose des méthodes de délégation pour compatibilité ascendante avec le contrôleur et l'AiService.
@@ -353,79 +352,6 @@ export class ProjectsService {
       updatedAt: project.updatedAt.toISOString(),
       deletedAt: project.deletedAt?.toISOString() ?? null,
     };
-  }
-
-  // ═══════════════════════════════════════════════════════════════════
-  //  GITHUB WEBHOOKS (logique propre)
-  // ═══════════════════════════════════════════════════════════════════
-
-  private verifyGitHubSignature(payload: any, signature?: string): boolean {
-    const secret = process.env.GITHUB_WEBHOOK_SECRET;
-    if (!secret) {
-      return process.env.NODE_ENV === 'test';
-    }
-    if (!signature) {
-      return false;
-    }
-    try {
-      const hmac = crypto.createHmac('sha256', secret);
-      const bodyStr = JSON.stringify(payload);
-      const digest = 'sha256=' + hmac.update(bodyStr).digest('hex');
-      return crypto.timingSafeEqual(
-        new Uint8Array(Buffer.from(signature)),
-        new Uint8Array(Buffer.from(digest)),
-      );
-    } catch {
-      return false;
-    }
-  }
-
-  private extractTaskIdsFromText(text: string): string[] {
-    if (!text) return [];
-    const regex =
-      /(?:fix|fixes|fixed|close|closes|closed|resolve|resolves|resolved)\s+#([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/gi;
-    const taskIds: string[] = [];
-    let match;
-    while ((match = regex.exec(text)) !== null) {
-      taskIds.push(match[1]);
-    }
-    return taskIds;
-  }
-
-  async handleGitHubWebhook(payload: any, signature?: string): Promise<string[]> {
-    if (!this.verifyGitHubSignature(payload, signature)) {
-      throw new ForbiddenException('Signature webhook GitHub invalide');
-    }
-
-    const taskIdsToClose = new Set<string>();
-
-    if (payload.action === 'closed' && payload.pull_request) {
-      const pr = payload.pull_request;
-      if (pr.merged === true) {
-        const textToSearch = `${pr.title || ''} ${pr.body || ''}`;
-        const ids = this.extractTaskIdsFromText(textToSearch);
-        ids.forEach((id) => taskIdsToClose.add(id));
-      }
-    }
-
-    if (payload.commits && Array.isArray(payload.commits)) {
-      for (const commit of payload.commits) {
-        if (commit.message) {
-          const ids = this.extractTaskIdsFromText(commit.message);
-          ids.forEach((id) => taskIdsToClose.add(id));
-        }
-      }
-    }
-
-    const closedIds: string[] = [];
-    for (const taskId of taskIdsToClose) {
-      const success = await this.tasksService.closeTaskFromWebhook(taskId);
-      if (success) {
-        closedIds.push(taskId);
-      }
-    }
-
-    return closedIds;
   }
 
   // ═══════════════════════════════════════════════════════════════════

@@ -1,6 +1,9 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { ProjectsService } from './projects.service';
 import { ProjectsController } from './projects.controller';
+import { GitHubWebhookController } from './github-webhook.controller';
+import { GitHubWebhookService } from './github-webhook.service';
+import { RedisModule } from '../redis/redis.module';
 import { InvitationsService } from './invitations.service';
 import { InvitationsController } from './invitations.controller';
 import { CommentsService } from './comments.service';
@@ -29,6 +32,7 @@ import { FirestoreSyncModule } from '../firestore-sync/firestore-sync.module';
 @Module({
   imports: [
     PrismaModule,
+    RedisModule,
     NotesModule,
     forwardRef(() => TrackingModule),
     NotificationsModule,
@@ -46,6 +50,7 @@ import { FirestoreSyncModule } from '../firestore-sync/firestore-sync.module';
     ProactiveSchedulerService,
     // Façade d'orchestration
     ProjectsService,
+    GitHubWebhookService,
     // Services existants
     InvitationsService,
     CommentsService,
@@ -59,7 +64,13 @@ import { FirestoreSyncModule } from '../firestore-sync/firestore-sync.module';
     CalendarSyncService,
     SprintService,
   ],
-  controllers: [ProjectsController, InvitationsController, CommentsController, AiController],
+  controllers: [
+    ProjectsController,
+    GitHubWebhookController,
+    InvitationsController,
+    CommentsController,
+    AiController,
+  ],
   exports: [
     ProjectsService,
     TasksService,

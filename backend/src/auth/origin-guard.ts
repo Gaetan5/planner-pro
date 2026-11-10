@@ -13,10 +13,11 @@ export function getAllowedOrigins(): string[] {
 const STATE_CHANGING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 /**
- * Routes exemptées, authentifiées autrement que par cookie (S29) : webhook GitHub (signature
- * HMAC) et SCIM (clé d'API). Elles ne reçoivent jamais de cookie de session d'un navigateur.
+ * Routes exemptées, authentifiées autrement que par cookie (S29) : webhook GitHub par projet
+ * (signature HMAC, S21) et SCIM (clé d'API). Elles ne reçoivent jamais de cookie de session d'un
+ * navigateur. La régénération du secret (`.../webhooks/github/secret`) n'est PAS exemptée.
  */
-const EXEMPT_PATHS: RegExp[] = [/^\/(?:projects\/)?webhooks\/github\/?$/, /^\/scim\/v2(?:\/|$)/];
+const EXEMPT_PATHS: RegExp[] = [/^\/projects\/[^/]+\/webhooks\/github\/?$/, /^\/scim\/v2(?:\/|$)/];
 
 function originOf(value: string | undefined): string | undefined {
   if (!value) return undefined;

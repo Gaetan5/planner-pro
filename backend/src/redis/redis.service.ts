@@ -51,6 +51,14 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Écrit la clé seulement si elle n'existe pas (`SET NX EX`), de façon atomique. Renvoie `true`
+   * si la clé a été créée, `false` si elle existait déjà (anti-rejeu).
+   */
+  async setIfAbsent(key: string, value: string, ttlSeconds: number): Promise<boolean> {
+    return (await this.redisClient.set(key, value, 'EX', ttlSeconds, 'NX')) === 'OK';
+  }
+
+  /**
    * Supprime une clé du cache.
    */
   async del(key: string): Promise<number> {

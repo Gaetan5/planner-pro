@@ -166,4 +166,89 @@ describe('GitHubRepoConnector : « Connecter un dépôt » (P9-R)', () => {
     expect(onAutoOpened).toHaveBeenCalledTimes(1);
     expect(calls()).toEqual([]);
   });
+
+  describe('secret du webhook (S21)', () => {
+    const SECRET = 'ab'.repeat(32);
+
+    it('première liaison : le secret et l’URL sont affichés une fois, puis disparaissent', async () => {
+      render(<GitHubRepoConnector projectId={ID} canManage />);
+      reply({ body: repos }, { body: { id: ID, githubRepo: 'acme/web', webhookSecret: SECRET } });
+      fireEvent.click(screen.getByRole('button', { name: 'Connecter un dépôt' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Lier acme/web' }));
+
+      expect(await screen.findByTestId('webhook-secret')).toHaveTextContent(SECRET);
+      expect(screen.getByText(new RegExp(`/projects/${ID}/webhooks/github$`))).toBeInTheDocument();
+      expect(screen.getByText(/ne sera plus jamais affiché/)).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: "J'ai copié le secret" }));
+      expect(screen.queryByTestId('webhook-secret')).toBeNull();
+      expect(document.body.textContent).not.toContain(SECRET);
+      // jamais persisté
+      expect(JSON.stringify({ ...localStorage, ...sessionStorage })).not.toContain(SECRET);
+    });
+
+    it('liaison sans nouveau secret (même dépôt) : rien n’est affiché', async () => {
+      render(<GitHubRepoConnector projectId={ID} canManage />);
+      reply({ body: repos }, { body: { id: ID, githubRepo: 'acme/web' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Connecter un dépôt' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Lier acme/web' }));
+      await screen.findByText(/Dépôt lié : acme\/web/);
+      expect(screen.queryByTestId('webhook-secret')).toBeNull();
+    });
+
+    it('régénérer : confirmation, POST sans corps vers la route du projet, nouveau secret affiché', async () => {
+      render(<GitHubRepoConnector projectId={ID} currentRepo="acme/api" canManage />);
+      reply({ body: { webhookSecret: SECRET } });
+      fireEvent.click(screen.getByRole('button', { name: 'Régénérer le secret du webhook' }));
+      expect(calls()).toEqual([]); // rien tant que non confirmé
+      expect(screen.getByText(/cessera immédiatement/)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Confirmer la régénération' }));
+
+      expect(await screen.findByTestId('webhook-secret')).toHaveTextContent(SECRET);
+      const [call] = calls();
+      expect(call.method).toBe('POST');
+      expect(call.url).toMatch(new RegExp(`/projects/${ID}/webhooks/github/secret$`));
+      expect(call.body).toBeUndefined();
+    });
+
+    it('régénérer : annuler n’appelle rien ; une erreur serveur est affichée sans secret', async () => {
+      render(<GitHubRepoConnector projectId={ID} currentRepo="acme/api" canManage />);
+      fireEvent.click(screen.getByRole('button', { name: 'Régénérer le secret du webhook' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Annuler la régénération' }));
+      expect(calls()).toEqual([]);
+
+      reply({ status: 403, body: { message: 'Permissions de projet insuffisantes' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Régénérer le secret du webhook' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Confirmer la régénération' }));
+      expect(await screen.findByRole('alert')).toHaveTextContent('Permissions de projet');
+      expect(screen.queryByTestId('webhook-secret')).toBeNull();
+    });
+
+    it('sans droit project.manage ou sans dépôt lié : aucun bouton de régénération', () => {
+      const { rerender } = render(
+        <GitHubRepoConnector projectId={ID} currentRepo="acme/api" canManage={false} />,
+      );
+      expect(screen.queryByRole('button', { name: 'Régénérer le secret du webhook' })).toBeNull();
+      rerender(<GitHubRepoConnector projectId={ID} canManage />);
+      expect(screen.queryByRole('button', { name: 'Régénérer le secret du webhook' })).toBeNull();
+    });
+
+    it('changer de projet efface le secret affiché', async () => {
+      const { rerender } = render(
+        <GitHubRepoConnector projectId={ID} currentRepo="acme/api" canManage />,
+      );
+      reply({ body: { webhookSecret: SECRET } });
+      fireEvent.click(screen.getByRole('button', { name: 'Régénérer le secret du webhook' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Confirmer la régénération' }));
+      await screen.findByTestId('webhook-secret');
+      rerender(
+        <GitHubRepoConnector
+          projectId="4a3b2c1d-5a4d-4e6f-9b7a-1c2d3e4f5a6b"
+          currentRepo="acme/api"
+          canManage
+        />,
+      );
+      await waitFor(() => expect(screen.queryByTestId('webhook-secret')).toBeNull());
+    });
+  });
 });

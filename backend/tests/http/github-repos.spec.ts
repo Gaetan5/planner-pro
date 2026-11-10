@@ -3,7 +3,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { PolicyService } from '../../src/authz/policy.service';
 import { AuthController } from '../../src/auth/auth.controller';
 import { AuthService } from '../../src/auth/auth.service';
-import { encrypt } from '../../src/auth/encryption.util';
+import { decrypt, encrypt } from '../../src/auth/encryption.util';
 import { FirebaseIdentityService } from '../../src/auth/firebase-identity.service';
 import { JwtAuthGuard } from '../../src/auth/jwt.guard';
 import { SessionService } from '../../src/auth/session.service';
@@ -206,6 +206,56 @@ describe('P9-R : liaison d’un dépôt GitHub à un projet (HTTP)', () => {
       expect((init.headers as Record<string, string>).Authorization).toBe('Bearer gho_secret');
       expect(init.signal).toBeInstanceOf(AbortSignal);
       expect(repoOf()).toBe('owner/Repo'); // full_name renvoyé par GitHub, pas la saisie
+    });
+
+    describe('secret de webhook (S21)', () => {
+      const storedSecret = () =>
+        prisma.project.rows.find((p) => p.id === 'p-1')?.githubWebhookSecret as string | undefined;
+      const link = async () =>
+        (await (await sync({ projectId: 'p-1', repoFullName: 'owner/repo' })).json()) as Record<
+          string,
+          unknown
+        >;
+
+      it('première liaison : secret de 32 octets renvoyé une fois, stocké chiffré', async () => {
+        const body = await link();
+        expect(body.webhookSecret).toMatch(/^[0-9a-f]{64}$/);
+        expect(storedSecret()).toBeDefined();
+        expect(storedSecret()).not.toContain(body.webhookSecret as string);
+        expect(decrypt(storedSecret() as string)).toBe(body.webhookSecret);
+        // le secret chiffré n'est pas non plus renvoyé
+        expect(JSON.stringify(body)).not.toContain(storedSecret() as string);
+      });
+
+      it('même dépôt relié de nouveau : secret conservé, rien de réaffiché', async () => {
+        const first = await link();
+        const stored = storedSecret();
+        const second = await link();
+        expect(second.webhookSecret).toBeUndefined();
+        expect(storedSecret()).toBe(stored);
+        expect(decrypt(stored as string)).toBe(first.webhookSecret);
+      });
+
+      it('autre dépôt : nouveau secret, l’ancien cesse de valoir', async () => {
+        const first = await link();
+        github.mockResolvedValue({
+          status: 200,
+          ok: true,
+          json: async () => ({ full_name: 'owner/Autre' }),
+        });
+        const body = (await (
+          await sync({ projectId: 'p-1', repoFullName: 'owner/autre' })
+        ).json()) as Record<string, unknown>;
+        expect(body.webhookSecret).toMatch(/^[0-9a-f]{64}$/);
+        expect(body.webhookSecret).not.toBe(first.webhookSecret);
+        expect(decrypt(storedSecret() as string)).toBe(body.webhookSecret);
+      });
+
+      it('échec de la vérification GitHub : aucun secret écrit', async () => {
+        github.mockResolvedValue({ status: 404, ok: false, json: async () => ({}) });
+        expect((await sync({ projectId: 'p-1', repoFullName: 'owner/repo' })).status).toBe(400);
+        expect(storedSecret()).toBeUndefined();
+      });
     });
   });
 

@@ -9,11 +9,9 @@ import {
   Delete,
   Req,
   Query,
-  Headers,
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
-import { Public } from '../auth/public.decorator';
 import { ForbiddenInImpersonation } from '../auth/forbidden-in-impersonation.decorator';
 import { DeliverableStatus } from '@prisma/client';
 import { ProjectsService } from './projects.service';
@@ -434,17 +432,6 @@ export class ProjectsController {
   @Delete('timeblocks/:timeBlockId')
   deleteTimeBlock(@Req() req: any, @Param('timeBlockId') timeBlockId: string) {
     return this.projectsService.deleteTimeBlock(timeBlockId, req.user.id);
-  }
-
-  @Public()
-  @Post('webhooks/github')
-  async handleGitHubWebhook(
-    @Body() payload: any,
-    @Headers('x-hub-signature-256') signature?: string,
-  ) {
-    const closedTaskIds = await this.projectsService.handleGitHubWebhook(payload, signature);
-    await this.broadcastTasks(closedTaskIds);
-    return { closedTaskIds };
   }
 
   @Post('workspaces/:workspaceId/resources/optimize')

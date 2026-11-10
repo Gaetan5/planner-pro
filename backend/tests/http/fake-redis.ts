@@ -32,6 +32,12 @@ export class FakeRedisService {
     else this.expiries.delete(key);
   }
 
+  async setIfAbsent(key: string, value: string, ttlSeconds: number): Promise<boolean> {
+    if ((await this.get(key)) !== null) return false;
+    await this.set(key, value, ttlSeconds);
+    return true;
+  }
+
   async del(key: string): Promise<number> {
     await this.availability();
     this.expiries.delete(key);

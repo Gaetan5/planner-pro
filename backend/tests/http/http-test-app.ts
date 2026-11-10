@@ -44,7 +44,10 @@ export async function startHttpTestApp(
       'Test HTTP interdit : un vrai PrismaService est instancié. Fournir un faux Prisma (tests/http/fake-prisma.ts).',
     );
   }
-  const app = moduleRef.createNestApplication<NestExpressApplication>({ logger: false });
+  const app = moduleRef.createNestApplication<NestExpressApplication>({
+    logger: false,
+    rawBody: true, // comme main.ts (S21)
+  });
   app.useBodyParser('json', { type: ['application/json', 'application/scim+json'] });
   app.use(cookieParser());
   app.use(originCheckMiddleware());

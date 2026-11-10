@@ -493,9 +493,10 @@ export class TasksService {
     }
   }
 
-  async closeTaskFromWebhook(taskId: string): Promise<boolean> {
+  /** Ferme une tâche DU projet signataire du webhook (S21) : jamais celle d'un autre projet. */
+  async closeTaskFromWebhook(projectId: string, taskId: string): Promise<boolean> {
     const task = await this.prisma.task.findFirst({
-      where: { id: taskId, deletedAt: null },
+      where: { id: taskId, projectId, deletedAt: null },
     });
     if (!task) {
       return false;

@@ -1,7 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Github } from 'lucide-react';
 import { startGitHubAuthorization } from '../github-oauth';
-import { listGitHubRepos, syncGitHubRepo, type GitHubRepo } from '../github-repos';
+import {
+  githubWebhookUrl,
+  listGitHubRepos,
+  regenerateWebhookSecret,
+  syncGitHubRepo,
+  type GitHubRepo,
+} from '../github-repos';
 import { savePendingRepo } from '../pending-repo';
 import { SecurityApiError } from '../security-api';
 
@@ -34,12 +40,20 @@ export const GitHubRepoConnector: React.FC<Props> = ({
   const [linked, setLinked] = useState<string | null>(currentRepo ?? null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  // Secret de webhook (S21) : en mémoire seulement, affiché une fois, jamais stocké ni relu
+  const [secret, setSecret] = useState<string | null>(null);
+  const [confirmRegenerate, setConfirmRegenerate] = useState(false);
   const autoOpened = useRef(false);
 
   useEffect(() => {
     setLinked(currentRepo ?? null);
     setRepos(null);
   }, [projectId, currentRepo]);
+
+  useEffect(() => {
+    setSecret(null);
+    setConfirmRegenerate(false);
+  }, [projectId]);
 
   const open = useCallback(async () => {
     setError('');
@@ -80,9 +94,24 @@ export const GitHubRepoConnector: React.FC<Props> = ({
       const saved = project.githubRepo ?? repo.fullName;
       setLinked(saved);
       setRepos(null);
+      if (project.webhookSecret) setSecret(project.webhookSecret);
       onLinked?.(saved);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'La liaison du dépôt a échoué.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const regenerate = async () => {
+    setError('');
+    setBusy(true);
+    try {
+      const result = await regenerateWebhookSecret(projectId);
+      setSecret(result.webhookSecret);
+      setConfirmRegenerate(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'La régénération du secret a échoué.');
     } finally {
       setBusy(false);
     }
@@ -95,6 +124,61 @@ export const GitHubRepoConnector: React.FC<Props> = ({
       </h3>
       <p>{linked ? <>Dépôt lié : {linked}</> : 'Aucun dépôt lié à ce projet.'}</p>
       {error && <div role="alert">{error}</div>}
+      {secret && (
+        <div role="status" aria-label="Secret du webhook GitHub">
+          <p>
+            <strong>
+              Secret du webhook : copiez-le maintenant, il ne sera plus jamais affiché.
+            </strong>
+          </p>
+          <p>
+            URL : <code>{githubWebhookUrl(projectId)}</code>
+          </p>
+          <p>
+            Secret : <code data-testid="webhook-secret">{secret}</code>
+          </p>
+          <p>
+            Dans GitHub (Settings, Webhooks) : type de contenu « application/json », événements «
+            Pushes » et « Pull requests ».
+          </p>
+          <button type="button" className="btn-refresh-glass" onClick={() => setSecret(null)}>
+            J'ai copié le secret
+          </button>
+        </div>
+      )}
+      {canManage && linked && !secret && !confirmRegenerate && (
+        <button
+          type="button"
+          className="btn-refresh-glass"
+          disabled={busy}
+          onClick={() => setConfirmRegenerate(true)}
+        >
+          Régénérer le secret du webhook
+        </button>
+      )}
+      {canManage && linked && confirmRegenerate && (
+        <div>
+          <p>
+            L'ancien secret cessera immédiatement de fonctionner : le webhook GitHub devra être mis
+            à jour.
+          </p>
+          <button
+            type="button"
+            className="btn-primary-gradient"
+            disabled={busy}
+            onClick={() => void regenerate()}
+          >
+            Confirmer la régénération
+          </button>
+          <button
+            type="button"
+            className="btn-refresh-glass"
+            onClick={() => setConfirmRegenerate(false)}
+          >
+            Annuler la régénération
+          </button>
+        </div>
+      )}
       {canManage && !repos && (
         <button type="button" className="btn-primary-gradient" disabled={busy} onClick={open}>
           Connecter un dépôt

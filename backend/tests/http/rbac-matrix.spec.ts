@@ -12,6 +12,8 @@ import { NotificationsService } from '../../src/notifications/notifications.serv
 import { GeminiService } from '../../src/notes/gemini.service';
 import { NotesService } from '../../src/notes/notes.service';
 import { PrismaService } from '../../src/prisma/prisma.service';
+import { RedisService } from '../../src/redis/redis.service';
+import { FakeRedisService } from './fake-redis';
 import { AiController } from '../../src/projects/ai.controller';
 import { AiService } from '../../src/projects/ai.service';
 import { CalendarSyncService } from '../../src/projects/calendar-sync.service';
@@ -24,6 +26,8 @@ import { IntegrationService } from '../../src/projects/integration.service';
 import { MilestonesService } from '../../src/projects/milestones.service';
 import { ProactiveSchedulerService } from '../../src/projects/proactive-scheduler.service';
 import { ProjectPermissionsService } from '../../src/projects/project-permissions.service';
+import { GitHubWebhookController } from '../../src/projects/github-webhook.controller';
+import { GitHubWebhookService } from '../../src/projects/github-webhook.service';
 import { ProjectsController } from '../../src/projects/projects.controller';
 import { ProjectsService } from '../../src/projects/projects.service';
 import { ResourcesService } from '../../src/projects/resources.service';
@@ -107,6 +111,8 @@ interface Row {
   noP1?: boolean;
   /** Statuts acceptables pour un refus (défaut : 403 ou 404). */
   denied?: number[];
+  /** Route publique dont le handler répond lui-même 401 (signature absente) : message du handler. */
+  own401?: string;
 }
 
 const TASK_P: Record<string, 'P1' | 'P2'> = { T1: 'P1', T2: 'P2' };
@@ -251,7 +257,19 @@ const TABLE: Record<string, Row> = {
     params: { timeBlockId: 'TB2' },
     denied: [400, 403, 404],
   },
+  // ── webhook GitHub par projet (S21) : réception publique (signature), régénération `project.manage`
   'POST /projects/webhooks/github': { need: { k: 'public' }, body: {} },
+  'POST /projects/:projectId/webhooks/github': {
+    need: { k: 'public' },
+    params: { projectId: 'P2' },
+    body: {},
+    own401: 'Webhook refusé.',
+  },
+  'POST /projects/:projectId/webhooks/github/secret': {
+    need: proj('P2', 'manage'),
+    params: { projectId: 'P2' },
+    denied: [403, 404],
+  },
   'POST /projects/workspaces/:workspaceId/resources/optimize': {
     need: ws('admin'),
     params: { workspaceId: W },
@@ -456,7 +474,13 @@ function routesOf(controllers: { prototype: object }[]): string[] {
   }
   return keys;
 }
-const CONTROLLERS = [ProjectsController, CommentsController, TrackingController, AiController];
+const CONTROLLERS = [
+  ProjectsController,
+  GitHubWebhookController,
+  CommentsController,
+  TrackingController,
+  AiController,
+];
 
 describe('S12-d : matrice RBAC par route (HTTP)', () => {
   it('méta : chaque route des contrôleurs projects, comments, tracking et ai a une ligne', () => {
@@ -608,6 +632,8 @@ describe('S12-d : matrice RBAC par route (HTTP)', () => {
         controllers: CONTROLLERS,
         providers: [
           ProjectsService,
+          GitHubWebhookService,
+          { provide: RedisService, useValue: new FakeRedisService() },
           TasksService,
           DependenciesService,
           TimeBlocksService,
@@ -699,6 +725,11 @@ describe('S12-d : matrice RBAC par route (HTTP)', () => {
         expect(result.text).not.toMatch(/Projet 2|Tâche 2|Livraison P2/);
       }
       if (allowed === null) {
+        if (row.own401 && result.status === 401) {
+          // 401 du handler (signature), pas du garde d'authentification
+          expect(result.text).toContain(row.own401);
+          return;
+        }
         expect(result.status).not.toBe(401);
         return;
       }

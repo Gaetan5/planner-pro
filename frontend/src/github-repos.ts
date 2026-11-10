@@ -10,6 +10,10 @@ export interface GitHubRepo {
   private: boolean;
 }
 
+/** URL de réception du webhook d'un projet (S21) : à saisir côté GitHub avec le secret du projet. */
+export const githubWebhookUrl = (projectId: string) =>
+  `${BACKEND_URL}/projects/${encodeURIComponent(projectId)}/webhooks/github`;
+
 async function call<T>(path: string, method: 'GET' | 'POST', body?: Record<string, string>) {
   const res = await fetch(`${BACKEND_URL}${path}`, {
     method,
@@ -33,7 +37,18 @@ export const listGitHubRepos = () => call<GitHubRepo[]>('/auth/github/repos', 'G
 
 /** Lie un dépôt à un projet. Le dépôt voyage dans le corps, jamais dans le chemin. */
 export const syncGitHubRepo = (projectId: string, repoFullName: string) =>
-  call<{ id: string; githubRepo: string | null }>('/auth/github/sync', 'POST', {
-    projectId,
-    repoFullName,
-  });
+  call<{ id: string; githubRepo: string | null; webhookSecret?: string }>(
+    '/auth/github/sync',
+    'POST',
+    { projectId, repoFullName },
+  );
+
+/**
+ * Régénère le secret du webhook (S21) : l'ancien cesse de valoir immédiatement. Le secret est
+ * renvoyé cette seule fois ; il n'est jamais relisible ensuite.
+ */
+export const regenerateWebhookSecret = (projectId: string) =>
+  call<{ webhookSecret: string }>(
+    `/projects/${encodeURIComponent(projectId)}/webhooks/github/secret`,
+    'POST',
+  );

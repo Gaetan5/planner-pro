@@ -34,8 +34,18 @@ class ProtectedController {
 @Public()
 @Controller()
 class ExemptedController {
-  @Post('projects/webhooks/github')
+  @Post('projects/:projectId/webhooks/github')
   webhook() {
+    return { ok: true };
+  }
+  // Régénération du secret : authentifiée par cookie, donc NON exemptée (S21)
+  @Post('projects/:projectId/webhooks/github/secret')
+  regenerate() {
+    return { ok: true };
+  }
+  // Ancienne route (410) : plus d'exemption
+  @Post('projects/webhooks/github')
+  legacy() {
     return { ok: true };
   }
   @Post('scim/v2/Users')
@@ -149,12 +159,20 @@ describe('S29 : contrôle d’Origin sur les méthodes à effet', () => {
 
   it('sans cookie de session (Bearer, webhook, SCIM) : aucun contrôle d’Origin', async () => {
     expect((await post('/auth/password/forgot', { Origin: EVIL }, false)).status).not.toBe(403);
-    expect((await post('/projects/webhooks/github', { Origin: EVIL }, false)).status).toBe(201);
+    expect((await post('/projects/p1/webhooks/github', { Origin: EVIL }, false)).status).toBe(201);
     expect((await post('/scim/v2/Users', { Origin: EVIL }, false)).status).toBe(201);
   });
 
   it('les exemptions webhook et SCIM tiennent même si un cookie est présent', async () => {
-    expect((await post('/projects/webhooks/github')).status).toBe(201);
+    expect((await post('/projects/p1/webhooks/github')).status).toBe(201);
     expect((await post('/scim/v2/Users')).status).toBe(201);
+  });
+
+  it('S21 : l’exemption ne couvre que la réception par projet, pas la régénération ni l’ancienne route', async () => {
+    expect((await post('/projects/p1/webhooks/github/secret', { Origin: EVIL })).status).toBe(403);
+    expect((await post('/projects/p1/webhooks/github/secret', { Origin: GOOD })).status).toBe(201);
+    expect((await post('/projects/webhooks/github', { Origin: EVIL })).status).toBe(403);
+    // sans cookie de session, ces routes ne sont de toute façon pas concernées
+    expect((await post('/projects/webhooks/github', { Origin: EVIL }, false)).status).toBe(201);
   });
 });

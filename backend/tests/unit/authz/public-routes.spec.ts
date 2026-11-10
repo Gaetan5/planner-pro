@@ -36,6 +36,7 @@ const PUBLIC_ROUTES_ALLOWLIST = [
   'DELETE /scim/v2/Users/:id',
   'POST /projects/invitations/check',
   'POST /projects/webhooks/github',
+  'POST /projects/:projectId/webhooks/github',
 ].sort();
 
 type Ctor = new (...args: never[]) => unknown;

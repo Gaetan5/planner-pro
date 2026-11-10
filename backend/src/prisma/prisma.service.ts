@@ -73,11 +73,18 @@ export function buildMariaDbOptions(
   };
 }
 
+/**
+ * Champs jamais renvoyés par une lecture ordinaire (S21) : le secret de webhook, même chiffré,
+ * ne doit sortir ni dans une réponse d'API, ni dans le journal d'audit, ni dans une synchronisation.
+ * Une lecture légitime le demande explicitement (`omit: { githubWebhookSecret: false }`).
+ */
+export const PRISMA_OMIT = { project: { githubWebhookSecret: true } } as const;
+
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit {
   constructor() {
     const adapter = new PrismaMariaDb(buildMariaDbOptions());
-    super({ adapter });
+    super({ adapter, omit: PRISMA_OMIT });
   }
 
   async onModuleInit() {

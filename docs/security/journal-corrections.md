@@ -3880,3 +3880,143 @@ Mesures relancées : jest backend 92 suites 2677/2677, `nest build`, `tsc` (test
 **Feu vert de commit unique (lot r37 + reprise r38)**, 9 fichiers : `backend/src/common/safe-fetch.ts`, `backend/src/projects/integration-url.ts`, `backend/tests/unit/common/safe-fetch.spec.ts`, `backend/tests/unit/common/safe-fetch.transport.spec.ts`, `backend/tests/unit/projects/attachment-dto.spec.ts`, `backend/tests/unit/projects/calendar-sync.service.spec.ts`, `frontend/src/safe-href.spec.ts`, `docs/security/journal-corrections.md`, `docs/security/rapport-audit.md`.
 
 **Ouverts** : S21, puis S22 + O16, puis le reste (voir « Revue r39 » du rapport pour les décisions à obtenir de l'utilisateur avant S21 et S22).
+
+
+## Lot r39 (fixeur) — S21
+
+### État initial et plan (consigné avant tout changement)
+
+**État constaté dans le code (HEAD 0838e4e)** :
+- `projects.service.ts` : `verifyGitHubSignature` calcule le HMAC sur `JSON.stringify(payload)` (corps re-sérialisé) avec le secret global `GITHUB_WEBHOOK_SECRET` ; sans secret, `return NODE_ENV === 'test'` (passe-droit).
+- `projects.controller.ts` : route publique `POST /projects/webhooks/github` ; `tasks.service.ts` `closeTaskFromWebhook(taskId)` ferme toute tâche de la plateforme par UUID ; aucun contrôle du dépôt ; aucun anti-rejeu.
+- `main.ts` : pas de `rawBody` ; `origin-guard.ts` exempte `/webhooks/github` et `/projects/webhooks/github`.
+- Les lignes `Project` complètes sont renvoyées par plusieurs lectures et écrites dans le journal d'audit (`before`/`after` de `updateProject`) : une colonne ajoutée simplement serait divulguée.
+- Mécanisme de chiffrement existant : `backend/src/auth/encryption.util.ts` (`encrypt`/`decrypt`, AES-256-GCM, `ENCRYPTION_KEY`), déjà utilisé pour `githubAccessToken` et le secret MFA. Il est réutilisé.
+- Redis : `RedisService` (ioredis, `maxRetriesPerRequest: null`, donc une commande reste en file indéfiniment si Redis est coupé) : un délai explicite est nécessaire (même approche que `AuthService.withRedisTimeout`, O19).
+
+**Décisions de l'utilisateur (confirmées le 2026-11-10)** : (1) secret affiché une seule fois, chiffré, jamais réaffiché, action « Régénérer » ; (2) régénération par le propriétaire du projet et les OWNER/ADMIN de l'espace de travail, vérifiée côté serveur par `PolicyService` ; (3) ancienne route : 410 Gone ; (4) Redis indisponible : refus (fail-closed).
+
+**Plan (un seul lot, S21 n'est pas découpé)** :
+1. Migration additive `20261115000000_s21_project_github_webhook_secret` : `Project.githubWebhookSecret TEXT NULL`. Client Prisma configuré avec `omit` global sur ce champ (jamais lu sauf demande explicite).
+2. `rawBody: true` dans `NestFactory.create` (et dans le banc de test HTTP) ; HMAC sur `req.rawBody`, `timingSafeEqual` après contrôle des longueurs.
+3. Secret généré (32 octets) à la liaison du dépôt (`syncRepositoryToProject`), renvoyé une seule fois dans la réponse (`webhookSecret`), chiffré par `encrypt()`. Route `POST /projects/:id/webhooks/github/secret` (régénération, action `project.manage`).
+4. Nouvelle route publique `POST /projects/:id/webhooks/github` ; ancienne route : 410. Exemption CSRF limitée à la nouvelle route.
+5. `closeTaskFromWebhook(projectId, taskId)` limité au projet ; dépôt de la charge utile comparé à `githubRepo` du projet.
+6. Anti-rejeu Redis `SET NX EX 86400` sur `X-GitHub-Delivery`, avec délai ; Redis indisponible : refus. 401 uniforme. Passe-droit de test supprimé.
+7. Frontend : affichage unique du secret et de l'URL à la liaison, bouton « Régénérer ».
+8. Tests, contre-mutations, mesures complètes.
+
+### S21 — Webhook GitHub : secret par projet, signature sur le corps brut, liaison au dépôt, anti-rejeu
+
+**Statut** : CORRIGÉ – À REVOIR
+
+**Cause confirmée** (code relu avant correction) : voir l'état initial ci-dessus. HMAC sur `JSON.stringify(payload)` (`projects.service.ts`, ancien `verifyGitHubSignature`), secret global `GITHUB_WEBHOOK_SECRET`, passe-droit `NODE_ENV === 'test'`, `closeTaskFromWebhook(taskId)` sans portée de projet ni de dépôt, aucun anti-rejeu.
+
+**Changement** :
+- `backend/prisma/schema/project.prisma` : `Project.githubWebhookSecret String? @db.Text`. Migration `backend/prisma/migrations/20261115000000_s21_project_github_webhook_secret/migration.sql`.
+- `backend/src/prisma/prisma.service.ts` : `PRISMA_OMIT` (`project.githubWebhookSecret`) passé à `new PrismaClient({ omit })` : le champ n'est jamais lu par défaut, donc absent de `GET /projects`, `GET /projects/:id`, du journal d'audit (`before`/`after` de `updateProject`), des synchronisations Firestore et de toutes les relations `include: { project: true }`. Seules deux lectures le demandent (`omit: { githubWebhookSecret: false }`) : le webhook et la liaison du dépôt.
+- `backend/src/main.ts` : `NestFactory.create(AppModule, { rawBody: true })` ; `tests/http/http-test-app.ts` reproduit le réglage.
+- `backend/src/projects/github-webhook.util.ts` (nouveau, pur) : `generateWebhookSecret()` (32 octets, hex), `verifyGitHubSignature(secret, rawBody, signature)` (format `sha256=<64 hex>` vérifié, longueurs égales, `timingSafeEqual`), `extractTaskIdsFromText`.
+- `backend/src/projects/github-webhook.service.ts` (nouveau) : `handle()` dans l'ordre projet non supprimé et secret présent, déchiffrement (`decrypt`), signature sur `req.rawBody`, `repository.full_name` égal (insensible à la casse) à `Project.githubRepo`, identifiant `X-GitHub-Delivery` au format valide, `SET NX EX 86400` Redis (clé `github-webhook:<projet>:<livraison>`), puis fermeture. Tout refus d'authentification, d'autorisation du dépôt ou de format : `401 « Webhook refusé. »` identique. Redis en erreur ou sans réponse sous 2 s : 503, aucun traitement (fail-closed). Traitement en échec : la clé est supprimée pour que la livraison puisse être rejouée. `regenerateSecret()` : `PolicyService.assertProject(projectId, userId, 'project.manage')`, 400 si aucun dépôt lié, nouveau secret chiffré par `encrypt()`, écriture d'audit `PROJECT_WEBHOOK_SECRET_REGENERATE` (dépôt seulement, jamais le secret).
+- `backend/src/projects/github-webhook.controller.ts` (nouveau) : `POST /projects/:projectId/webhooks/github` (`@Public`, authentifié par signature), `POST /projects/:projectId/webhooks/github/secret` (session, `@ForbiddenInImpersonation`, droit `project.manage`), `POST /projects/webhooks/github` (`@Public`) : **410 Gone** avec message d'orientation. Diffusion temps réel des tâches fermées conservée.
+- `backend/src/projects/tasks.service.ts` : `closeTaskFromWebhook(projectId, taskId)` limité aux tâches du projet. `projects.service.ts` et `projects.controller.ts` : ancien code du webhook supprimé (passe-droit de test compris). `projects.module.ts` : nouveau contrôleur, service, `RedisModule`.
+- `backend/src/redis/redis.service.ts` : `setIfAbsent(key, value, ttl)` (`SET ... EX ... NX`). `tests/http/fake-redis.ts` : équivalent.
+- `backend/src/auth/auth.service.ts` (`syncRepositoryToProject`) : secret généré à la première liaison et à chaque changement de dépôt, conservé si le même dépôt est relié de nouveau ; renvoyé en clair une seule fois dans la réponse (`webhookSecret`), jamais le secret chiffré (retiré explicitement de la réponse).
+- `backend/src/auth/origin-guard.ts` : exemption CSRF limitée à `/projects/:id/webhooks/github` ; ancienne route, régénération et reste non exemptés.
+- `docker-compose.yml`, `docker-compose.prod.yml`, `.env.production.example` : variable `GITHUB_WEBHOOK_SECRET` supprimée (plus lue).
+- Frontend : `frontend/src/github-repos.ts` (`githubWebhookUrl`, `regenerateWebhookSecret`, `webhookSecret` dans la réponse de liaison), `frontend/src/components/GitHubRepoConnector.tsx` : après liaison ou régénération, URL et secret affichés une fois avec la mention « il ne sera plus jamais affiché » et un bouton « J'ai copié le secret » ; bouton « Régénérer le secret du webhook » avec confirmation, visible seulement avec le droit de gestion et un dépôt lié ; le secret n'est qu'en mémoire du composant (jamais dans `localStorage`/`sessionStorage`), effacé au changement de projet.
+
+**Action et permission (décision 2)** : action `project.manage` de `PolicyService` (matrice `PROJECT_PERMISSIONS`, rôle MANAGER). Elle accorde : OWNER et ADMIN de l'espace de travail (MANAGER implicites), le créateur du projet s'il est au moins MEMBER de l'espace (règle P10), et les MANAGER désignés par `ProjectMembership`. C'est la même action que celle de la liaison du dépôt (`POST /auth/github/sync`). Voir question 1.
+
+**Tests** (résultats réels, exécutés) :
+- `tests/unit/projects/github-webhook.util.spec.ts` (nouveau, 17) : signature sur corps brut avec espaces acceptée, sur JSON re-sérialisé refusée, autre secret, corps modifié, 7 formes de signature invalides sans exception, corps/secret absents, majuscules ; secret de 64 hex distinct à chaque appel ; extraction des identifiants.
+- `tests/http/github-webhook.spec.ts` (nouveau, 44, application Nest réelle, politique réelle sur la fixture RBAC) : tâche fermée avec signature sur corps brut espacé, PR fusionnée, PR non fusionnée, ping ; **tâche d'un autre projet non fermée** ; dépôt différent / absent / projet sans dépôt : 401 ; 401 uniforme (message identique, rien fermé, rien écrit dans Redis) pour 10 motifs (signature fausse, absente, mal formée, secret d'un autre projet, projet inconnu, supprimé, sans secret, secret illisible, livraison absente ou invalide) ; rejeu ignoré (aucune écriture), autre livraison traitée, TTL 86400 s et clé par projet, livraison refusée ne consomme pas l'identifiant, échec de traitement libère l'identifiant, **Redis en erreur ou muet : 503 sans traitement** ; ancienne route 410 avec et sans signature ; régénération par propriétaire, OWNER, ADMIN et créateur MEMBER (secret stocké chiffré, déchiffre vers la valeur renvoyée), ancien secret invalidé immédiatement et nouveau valide, refus (403/404) pour member, contributor, commenter, viewer, client, outsider, deprovisioned (y compris contributor/commenter/client qui ont un rôle sur le projet), 401 sans session, 400 sans dépôt, audit sans secret.
+- `tests/http/github-repos.spec.ts` (+4) : première liaison (secret 64 hex renvoyé, stocké chiffré, secret chiffré absent de la réponse), même dépôt (secret conservé, rien réaffiché), autre dépôt (nouveau secret), échec GitHub (aucun secret écrit).
+- `tests/http/csrf-origin.spec.ts` (+1, adapté) : exemption limitée à la réception par projet ; régénération et ancienne route soumises au contrôle d'Origin.
+- `tests/http/rbac-matrix.spec.ts` : `GitHubWebhookController` ajouté (réception publique à 401 propre au handler, régénération `project.manage` pour les 9 profils et la variante P1) ; `tests/unit/authz/public-routes.spec.ts` : liste blanche mise à jour.
+- `tests/unit/prisma-omit.spec.ts` (nouveau, 2) : `PRISMA_OMIT` et omission globale effectivement posée sur le client Prisma ; `tests/unit/main-raw-body.spec.ts` (nouveau, 2) : `main.ts` conserve `rawBody: true`.
+- Frontend `GitHubRepoConnector.spec.tsx` (+6) : affichage unique puis effacement (rien dans les stockages), pas d'affichage sans nouveau secret, régénération avec confirmation et POST sans corps, annulation et erreur, absence du bouton sans droit ou sans dépôt, effacement au changement de projet.
+
+**Contre-mutations** (sauvegarde dans le bac à sable, restauration `/bin/cp -f`, une à la fois, `cmp` identique après chacune ; tests ciblés des 6 fichiers ci-dessus, 113 tests) :
+| Mutation | Résultat |
+| --- | --- |
+| HMAC sur JSON re-sérialisé | détectée (16 échecs) |
+| comparaison du dépôt supprimée | détectée (1) |
+| `closeTaskFromWebhook` sans `projectId` | détectée (1) |
+| anti-rejeu neutralisé | détectée (1) |
+| Redis fail-open | détectée (2) |
+| ancienne route de nouveau active | détectée (2) |
+| exemption CSRF élargie à `/secret` | détectée (1) |
+| régénération avec l'action `project.read` | détectée (3) ; **non détectée au premier essai** (110/110 : aucun profil de P2 n'a de rôle de projet), test ajouté sur P1 (contributor, commenter, client) puis mutation rejouée |
+| `omit` global retiré | détectée (1) |
+| `rawBody` retiré de `main.ts` | détectée (1) |
+| clé non libérée après échec de traitement | détectée (1) |
+| secret chiffré renvoyé par la liaison | détectée (1) |
+| projet inconnu : réponse distincte | détectée (3) |
+| identifiant de livraison non contrôlé | détectée (1) |
+| pas de nouveau secret au changement de dépôt | détectée (1) |
+| secret stocké en clair (liaison, puis régénération) | détectée (3 et 3) |
+| signature mal formée acceptée | détectée (7) |
+| TTL modifié | détectée (1) |
+| clé de livraison sans le projet | détectée (1) |
+| secret écrit dans l'audit | détectée (1) |
+Frontend (3 mutations, `/bin/cp -f` et `cmp`) : « J'ai copié » sans effet (1 échec), effacement au changement de projet retiré (1), régénération sans confirmation (3) : toutes détectées. Aucun processus jest ou vitest en attente à la fin.
+
+**Mesures** : jest backend (`env -u DATABASE_URL`) 96 suites, 2765/2765 ; `nest build`, `tsc -p tsconfig.test.json`, `tsc -p tsconfig.build.json` : exit 0 ; `prisma validate` : valide ; `prisma generate` exécuté (client régénéré, nécessaire au type `omit`) ; ESLint backend 0 erreur (15 avertissements `any` préexistants) ; Prettier conforme ; frontend `tsc --noEmit` exit 0, vitest 30 fichiers, 232/232, `pnpm build` ok, grep `mock/login|Simuler une session` dans `dist/assets` : vide, ESLint 0 erreur (36 avertissements), Prettier conforme.
+
+**Écart par rapport au rapport** :
+1. Le champ est omis **globalement** par le client Prisma (non demandé explicitement, mais nécessaire : plusieurs lectures renvoient la ligne `Project` entière et `updateProject` écrit `before`/`after` dans le journal d'audit). Le test « secret absent de `GET /projects/:id` » est donc couvert par la configuration du client (`prisma-omit.spec.ts`) et non par un faux Prisma, qui ignore `omit`. Non vérifié contre une vraie base MariaDB (voir « Non vérifié »).
+2. Régénération autorisée selon `project.manage` (voir ci-dessus) : le rapport disait « propriétaire du projet » ; la décision utilisateur élargit aux OWNER/ADMIN.
+3. Les 401 du webhook couvrent aussi dépôt différent et livraison invalide (rapport : « 401 uniforme quel que soit le motif »). Redis indisponible : 503 (après contrôle de signature, donc non exploitable sans le secret).
+4. Le secret n'est pas régénéré quand le même dépôt est relié de nouveau ; il l'est à tout changement de dépôt.
+
+**Migrations** : `20261115000000_s21_project_github_webhook_secret` : `ALTER TABLE Project ADD COLUMN githubWebhookSecret TEXT NULL`. Additive, nullable, sans reprise de données, réversible par `DROP COLUMN` (perte des secrets). Les projets existants restent à NULL. Appliquer avec `prisma migrate deploy` ; non appliquée sur la base de développement (serveurs en cours non touchés).
+
+**Changements cassants** :
+- `POST /projects/webhooks/github` répond désormais 410 : tout webhook existant cesse de fonctionner jusqu'à reconfiguration.
+- Tout projet existant n'a **aucun** secret : le webhook de ce projet est refusé (401) tant que le secret n'a pas été généré par « Régénérer le secret du webhook » (ou par une nouvelle liaison de dépôt).
+- Le webhook GitHub doit être en `Content-Type: application/json` (le format `x-www-form-urlencoded` n'a pas de corps brut JSON exploitable et sera refusé).
+- Variable `GITHUB_WEBHOOK_SECRET` obsolète (retirée des fichiers compose et de `.env.production.example` ; à retirer des environnements déployés).
+- Réponse de `POST /auth/github/sync` : champ supplémentaire optionnel `webhookSecret` (présent uniquement à la génération).
+
+**Actions d'exploitation** :
+1. Avant la mise en production, recenser les webhooks GitHub configurés avec l'ancien secret global : côté plateforme, savoir quels clients ont un dépôt lié (`SELECT id, name, workspaceId, githubRepo FROM Project WHERE githubRepo IS NOT NULL AND deletedAt IS NULL`, lecture seule) ; côté GitHub, chaque client doit avoir un webhook vers `/projects/webhooks/github` (ou une livraison en échec 410 dans « Recent Deliveries »). Ce recensement n'est pas automatisable depuis la base : à croiser avec les clients.
+2. Pour chaque projet concerné : un OWNER/ADMIN (ou le propriétaire du projet) ouvre le projet, clique « Régénérer le secret du webhook », recopie l'URL `https://<API>/projects/<id>/webhooks/github` et le secret dans les paramètres du webhook GitHub (type `application/json`, événements Pushes et Pull requests), puis vérifie une livraison « ping » (réponse 201).
+3. Communiquer l'échéance aux clients avant le déploiement (le 410 coupe l'ancien flux immédiatement). Aucun nettoyage automatique.
+4. Retirer `GITHUB_WEBHOOK_SECRET` des environnements de production et de préproduction ; appliquer la migration (`prisma migrate deploy`) avant de déployer le code.
+5. Vérifier en préproduction, contre MariaDB réelle, que `GET /projects` ne contient pas `githubWebhookSecret` (voir « Non vérifié »).
+6. Redis doit être disponible : sans lui, les webhooks sont refusés (503). GitHub ne rejoue pas automatiquement : les livraisons en échec se rejouent à la main (« Redeliver ») dans l'interface GitHub.
+
+**Non vérifié** : le comportement réel de l'omission globale de Prisma (`omit`) sur MariaDB, y compris sur `include`, `update` et les transactions, n'a pas été exercé contre une base (aucune base de test, la base de développement n'a pas été touchée). Les tests établissent que le client est configuré avec `omit` ; la liaison supprime en plus le champ de sa propre réponse. À confirmer en préproduction avant la mise en production (action 5).
+
+**Risques résiduels** : (a) le limiteur de débit global (60/min par IP) s'applique à la route publique ; derrière un proxy sans `trust proxy` (S24), les livraisons de plusieurs clients partagent le compteur, d'où des 429 possibles en pic : à traiter avec S24 (ou `@SkipThrottle` dédié avec limite par projet) ; (b) GitHub ne rejoue pas automatiquement les livraisons en 5xx.
+
+**Questions pour l'architecte** :
+1. `project.manage` inclut aussi les MANAGER désignés par `ProjectMembership` (au-delà de « propriétaire + OWNER/ADMIN » de la décision 2). Cohérent avec la liaison du dépôt, qui exige déjà ce droit : acceptable, ou faut-il une action dédiée limitée au créateur et aux OWNER/ADMIN ? Je recommande de garder `project.manage`.
+2. Un secret n'est plus relu : un projet lié avant la migration doit utiliser « Régénérer ». Acceptable sans rétro-génération en masse (une rétro-génération ne servirait à rien puisque le secret ne peut plus être affiché) ?
+3. Refus de dépôt différent ou de livraison invalide : 401 (uniforme, choisi) plutôt que 403 ou 422 ; confirmer.
+4. Rattacher le point (a) des risques résiduels à S24 ?
+
+**Fichiers modifiés ou créés** (aucun commit) : `.env.production.example`, `docker-compose.yml`, `docker-compose.prod.yml`, `backend/prisma/schema/project.prisma`, `backend/prisma/migrations/20261115000000_s21_project_github_webhook_secret/migration.sql`, `backend/src/auth/auth.service.ts`, `backend/src/auth/origin-guard.ts`, `backend/src/main.ts`, `backend/src/prisma/prisma.service.ts`, `backend/src/projects/github-webhook.controller.ts`, `backend/src/projects/github-webhook.service.ts`, `backend/src/projects/github-webhook.util.ts`, `backend/src/projects/projects.controller.ts`, `backend/src/projects/projects.module.ts`, `backend/src/projects/projects.service.ts`, `backend/src/projects/tasks.service.ts`, `backend/src/redis/redis.service.ts`, `backend/tests/http/csrf-origin.spec.ts`, `backend/tests/http/fake-redis.ts`, `backend/tests/http/github-repos.spec.ts`, `backend/tests/http/github-webhook.spec.ts`, `backend/tests/http/http-test-app.ts`, `backend/tests/http/rbac-matrix.spec.ts`, `backend/tests/unit/authz/public-routes.spec.ts`, `backend/tests/unit/main-raw-body.spec.ts`, `backend/tests/unit/prisma-omit.spec.ts`, `backend/tests/unit/projects/github-webhook.util.spec.ts`, `backend/tests/unit/projects/projects.service.spec.ts`, `frontend/src/github-repos.ts`, `frontend/src/components/GitHubRepoConnector.tsx`, `frontend/src/components/GitHubRepoConnector.spec.tsx`, `docs/security/journal-corrections.md`.
+
+
+## Revue architecte (r40) — S21
+
+**Verdict : VALIDÉ** (non bloquant : r40-m1, r40-m2, r40-a1 dans `rapport-audit.md`, « Revue r40 »).
+
+Vérifié dans le code, pas dans la description : HMAC sur `req.rawBody` (format `sha256=<64 hex>`, longueurs égales puis `timingSafeEqual`), `rawBody: true` effectif avec `useBodyParser` (Nest relaie l'option), liaison au dépôt insensible à la casse, 401 uniforme, `SET NX EX 86400` par projet après signature et dépôt (l'identifiant n'est écrit qu'après authentification), fail-closed 503, clé libérée si le traitement échoue, `closeTaskFromWebhook` borné par `projectId`, passe-droit de test supprimé, exemption CSRF limitée à `/projects/:id/webhooks/github`, ancienne route 410, secret absent des logs, de l'audit et des stockages navigateur, compose et `.env.production.example` sans valeur réelle. Omission globale vérifiée sur MySQL 8 réel (conteneur jetable supprimé, base de développement non touchée). Mesures relancées toutes vertes. Contre-mutations propres (sauvegarde bac à sable, `/bin/cp -f`, `cmp`) : `deletedAt` retiré, détectée ; PR non fusionnée acceptée, détectée ; Redis fail-open, détectée ; décorateur d'impersonation retiré, **non détectée** (r40-m1).
+
+**Réponses aux questions** :
+1. `project.manage` : écart à la décision (2) car il ajoute les MANAGER de `ProjectMembership`. Recommandation : le garder (ils peuvent déjà relier un autre dépôt et obtenir un nouveau secret) ; action dédiée possible si l'utilisateur veut la lettre de la décision. **À confirmer par l'utilisateur.**
+2. Pas de rétro-génération : accepté (le secret ne pourrait pas être montré). Amélioration facultative : indiquer dans l'interface si un secret existe (booléen calculé, sans le renvoyer).
+3. 401 uniforme pour dépôt différent et livraison invalide : confirmé.
+4. 429 : rattaché à S24 (avec `@SkipThrottle` dédié ou limite par projet), ainsi que la limite de corps (S23).
+
+**Écarts jugés** : (1) omission globale : acceptée, vérifiée sur base réelle ; (2) `project.manage` : voir ci-dessus ; (3) 401 étendu et 503 Redis : acceptés ; (4) pas de nouveau secret pour le même dépôt : accepté.
+
+**Feu vert de commit** (32 entrées de `git status`, chemins explicites, sans `.claude/` ni `.env` réel) : les 31 fichiers de la liste du fixeur (dont le dossier `backend/prisma/migrations/20261115000000_s21_project_github_webhook_secret/migration.sql`) et `docs/security/rapport-audit.md`.
+**Changements cassants** : ancienne route 410 ; projets existants sans secret (401 tant que non régénéré) ; webhook en `application/json` obligatoire ; `GITHUB_WEBHOOK_SECRET` obsolète ; champ `webhookSecret` ajouté à la réponse de `/auth/github/sync`.
+**Ordre de déploiement** : migration (`prisma migrate deploy`) avant le code (le client sélectionne la colonne) ; ensuite code ; retirer `GITHUB_WEBHOOK_SECRET` des environnements.
+**Actions d'exploitation** : recenser les webhooks clients, prévenir avant le 410, régénérer et saisir secret et URL par projet, Redis disponible, vérifier en préproduction `GET /projects` (déjà confirmé sur MySQL 8 local, à refaire sur MariaDB de production).
+
+**Constats encore ouverts** : r40-m1, r40-m2, r40-a1, puis S22 + O16, S30, S23 à S25, S26, A5 à A7, P5, P8, O10 à O17, O21, Phase 6.
