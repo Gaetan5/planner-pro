@@ -5,6 +5,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import * as cookieParser from 'cookie-parser';
 import { originCheckMiddleware } from '../../src/auth/origin-guard';
+import { noStoreMiddleware } from '../../src/common/no-store.middleware';
 import { FeatureFlagGuard } from '../../src/config/feature-flag.guard';
 import { JwtAuthGuard } from '../../src/auth/jwt.guard';
 import { PrismaService } from '../../src/prisma/prisma.service';
@@ -49,6 +50,7 @@ export async function startHttpTestApp(
     rawBody: true, // comme main.ts (S21)
   });
   app.useBodyParser('json', { type: ['application/json', 'application/scim+json'] });
+  app.use(noStoreMiddleware()); // comme main.ts (O16)
   app.use(cookieParser());
   app.use(originCheckMiddleware());
   app.useGlobalPipes(new AppValidationPipe());

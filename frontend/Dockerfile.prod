@@ -32,6 +32,9 @@ RUN pnpm build
 FROM nginx:1.27-alpine
 
 COPY frontend/nginx.prod.conf /etc/nginx/conf.d/default.conf
+# En-têtes de sécurité générés au démarrage depuis l'environnement (S22)
+COPY frontend/docker-entrypoint.d/40-security-headers.sh /docker-entrypoint.d/40-security-headers.sh
+RUN chmod 755 /docker-entrypoint.d/40-security-headers.sh
 COPY --from=build /home/node/app/frontend/dist /usr/share/nginx/html
 
 EXPOSE 80

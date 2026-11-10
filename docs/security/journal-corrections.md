@@ -4082,3 +4082,85 @@ Contre-mutations : une occurrence ajoutée dans `projects.service.ts` : 2 échec
 - **r40-m1 : VALIDÉ. r40-m2 : VALIDÉ. r40-a1 (i) : VALIDÉ.** Jest 97 suites 2776/2776, nest build, tsc (build et test), ESLint, Prettier propres. Contre-mutations : `del` non borné (2 échecs), `del` sur rejeu normal (1 échec), commentaire dans un autre fichier (2 échecs) ; restaurations vérifiées.
 - Réponses : (1) volets ii à iv reportés par l'architecte dans S22, O16, S23, S24 du rapport ; (2) `prisma.service.ts` accepté ; (3) test textuel strict accepté. Risques déclarés (503 jusqu'à 2 délais, clé jusqu'à 24 h si Redis muet pendant le `del`) acceptés.
 - Ouverts : S22 + O16, S30, exploitation, S23 à S25, S26, A5 à A7, P5, P8, O10 à O17, O21, Phase 6. Commit autorisé (liste dans « Revue r41 » du rapport).
+
+## Lot r41 (fixeur) — S22 + O16
+
+Périmètre : S22 et O16 du rapport (constats d'origine, « Exigences précisées pour S22 + O16 », compléments r41), avec les décisions de l'utilisateur du 2026-11-10. Documentation d'exploitation : `docs/security/en-tetes-frontend.md`.
+
+### Décisions de l'utilisateur appliquées
+1. **Connexion Google par popup** : vérifiée dans le code, **non implémentée**. `grep` sur `frontend/src` : aucun `signInWithPopup`, `signInWithRedirect`, `GoogleAuthProvider` ni `getRedirectResult`. Seul `signInWithEmailAndPassword` est utilisé (`Login.tsx:278`, `IdentitiesSection.tsx:101`). `frame-src 'none'`, et ni `apis.google.com`, `accounts.google.com`, ni `*.firebaseapp.com` : ajouter des sources non utilisées élargirait la CSP sans raison. Sources Firebase retenues : `identitytoolkit.googleapis.com` (connexion) et `securetoken.googleapis.com` (rafraîchissement du jeton). Une connexion Google par popup, si elle est ajoutée, demandera `frame-src https://<VITE_FIREBASE_AUTH_DOMAIN>` et `script-src https://apis.google.com` (procédure dans le document d'exploitation).
+2. **Police auto-hébergée** : `@import` de `fonts.googleapis.com` supprimé de `frontend/src/index.css` ; `@fontsource-variable/outfit` 5.3.0 (version exacte, licence OFL-1.1), importé dans `frontend/src/main.tsx` ; deux fichiers woff2 émis dans `dist/assets` (15 et 32 ko, donc non inlinés en `data:`). Famille `'Outfit Variable'` ajoutée à `--font-primary` et à `GovernanceView.css:599`. Aucune source Google Fonts dans la CSP ; `grep fonts.googleapis` sur `dist` : aucun résultat.
+3. **Report-Only par défaut**, variable `CSP_MODE` (`report-only` | `enforce`), documentée (`.env.production.example`, `docker-compose.prod.yml`, `docs/security/en-tetes-frontend.md`, `docs/deployment-production.md`). Valeur invalide : le conteneur refuse de démarrer (pas de repli silencieux). `CSP_REPORT_URI` facultatif (valeurs contenant `;`, `"`, `$`, espace, etc. refusées : injection de directive ou d'en-tête).
+4. **HSTS** : `max-age=31536000; includeSubDomains`, pas de `preload` (test et `check-headers.sh` échouent si `preload` apparaît).
+
+### Architecture (où sont servis les en-têtes)
+Conteneur nginx du frontend (`frontend/Dockerfile.prod`, image `nginx:1.27-alpine`). Aucun domaine de production en dur : `frontend/docker-entrypoint.d/40-security-headers.sh` (exécuté par l'entrypoint officiel nginx) lit `VITE_API_URL` **au démarrage du conteneur** et génère `/etc/nginx/snippets/security-headers.conf` ; `frontend/nginx.prod.conf` l'inclut dans `location /` **et** dans le bloc des assets (nginx n'hérite pas des `add_header`). Choix du script shell plutôt que d'`envsubst` : le `connect-src` demande une dérivation (`https`→`wss`, extraction de l'origine) et une validation. `VITE_API_URL` doit donc être passée au conteneur à l'exécution (ajoutée dans `environment` du service `frontend` de `docker-compose.prod.yml`, en plus de l'argument de build existant).
+
+### S22 — en-têtes de sécurité du frontend
+**Statut** : CORRIGÉ – À REVOIR
+
+**Changement** : `frontend/nginx.prod.conf` (includes, avec `always` dans le snippet) ; `frontend/docker-entrypoint.d/40-security-headers.sh` (nouveau) ; `frontend/Dockerfile.prod` (copie + `chmod`) ; `docker-compose.prod.yml` (`environment` du service `frontend`) ; `.env.production.example` (`CSP_MODE`, `CSP_REPORT_URI`, sans valeur réelle) ; `scripts/check-headers.sh` (nouveau, `/` et un asset `.js`, `EXPECT_CSP_MODE`) ; police (`frontend/package.json`, `pnpm-lock.yaml` : +11 lignes, `index.css`, `main.tsx`, `GovernanceView.css`).
+
+CSP émise : `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; media-src 'self' https://assets.mixkit.co; connect-src 'self' <API> <wss de l'API> https://identitytoolkit.googleapis.com https://securetoken.googleapis.com; frame-src 'none'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`. Autres en-têtes : HSTS, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy: camera=(), geolocation=(), microphone=(self)`. Chaque source est justifiée dans le document d'exploitation. `data:` limité à `img-src`.
+
+**Tests** :
+- `frontend/src/security-headers.spec.ts` (29 tests, vitest) : exécute le script réel ; CSP en Report-Only par défaut et jamais bloquante en même temps, `enforce`, mode invalide refusé, `script-src 'self'` seul (ni `unsafe-inline` ni `unsafe-eval`), directives de cloisonnement, `data:` seulement en `img-src`, aucune source Google Fonts ni `apis.google.com`/`accounts.google.com`/`firebaseapp.com`, `connect-src` dérivé de `VITE_API_URL` (https/wss, http/ws, port), valeurs invalides ou injectées refusées (`VITE_API_URL`, `CSP_REPORT_URI`), HSTS `includeSubDomains` sans `preload`, autres en-têtes, `always` partout, `include` présent dans les deux `location`, aucun `boukarou` dans nginx ni le script, `index.css` sans Google Fonts, `index.html` sans script inline.
+- Vérification sur **vrai nginx 1.27** (conteneurs jetables, supprimés) : `nginx -t` OK ; image construite avec `frontend/Dockerfile.prod` puis `scripts/check-headers.sh` sur `/` et sur l'asset : tous les en-têtes présents (une erreur de mon script, `grep` sans `-E`, a été corrigée grâce à ce test) ; démarrage refusé sans `VITE_API_URL` ; réponse 404 d'asset et route SPA inconnue portent aussi les en-têtes.
+- Contre-mutations (une à la fois, sauvegarde dans le bac à sable, `cmp` identique après chacune) : include retiré du bloc des assets : 1 échec ; défaut `enforce` : 8 échecs ; `'unsafe-inline'` dans `script-src` : 1 échec ; `preload` : 1 échec ; import Google Fonts rétabli dans `index.css` : 1 échec. (Un premier passage de mutations a été exécuté sans sauvegarde à cause d'une erreur de shell : les fichiers ont été remis à la main puis re-testés ; le second passage, avec sauvegardes, est celui rapporté ; état final vérifié par `cmp` et par les 29 tests verts.)
+
+### O16 — `Cache-Control: no-store`
+**Statut** : CORRIGÉ – À REVOIR
+
+**Changement** : `backend/src/common/no-store.middleware.ts` (nouveau) : middleware Express posant `Cache-Control: no-store` et `Pragma: no-cache` sur `/auth/*`, `/admin/*` et `/projects/:projectId/webhooks/github/secret` (insensible à la casse, comme le routage Express ; y compris pour les 401/403). Branché dans `backend/src/main.ts` (après `helmet()`) et dans `backend/tests/http/http-test-app.ts` (comme `originCheckMiddleware`, pour que tous les tests HTTP l'exercent). Choix du middleware plutôt que d'un intercepteur : il couvre aussi les réponses des guards (refus 401/403) qu'un intercepteur ne voit pas. La route du secret a un motif explicite (hors `/auth/*`) ; `POST /auth/github/sync` est couverte par `/auth/*`.
+
+**Tests** :
+- `tests/http/session-lifecycle.spec.ts` : `GET /auth/mfa/status`, `POST /auth/mfa/setup`, `GET /auth/sessions` et un 401 anonyme portent `no-store` + `no-cache`; `/protected` n'en porte pas.
+- `tests/http/github-repos.spec.ts` : réponse de `POST /auth/github/sync` (avec `webhookSecret` en clair) : `no-store`.
+- `tests/http/github-webhook.spec.ts` : `POST /projects/P2/webhooks/github/secret` : 201, 403 et 401 portent `no-store`.
+- `tests/http/admin-platform-roles.spec.ts` : `GET /admin/overview` en 200 et en 403.
+- `tests/unit/common/no-store.middleware.spec.ts` (nouveau) : motifs inclus et exclus (`/authors`, `/administrators`, `/projects/x/webhooks/github`, `.../secretx`) et branchement dans `main.ts` (test textuel : le test HTTP a son propre `app.use`, il ne verrait pas un retrait dans `main.ts`).
+- Contre-mutations : motif du secret retiré : 3 échecs ; `/admin` retiré : 4 ; `Pragma` retiré : 13 ; `app.use` retiré de `main.ts` : 1 (le test textuel) ; `/auth` retiré : 6. Fichiers restaurés, `cmp` identique.
+
+### Mesures (état final)
+- Jest backend (`env -u DATABASE_URL`) : 98 suites, 2798/2798 (avant : 97 suites, 2776). `nest build` OK ; `tsc --noEmit -p tests/tsconfig.json` OK.
+- Vitest frontend : 31 fichiers, 261/261 (avant : 232 ; +29). `pnpm build` OK : aucun `mock/login` ni `Simuler une session`, aucun `fonts.googleapis` dans `dist`.
+- `pnpm lint` : 0 erreur (51 avertissements `no-explicit-any` préexistants). Prettier : propre sur les fichiers touchés.
+- `docker build -f frontend/Dockerfile.prod` puis exécution : en-têtes vérifiés par `scripts/check-headers.sh` (voir S22). Image et conteneurs de test supprimés.
+
+### Écarts par rapport au rapport
+- `connect-src` : `*.googleapis.com`/`*.firebaseio.com` du modèle initial remplacés par les deux hôtes Firebase Auth réellement utilisés (conforme aux exigences précisées).
+- Ajout de `media-src https://assets.mixkit.co` : le son de mention est chargé depuis ce domaine (`AppContext.tsx:722`), `default-src 'self'` le bloquerait. Hors modèle initial.
+- Ajout de `object-src 'none'`, `frame-src 'none'` et `X-Frame-Options: DENY` (cette dernière parce que `frame-ancestors` n'est pas appliqué en Report-Only).
+- O16 : middleware plutôt qu'« intercepteur ou middleware » (les deux admis par le rapport).
+- Aucun `unsafe-inline` en `script-src`. `style-src 'unsafe-inline'` conservé (une centaine d'attributs `style={{...}}` React) : conforme au modèle.
+
+### Changements cassants et consignes de déploiement
+- **Le service `frontend` exige `VITE_API_URL` à l'exécution** (déjà obligatoire au build dans `.env.production`, donc rien à ajouter si le fichier est à jour) : le conteneur refuse de démarrer sinon. La valeur doit être celle compilée dans le frontend.
+- Reconstruire l'image `frontend` (`docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build frontend`), puis `scripts/check-headers.sh https://<frontend>`.
+- La CSP démarre en **Report-Only** : rien ne bloque. Parcours à faire avec la console ouverte (connexion Firebase e-mail/mot de passe, MFA, temps réel, notification de mention), puis `CSP_MODE=enforce` et redéploiement du seul conteneur frontend. Le reverse proxy de l'hôte ne doit ni supprimer ni dupliquer ces en-têtes.
+- **HSTS `includeSubDomains`** s'applique dès le déploiement (1 an) : à ne déployer qu'une fois tous les sous-domaines en HTTPS (confirmé par l'utilisateur). Les navigateurs ignorent HSTS reçu en HTTP (pile locale).
+- `pnpm install` nécessaire (nouvelle dépendance `@fontsource-variable/outfit` 5.3.0, justifiée par la décision 2). Le lockfile n'a reçu que 11 lignes (reformaté par Prettier comme le dépôt).
+- Frontend de développement (`Dockerfile`, Vite) : inchangé, sans en-têtes (le fichier S22 vise la production).
+- Les clients qui lisaient des réponses `/auth/*` en cache : aucun effet fonctionnel attendu.
+
+### Questions pour l'architecte
+1. **Connexion Google** : la décision (popup) ne correspond pas au code, qui n'a aucune connexion Google. J'ai donc dimensionné la CSP sur le code réel. L'utilisateur prévoit-il d'ajouter la connexion Google ? Si oui, ce sera un autre constat, avec la CSP à compléter (voir le document).
+2. **Son de notification hébergé par `assets.mixkit.co`** : accepter la source `media-src` (état actuel) ou héberger le fichier localement et la supprimer (préférable, mais relève d'un autre lot) ?
+3. **CI** : j'ai ajouté le test vitest qui exécute le script ; `scripts/check-headers.sh` (nginx réel) n'est pas branché dans `ci.yml` (nécessite de construire l'image). Le faire dans le lot « Phase 6 / CI » ?
+4. `X-Frame-Options: DENY` en plus de `frame-ancestors` : accepté ?
+5. `report-uri` (déprécié mais seul universellement pris en charge) plutôt que `report-to` : accepté ? Aucun point de collecte n'existe côté API : à créer ou à confier à un service tiers si les rapports doivent être centralisés.
+
+**Fichiers modifiés ou créés** (aucun commit) : `backend/src/common/no-store.middleware.ts`, `backend/src/main.ts`, `backend/tests/http/{http-test-app,session-lifecycle.spec,github-repos.spec,github-webhook.spec,admin-platform-roles.spec}.ts`, `backend/tests/unit/common/no-store.middleware.spec.ts`, `frontend/nginx.prod.conf`, `frontend/Dockerfile.prod`, `frontend/docker-entrypoint.d/40-security-headers.sh`, `frontend/src/security-headers.spec.ts`, `frontend/src/{index.css,main.tsx}`, `frontend/src/components/GovernanceView.css`, `frontend/package.json`, `pnpm-lock.yaml`, `docker-compose.prod.yml`, `.env.production.example`, `scripts/check-headers.sh`, `docs/security/en-tetes-frontend.md`, `docs/deployment-production.md`, `docs/security/journal-corrections.md`.
+
+## Revue architecte (r42) — lot r41 (S22 + O16)
+
+#### Revue architecte
+**S22 : VALIDÉ** (code). **O16 : VALIDÉ.** Mesures relancées et nginx 1.27 réel vérifiés (détail dans « Revue r42 » de `rapport-audit.md`) : jest 2798/2798, vitest 261/261, build, lint, `nginx -t`, `check-headers.sh` OK sur `/` et sur un asset, 404 et route SPA inconnue couvertes, 3 contre-mutations détectées et restaurées (`cmp`). Aucune mutation résiduelle dans `git diff`.
+
+- **Connexion Google** : votre constat est exact pour Firebase (aucune connexion Google Firebase). Nuance : le SSO OIDC Google (`oidc.ts:35`) existe côté backend, par redirection pleine page, sans effet sur la CSP. L'écart avec la réponse « popup » de l'utilisateur est à lui faire trancher (ajout d'un bouton Firebase Google, ou SSO Workspace existant ?).
+- **Écarts** : les trois acceptés (hôtes Firebase resserrés ; `media-src mixkit`, `object-src`/`frame-src`/`X-Frame-Options` ; middleware).
+- **Q1 à Q5** : voir réponses dans le rapport (mixkit à héberger localement plus tard, `check-headers.sh` en CI différé, `X-Frame-Options` accepté, `report-uri` accepté sans collecteur).
+- **Nouveaux constats** : r42-m1 (le SDK Firebase `getAuth` charge gapi et une iframe sur mobile/Safari : bloque `enforce`), r42-m2 (`VITE_API_URL` multiligne accepté), r42-a1, r42-a2.
+- **Commit autorisé** (liste exacte dans le rapport). `CSP_MODE=enforce` interdit tant que r42-m1 n'est pas traité et le parcours mobile/Safari consigné.
+
+Constats ouverts : r42-m1, r42-m2, r42-a1, r42-a2, puis S30, S23 à S26, A5 à A7, P5, P8, O10 à O15, O17, O21, Phase 6.

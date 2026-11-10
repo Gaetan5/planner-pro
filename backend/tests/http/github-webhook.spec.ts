@@ -442,6 +442,22 @@ describe('S21 : webhook GitHub par projet', () => {
       expect(decrypt(stored)).toBe(webhookSecret);
     });
 
+    // S22/O16 : la réponse porte le secret en clair ; route hors /auth/*, motif explicite
+    it('Cache-Control no-store sur le succès, le refus 403 et le 401', async () => {
+      const call = (persona?: Persona) =>
+        fetch(`${baseUrl}/projects/P2/webhooks/github/secret`, {
+          method: 'POST',
+          headers: persona ? { Authorization: `Bearer ${tokens[persona]}` } : {},
+        });
+      const ok = await call('owner');
+      expect(ok.status).toBe(201);
+      expect((await ok.json()).webhookSecret).toMatch(/^[0-9a-f]{64}$/);
+      for (const res of [ok, await call('outsider'), await call()]) {
+        expect(res.headers.get('cache-control')).toBe('no-store');
+        expect(res.headers.get('pragma')).toBe('no-cache');
+      }
+    });
+
     it('le propriétaire du projet, simple MEMBER de l’espace, peut régénérer', async () => {
       expect((await regenerate('P3', 'member')).status).toBe(201);
     });

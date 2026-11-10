@@ -5,6 +5,7 @@ import * as cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { AppValidationPipe } from './common/app-validation.pipe';
 import { originCheckMiddleware } from './auth/origin-guard';
+import { noStoreMiddleware } from './common/no-store.middleware';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -13,6 +14,8 @@ async function bootstrap() {
   // Les IdP SCIM envoient application/scim+json (RFC 7644 §3.1) : corps JSON à analyser aussi
   app.useBodyParser('json', { type: ['application/json', 'application/scim+json'] });
   app.use(helmet());
+  // Réponses sensibles jamais mises en cache (O16)
+  app.use(noStoreMiddleware());
   app.useGlobalPipes(new AppValidationPipe());
   app.use(cookieParser());
   // Anti-CSRF des sites voisins : Origin/Referer obligatoire pour les requêtes à cookie (S29)

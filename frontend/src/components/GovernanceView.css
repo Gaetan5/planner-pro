@@ -596,7 +596,7 @@
   font-size: 1.2rem;
   font-weight: 700;
   color: var(--text-primary);
-  font-family: 'Outfit', sans-serif;
+  font-family: 'Outfit Variable', 'Outfit', sans-serif;
 }
 
 .project-overview-ring-container {

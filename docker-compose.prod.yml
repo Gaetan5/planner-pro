@@ -105,6 +105,12 @@ services:
         VITE_FIREBASE_PROJECT_ID: ${VITE_FIREBASE_PROJECT_ID:-}
         VITE_FIREBASE_APP_ID: ${VITE_FIREBASE_APP_ID:-}
     restart: unless-stopped
+    environment:
+      # En-têtes de sécurité (S22), lus au démarrage par 40-security-headers.sh
+      VITE_API_URL: ${VITE_API_URL:?Set VITE_API_URL in .env.production}
+      # report-only (défaut) signale sans bloquer ; enforce bloque (voir docs/security/en-tetes-frontend.md)
+      CSP_MODE: ${CSP_MODE:-report-only}
+      CSP_REPORT_URI: ${CSP_REPORT_URI:-}
     depends_on:
       - backend
     ports:

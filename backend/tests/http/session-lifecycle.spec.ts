@@ -354,6 +354,35 @@ describe('A3/S7 : cycle de vie des sessions (HTTP)', () => {
     expect((row.expiresAt as Date).getTime() - Date.now()).toBeLessThanOrEqual(15 * 60 * 1000);
   });
 
+  // O16 : secret TOTP, codes de secours et état du compte ne sont jamais mis en cache
+  it('O16 : /auth/mfa/status, /auth/mfa/setup, /auth/sessions et une erreur 401 portent no-store', async () => {
+    process.env.ENCRYPTION_KEY = 'super-secret-key-32-bytes-long!!'; // chiffrement du secret TOTP
+    const { jar } = await login();
+    const headers = { Cookie: asHeader(jar), Origin: FRONT_ORIGIN };
+    const noStore = (res: Response) => {
+      expect(res.headers.get('cache-control')).toBe('no-store');
+      expect(res.headers.get('pragma')).toBe('no-cache');
+    };
+    const status = await fetch(`${baseUrl}/auth/mfa/status`, { headers });
+    expect(status.status).toBe(200);
+    noStore(status);
+    const setup = await fetch(`${baseUrl}/auth/mfa/setup`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: 'MotDePasse!2026' }),
+    });
+    expect(setup.status).toBeLessThan(300);
+    noStore(setup);
+    noStore(await fetch(`${baseUrl}/auth/sessions`, { headers }));
+    const anonymous = await fetch(`${baseUrl}/auth/mfa/status`);
+    expect(anonymous.status).toBe(401);
+    noStore(anonymous);
+    // une route hors périmètre n'est pas touchée
+    expect(
+      (await fetch(`${baseUrl}/protected`, { headers })).headers.get('cache-control'),
+    ).toBeNull();
+  });
+
   it('GET /auth/sessions liste les sessions du compte ; la session courante est marquée', async () => {
     const first = await login();
     await login(); // seconde session

@@ -208,6 +208,15 @@ describe('P9-R : liaison d’un dépôt GitHub à un projet (HTTP)', () => {
       expect(repoOf()).toBe('owner/Repo'); // full_name renvoyé par GitHub, pas la saisie
     });
 
+    // S22/O16 : la réponse porte le secret du webhook en clair, elle ne doit pas être mise en cache
+    it('réponse de la liaison (secret en clair) : Cache-Control no-store', async () => {
+      const res = await sync({ projectId: 'p-1', repoFullName: 'owner/repo' });
+      expect(res.status).toBe(201);
+      expect((await res.json()).webhookSecret).toMatch(/^[0-9a-f]{64}$/);
+      expect(res.headers.get('cache-control')).toBe('no-store');
+      expect(res.headers.get('pragma')).toBe('no-cache');
+    });
+
     describe('secret de webhook (S21)', () => {
       const storedSecret = () =>
         prisma.project.rows.find((p) => p.id === 'p-1')?.githubWebhookSecret as string | undefined;

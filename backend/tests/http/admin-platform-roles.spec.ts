@@ -117,6 +117,17 @@ describe('S18.1 / S18.3 : console admin (HTTP)', () => {
     it('utilisateur sans rôle de plateforme : 403', async () => {
       expect((await call('user-1', 'GET', '/admin/overview')).status).toBe(403);
     });
+
+    // O16 : la console d'administration n'est jamais mise en cache, succès comme refus
+    it.each([
+      ['padmin-1', 200],
+      ['user-1', 403],
+    ])('GET /admin/overview (%s) : %i avec Cache-Control no-store', async (userId, status) => {
+      const res = await call(userId, 'GET', '/admin/overview');
+      expect(res.status).toBe(status);
+      expect(res.headers.get('cache-control')).toBe('no-store');
+      expect(res.headers.get('pragma')).toBe('no-cache');
+    });
   });
 
   describe('S18.3 : MFA obligatoire pour les rôles de plateforme', () => {

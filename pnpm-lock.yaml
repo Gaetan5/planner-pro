@@ -185,6 +185,9 @@ importers:
       '@dnd-kit/utilities':
         specifier: 3.2.2
         version: 3.2.2(react@18.3.1)
+      '@fontsource-variable/outfit':
+        specifier: 5.3.0
+        version: 5.3.0
       date-fns:
         specifier: 3.6.0
         version: 3.6.0
@@ -1725,6 +1728,12 @@ packages:
     resolution:
       {
         integrity: sha512-2xCRM9q9FlzGZCdgDMJwc0gyUkWFtkosy7Xxr6sFgQwn+wMNIWd7xIvYNauU1r64B5L5rsGKy/n9TKJ0aAFeqQ==,
+      }
+
+  '@fontsource-variable/outfit@5.3.0':
+    resolution:
+      {
+        integrity: sha512-fPb5XnYK0k7SbR++HEmm4+ZqDszmLKQ+sPRUr8oQ/KNC0vy6r6hazJFe8iYozv4cqlHbvJ/JECkJWrfDodUMVQ==,
       }
 
   '@google-cloud/cloud-sql-connector@1.12.1':
@@ -11787,6 +11796,8 @@ snapshots:
       tslib: 2.8.1
 
   '@firebase/webchannel-wrapper@1.0.3': {}
+
+  '@fontsource-variable/outfit@5.3.0': {}
 
   '@google-cloud/cloud-sql-connector@1.12.1':
     dependencies:

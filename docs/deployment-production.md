@@ -93,6 +93,9 @@ Planner-Pro ne crée jamais de compte Firebase Authentication à la place de l�
    `planner-pro.boukarou-os.com` vers `127.0.0.1:8080` et
    `api.planner-pro.boukarou-os.com` vers `127.0.0.1:3003`, avec la prise en charge
    WebSocket pour l'API.
+   En-têtes de sécurité du frontend (CSP, HSTS) : la CSP est servie en `Report-Only` par
+   défaut (`CSP_MODE`) ; procédure de bascule en blocage dans
+   `docs/security/en-tetes-frontend.md`. Le reverse proxy ne doit pas supprimer ces en-têtes.
 5. Pour activer Firebase Auth, créer une application Web Firebase, activer le
    fournisseur e-mail/mot de passe et ajouter le domaine de l’application aux
    domaines autorisés. Renseigner les variables `VITE_FIREBASE_*` pour le build
