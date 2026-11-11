@@ -5011,3 +5011,88 @@ Réponses : (1) `clientSecret` : colonne en TEXT et migration, borne 1 024 (N6) 
 **O-d : VALIDÉ.** Les trois chemins réels sont testés (révocation par l'administration : immédiate ; drapeau en base : fenêtre de 60 s documentée, connexion et rafraîchissement refusés tout de suite ; SCIM `active:false` : appartenance retirée, compte non suspendu). L'écart signalé est exact. Pas de route de suspension : voir O-e.
 
 **Constats encore ouverts (à relancer vers `fixeur`)** : N3 (PATCH SCIM : 500), N4 (angles morts du test de garde, `billingType`), N5 (aperçu IA aligné sur le DTO), N6 (`clientSecret` en TEXT). Puis A9-b (NestJS 11), A8 (y inclure O-b et O-e), P2. Améliorations : O-f, O23, O-a, r48-a1, r48-a2. Feu vert de commit donné (5 commits, voir le rapport). Environnement : conteneurs `r52-mysql` et `r52-redis` supprimés, aucun processus résiduel, rien commité ni poussé, aucune écriture en production.
+
+## Lot P7-c (fixeur)
+
+Référence : « Revue r52 (architecte) : lot P7-b » à la fin de `rapport-audit.md`. Rien n'est commité ni poussé, aucune écriture en production. Bases MySQL 8.0 et Redis 7 jetables (`p7c-mysql`, `p7c-redis`), supprimées à la fin. **Une migration** (N6) et **un pas de CI** ajoutés ; aucune dépendance, aucun changement frontend.
+
+### N3 — PATCH SCIM : valeur démesurée, 500
+
+**Statut** : CORRIGÉ – À REVOIR
+**Changement** : l'état de départ non commité a été relu et conservé (pas de réécriture) : `backend/src/auth/scim/scim.dto.ts` (`SCIM_TEXT_MAX = 191`, appliqué à `ScimNameDto.formatted`, `ScimEmailDto.value`, `CreateScimUserDto.userName` et `.displayName` : créations et PUT bornés comme les colonnes `User.name` et `User.email`), `backend/src/auth/scim/scim.service.ts` (méthode privée `scimText()` appliquée dans `patchUser` à `displayName`, `userName` et `emails` : 400 SCIM `invalidValue` si la valeur n'est pas une chaîne ou dépasse 191 caractères, avant toute écriture). Seul changement de ma part : le commentaire de `scimText()`, inexact (« `undefined` est rendu tel quel » : `String(undefined)` donne `"undefined"`). Il dit maintenant ce que fait le code (l'opération `remove` sans valeur passe par `String()` comme avant). Comportement du `remove` **inchangé**, voir question 1.
+**Autres chemins vers une colonne VARCHAR** (relus, `patchUser`, `updateUser`, `createUser`) : `patchUser` n'écrit que `User.name` (le reste est lu ou comparé : `assertEmailUnchanged` ne produit qu'un 400/403) ; `updateUser` écrit `name` depuis `displayName` ou `name.formatted` (bornés à 191 par le DTO) ; `createUser` écrit `email` (≤ 191 par le DTO, domaine vérifié) et `name` (`displayName`, `name.formatted` ou partie locale de l'adresse, tous ≤ 191) ; `externalId` (255) n'est jamais écrit en base. Aucun autre chemin.
+**Reproduction du 500 avant correction** (e2e, `scim.service.ts` et `scim.dto.ts` remis à `HEAD`, puis la version corrigée restaurée par `\cp`, `git diff --stat` identique) : **6 échecs** : le test dédié de `webhook-scim.e2e-spec.ts` et 5 cas Q-2 (`PATCH displayName gigantesque` par chemin et par objet, `de 192 caractères`, `tableau de chaînes`, `PUT displayName de 192 caractères`). Les cas `userName` et `emails` gigantesques ne produisaient pas de 5xx (refus par `assertEmailUnchanged`) : conservés comme garde-fous. Après : 0 échec.
+**Tests** : e2e `webhook-scim.e2e-spec.ts` (provisionnement d'un compte, puis PATCH démesuré par chemin, par objet, 192 caractères, tableau, `userName`, `emails`, création et PUT : 400 au format SCIM `invalidValue`, nom inchangé en base ; 191 caractères non ASCII acceptés) ; Q-2 `abuse-no-5xx.e2e-spec.ts` (8 cas SCIM avec une clé valide et un compte provisionné créés en `beforeAll`, marqueurs `:scimuser`, `:scimkey`, `:scimemail`) ; unitaires `scim.service.spec.ts` (2 tests : refus 400 de valeurs de 192 caractères, tableau, nombre, objet, et aucune écriture ; 191 caractères acceptés ; `remove` sans valeur non refusé).
+**Écart par rapport au rapport** : aucun (option « contrôle dans `patchUser` », 400 SCIM `invalidValue`).
+**Questions** : voir question 1.
+
+### N4 — Angles morts du test de garde, `billingType`
+
+**Statut** : CORRIGÉ – À REVOIR
+**Changement** :
+1. `@IsISO8601` : `@MaxLength(64)` posé sur les **22** champs de date trouvés dans le code (le rapport en annonce 23 ; je n'en ai trouvé que 22 par `grep` sur `@IsISO8601`, voir question 2) : `create-task`, `update-task`, `create-project`, `update-project`, `create-sprint`, `update-sprint`, `create-milestone`, `create-deliverable`, `create-resource-allocation`, `create-resource-leave`, `create-timeblock`, `list-query` (`backend/src/projects/dto/`). `isIso8601` et `isDateString` ajoutés à `TEXT_VALIDATORS`. **Piège rencontré** : `class-validator` nomme ce validateur `isIso8601` (et non `isISO8601`) dans ses métadonnées ; avec l'orthographe du décorateur le garde ne voyait toujours rien. Le test synthétique (point 4) l'aurait révélé.
+2. Motif à alternance : `isBoundedPattern` refuse tout motif contenant `|` hors groupe et hors classe de caractères (`hasTopLevelAlternation`) ; `^(?:a|b)$`, `^[|a]{3}$` et `^a\|b$` restent admis.
+3. Champs sans type : le garde échoue pour un champ dont aucun validateur n'est un type reconnu (texte, nombre, booléen, `isIn`, `isEnum`, `isUuid`, `isDate`, `isObject`, `isArray`, `@ValidateNested`). Liste d'exceptions `UNTYPED_EXEMPT` justifiée, une seule entrée : `ScimPatchOperationDto.value` (valeur SCIM de forme libre, contrôlée par `scimText` dans `patchUser`, N3). Une exception doit viser un champ qui est réellement sans type (test). Le nouveau contrôle a trouvé un seul autre cas : `LoginDto.passwordRaw` (`@MinLength` et `@MaxLength` sans `@IsString`) : `@IsString()` ajouté (`backend/src/auth/dto/login.dto.ts`), sans effet visible (les deux autres validateurs refusent déjà un non-texte).
+4. `billingType` : valeur fermée `@IsIn(BILLING_TYPES)` aux trois endroits (`create-project`, `update-project`, `update-project-finances`), constante `BILLING_TYPES` dans le nouveau `backend/src/projects/dto/billing-types.ts`. Le frontend n'envoie jamais `billingType` (lecture seule dans `FinancesView.tsx`).
+**Tests** : `dto-length-bounds.spec.ts` (6 tests, dont « N4 : le garde détecte les trois angles morts » sur des classes synthétiques et les cas `/^a|b$/`, `/^a$|^b$/`) ; nouveau `tests/unit/projects/billing-type.dto.spec.ts` (6 tests : les deux valeurs et l'absence acceptées ; `HOURLY`, casse, 300 000 caractères, chaîne vide, nombre, tableau refusés, aux trois DTO).
+**Contre-mutations sur le code réel** (restauration par `\cp`, `cmp` identique à chaque fois) : (a) `@MaxLength(64)` retiré de `CreateTaskDto.startDate` : **détectée** (`CreateTaskDto.startDate : texte sans borne`) ; (b) `SIX_DIGITS` (codes MFA) remplacé par `/^\d{6}|x$/` : **détectée** (4 champs `code`) ; (c) `@IsString()` retiré de `LoginDto.passwordRaw` : **détectée** (`aucun validateur de type reconnu`) ; (d) exception `ScimPatchOperationDto.value` retirée : **détectée** (champ sans type, et exception orpheline) ; (e) `UpdateProjectDto.billingType` remis en `@IsString() @MaxLength(191)` : **détectée** (`billing-type.dto.spec.ts`, 1 échec). La mutation du rapport (`@Matches(/^a|b$/)`) est couverte par (b) et par le test synthétique ; sur `sso.dto.ts`, `Matches` n'est pas importé (échec de compilation, non retenu).
+**Écart par rapport au rapport** : `MaxLength(64)` sur 22 champs au lieu de 23 (constat de dénombrement, voir question 2).
+**Questions** : voir question 2.
+
+### N5 — L'aperçu IA aligné sur le DTO
+
+**Statut** : CORRIGÉ – À REVOIR
+**Changement** : `backend/src/projects/dto/execute-ai-actions.dto.ts` : constante exportée `RESOLVED_ACTION_MAX_LENGTH` (source unique, utilisée par les décorateurs `@MaxLength` du DTO) ; `backend/src/projects/ai.service.ts` : `normalizeResolvedAction` applique ces bornes. Choix (parmi les deux options du rapport, combinées) : un titre, un nom ou une description de tâche trop longs sont **tronqués** (sans couper une paire de substitution : un émoji coupé en deux serait refusé par MySQL) ; un identifiant ou une date trop longs sont **retirés** (une valeur tronquée serait fausse) ; dans les deux cas l'action passe à `resolved: false` avec un avertissement explicite par champ (« Le champ « taskTitle » dépassait 191 caractères et a été tronqué. »), visible dans l'aperçu (la carte porte déjà `has-warning`). `description` et `warning` (libellés d'affichage, 2 000) sont tronqués sans avertissement. Une action dans les bornes est renvoyée inchangée.
+**Tests** (`tests/unit/authz/ai-roundtrip.spec.ts`, +4) : commande à titre de 4 000 caractères : tronqué, `resolved: false`, avertissement, accepté par le DTO strict ; **propriété** : pour chacun des 15 champs texte, une valeur de 100 000 caractères en sortie de `normalizeResolvedAction` valide `ExecuteAiActionsDto` ; coupure sans moitié de paire de substitution ; action dans les bornes inchangée. Avant correction (`ai.service.ts` remis à `HEAD`) : 3 de ces 4 tests échouent (le 4e, action dans les bornes, doit passer avant et après) ; après : 8/8 dans le fichier.
+**Écart par rapport au rapport** : aucun. Le frontend n'empêche pas d'exécuter une action `resolved: false` (`canExecute` ne dépend pas de `hasWarnings`) : l'utilisateur est averti mais pas bloqué, comportement existant.
+**Questions** : voir question 3.
+
+### N6 — `clientSecret` SSO en TEXT, borne à 1 024
+
+**Statut** : CORRIGÉ – À REVOIR
+**Changement** : `backend/prisma/schema/workspace.prisma` (`clientSecret String? @db.Text`) ; migration `backend/prisma/migrations/20261117000000_n6_sso_client_secret_text/migration.sql`, **gardée et idempotente** (même principe que la migration de dérive A9 : `information_schema.COLUMNS`, `ALTER TABLE … MODIFY clientSecret TEXT NULL` seulement si le type n'est pas déjà `text`, sinon `DO 0`) ; `backend/src/auth/sso/sso.dto.ts` (`@MaxLength(1024)`, commentaire mis à jour : au pire 3 octets par unité UTF-16, soit 58 + 2 × 3 072 = 6 202 caractères chiffrés, très en dessous de 65 535 octets) ; `.github/workflows/ci.yml` : deux pas ajoutés au job `migrations` (rejeu du SQL N6 puis second `migrate diff`), comme pour la migration de dérive (r47-m1).
+**Impact données et reprise** : élargissement sans perte VARCHAR(191) vers TEXT ; table **vide en production** (0 ligne, mesuré en r52). Aucun backfill, aucun chiffrement à refaire. Sauvegarde `mysqldump` comme pour les autres migrations du déploiement. Retour arrière : non joué (les secrets chiffrés de plus de 191 caractères ne tiendraient plus dans VARCHAR(191)).
+**Vérifications de la migration (MySQL 8.0 jetable)** : `migrate deploy` applique la migration ; `migrate diff --from-config-datasource --to-schema --exit-code` : « No difference detected » (exit 0) ; rejeu du SQL sur la base conforme : succès et second `diff` à 0 ; colonne remise à la main en VARCHAR(191) puis rejeu : redevient `text`.
+**Tests** : e2e `abuse-no-5xx.e2e-spec.ts` « N6 » : secret de 1 024 « € » (pire cas, 3 octets) enregistré, chiffré (58 + 2 × 3 × 1 024 = 6 202 caractères en base), 1 025 refusé (400) ; **avec la colonne VARCHAR(191) (état d'avant N6) : 500 reproduit** (2 échecs : ce test et le cas Q-2 « secret de 100 caractères »), avec TEXT : 229/229. Unitaire `dto-length-bounds.spec.ts` : le test « 66 octets tiennent dans 191 » est remplacé par « borne 1 024, schéma `@db.Text`, secret maximal chiffré de 6 202 caractères sous 65 535 ».
+**Constat annexe (important)** : les cas SSO du catalogue Q-2 répondaient **404** (route derrière `FEATURE_SSO_ENABLED`, absent des variables du test) : ils n'éprouvaient ni le DTO ni la base. `abuse-no-5xx.e2e-spec.ts` active désormais `FEATURE_SSO_ENABLED` (et `FEATURE_SCIM_ENABLED`, qui n'était jamais retiré) en `beforeAll` et les supprime en `afterAll`. Aucun 5xx nouveau n'est apparu parmi les cas SSO ainsi rendus effectifs (229/229).
+**Écart par rapport au rapport** : aucun (migration, `@db.Text`, borne 1 024) ; ajout du pas de CI, voir question 4.
+**Questions** : voir question 4.
+
+### Mesures du lot
+
+| Mesure | Résultat |
+| --- | --- |
+| e2e `--runInBand --detectOpenHandles` | 8 suites, **381/381** (371 avant le lot ; +1 SCIM, +8 Q-2 SCIM, +1 N6), 134 s, aucun handle ouvert signalé |
+| jest backend (`env -u DATABASE_URL -u E2E_DATABASE_URL`) | 109 suites, **2 985/2 985** (2 972 avant : +13 = 2 SCIM, 1 garde N4, 6 `billingType`, 4 IA ; 1 test SSO remplacé) |
+| `nest build`, `tsc --noEmit` (src), `tsc -p tests --noEmit` | 0 erreur |
+| ESLint (`src` et `tests`) | 0 erreur, 15 avertissements `no-explicit-any` préexistants (2 erreurs d'imports inutilisés rencontrées en cours de route dans `update-project-finances.dto.ts`, corrigées) |
+| Prettier (`src`, `tests`, `prisma/schema`) | propre |
+| vitest frontend | non lancé : aucun fichier du frontend modifié |
+| Migration | `migrate deploy`, `migrate diff` (0 écart), rejeu idempotent, rejeu depuis VARCHAR : voir N6 |
+| Environnement | conteneurs `p7c-mysql` et `p7c-redis` supprimés, rien commité ni poussé, aucune écriture en production |
+
+### Constats à passer en revue
+N3, N4, N5, N6 : tous `CORRIGÉ – À REVOIR`.
+
+### Questions pour l'architecte
+1. **N3, `remove` de `displayName`** : une opération `{ op: 'remove', path: 'displayName' }` (sans valeur) écrit la chaîne littérale « undefined » comme nom du compte provisionné (`String(undefined)`, comportement historique, conservé faute de justification demandée). C'est un défaut distinct de N3. Option recommandée : ignorer l'opération (ou refuser en 400 `noTarget`/`invalidValue`) dans un petit correctif séparé ; à vous de décider.
+2. **N4, 23 champs ISO** : j'en trouve 22 (`grep -c '@IsISO8601'` sur `src`). Si vous en avez compté un 23e (hors `class-validator` ? un DTO ailleurs ?), indiquez-le : le garde échouerait dessus, il est vert.
+3. **N5, politique** : je tronque (titres, noms, descriptions) et j'avertis plutôt que de bloquer, car le frontend laisse exécuter une action `resolved: false`. Alternative plus stricte : retirer le titre et laisser l'exécution échouer, ou faire bloquer `canExecute` quand `hasWarnings` (changement de produit, non fait).
+4. **N6, CI** : j'ai ajouté deux pas au job `migrations` de `ci.yml` (rejeu et `diff`). À valider ; à retirer si vous préférez ne pas toucher au workflow dans ce lot. Les cas SSO du catalogue Q-2 étaient vacants (404) avant ce lot : à mentionner dans la revue de r51-m3.
+
+## Revue architecte (r53) : lot P7-c
+
+#### Revue architecte
+
+**N3 : VALIDÉ.** `scimText` appliqué à `displayName`, `userName` et `emails` avant toute écriture ; 400 SCIM `invalidValue`. Rejoués : unitaire (23/23 dans `scim.service.spec`), e2e SCIM 13/13. Contre-mutation (borne neutralisée) : unitaire et e2e dédié en échec, restauré (`cmp` identique). Défaut distinct ouvert : **r53-m1** (`remove` de `displayName` écrit « undefined »).
+
+**N4 : VALIDÉ.** 22 champs ISO bornés à 64 : le compte est exact (mon « 23 » de r52 était un recompte erroné). Contre-mutations : `billingType` remis en `@IsString`, `@MaxLength(64)` retiré de `create-sprint` et de `list-query`, `@IsString()` retiré de `LoginDto.passwordRaw` : garde ou test dédié en échec à chaque fois. Alternance non ancrée et champ sans type refusés. Limite : la valeur de la borne n'est pas contrôlée (r53-a1).
+
+**N5 : VALIDÉ.** Troncature, retrait des identifiants et dates, `resolved: false` et avertissement par champ : trois contre-mutations détectées (troncature, passage à `resolved: false`, paire de substitution). `normalizeResolvedAction` est le seul chemin vers le client ; l'`id` est toujours `action-temp-N`.
+
+**N6 : VALIDÉ.** Migration appliquée, 0 écart avec le schéma, rejeu idempotent, rejeu depuis `VARCHAR(191)` : redevient `text`. Colonne remise en `VARCHAR(191)` : e2e `abuse-no-5xx` en échec (2), avec TEXT : 229/229. Ajout CI accepté.
+
+Batterie rejouée (`r53-mysql`, `r53-redis`, supprimés) : jest 109 suites 2 985/2 985, e2e 381/381 (un test de débit SCIM a dépassé 30 s une fois, parce que j'avais lancé jest unitaire en parallèle ; rejoué seul : 13/13), `nest build`, `tsc -p tests`, ESLint (0 erreur), Prettier : propres.
+Réponses : (1) `remove` de `displayName` : oui, correctif séparé, r53-m1 (400 SCIM `mutability`). (2) Bloquer `resolved: false` : non, ni serveur (`resolved` vient du client, `executeActions` valide chaque champ) ni dans ce lot ; décision d'interface ouverte en r53-a2 (le texte de l'aperçu promet un blocage qui n'existe pas). (3) CI : garder. Écart noté : « huit autres » DTO contre dix n'apparaît pas dans le journal écrit (12 fichiers, 22 champs).
+
+**Constats encore ouverts (à relancer vers `fixeur`)** : r53-m1 (petit lot P7-d). Puis A9-b (NestJS 11), A8 (y inclure O-b et O-e), P2. Améliorations : r53-a1, r53-a2, O-f, O23, O-a, r48-a1, r48-a2. Feu vert de commit donné (5 commits : N3 ; N4 et N6 ensemble ; N5 ; e2e ; docs, voir le rapport). Environnement : conteneurs `r53-mysql` et `r53-redis` supprimés, rien commité ni poussé, aucune écriture en production.
