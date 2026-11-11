@@ -4885,3 +4885,129 @@ Détail, mesures, contre-mutations et feu vert de commit : voir « Revue r51 » 
 1. r51-m1, r51-m2, r51-m3 (lot P7-b, avant A9-b), plus test de suspension (O-d).
 2. Améliorations : O23, O-a, r48-a1, r48-a2.
 3. Phase 6 : A9-b, puis A8 (avec O-b), puis P2.
+
+---
+
+## Lot P7-b (fixeur)
+
+Référence : « Revue r51 » à la fin de `rapport-audit.md`. Rien n'est commité ni poussé. Aucune migration, aucune dépendance, aucun changement de schéma.
+
+### r51-m1 — Valeur exacte du `Retry-After` du verrou
+
+**Statut** : CORRIGÉ – À REVOIR
+**Changement** : aucun code applicatif (le défaut était un test manquant). Test : `backend/tests/unit/common/retry-after.filter.spec.ts`, bloc « délai restant du verrou (r51-m1), horloge simulée » (`jest.spyOn(Date, 'now')`, instant fixe).
+**Tests** : 2 cas ajoutés. (1) palier 1 : 900 s à l'instant du verrou, 600 s après 5 minutes, 1 s une seconde avant la fin. (2) palier 2 (20 échecs) : 1 800 s, puis 1 200 s après 10 minutes. Résultat : 5/5 dans le fichier.
+**Contre-mutation** : `until > Date.now() ? Math.ceil((until - Date.now()) / 1000) : LOCKOUT_BASE_SECONDS` remplacé par `LOCKOUT_BASE_SECONDS` (délai constant) : **détectée**, 2 échecs sur 5. Restauré par `\cp`, `cmp` identique.
+**Écart par rapport au rapport** : aucun.
+**Questions** : aucune.
+
+### r51-m2 — Finances : garde principale du résumé, `NotFoundException`
+
+**Statut** : CORRIGÉ – À REVOIR
+**Changement** : `backend/src/projects/finances.service.ts` : `new Error('Project not found')` remplacé par `NotFoundException('Projet introuvable.')` (import ajouté). Le message était en anglais et produisait un 500 ; il est maintenant en français et répond 404.
+**Tests** :
+- e2e `authz.e2e-spec.ts`, bloc « finances : espace de travail sans projet » : espace sans aucun projet (vérifié par un `count` à 0), `GET /projects/workspaces/:id/finances` : OWNER 200 et ADMIN 200 (corps `projects: []`), MEMBER 403, VIEWER 403. Les profils « rôle de projet » ne peuvent pas exister dans un espace sans projet (un rôle de projet est attaché à un projet) : ils restent couverts par la matrice RBAC existante.
+- unitaire `finances.service.spec.ts` : projet disparu : `NotFoundException`.
+**Contre-mutations** : (a) garde du résumé retirée : **détectée** par l'e2e (MEMBER et VIEWER reçoivent 200 au lieu de 403 : 2 échecs sur 102) et par le test unitaire existant « refuse le résumé aux utilisateurs sans rôle autorisé » (1 échec) ; (b) `NotFoundException` remis en `Error` : **détectée** (test unitaire). Restaurations par `\cp`, `cmp` identique.
+**Écart par rapport au rapport** : aucun. Note : le test unitaire existant détectait déjà la mutation (a) ; la revue r51 n'avait mesuré que l'e2e.
+**Questions** : aucune.
+
+### r51-m3 — Bornes de longueur de tous les DTO
+
+**Statut** : CORRIGÉ – À REVOIR
+
+**Test de garde** : `backend/tests/unit/common/dto-length-bounds.spec.ts`. Il parcourt les fichiers de `src` qui importent `class-validator` (donc tout DTO futur, sans déclaration), charge toutes les classes exportées et lit leurs métadonnées `class-validator`. Échec sur : (1) tout champ `@IsString`, `@IsEmail`, `@IsUrl`, `@Matches`, `@IsNumberString` ou validateur maison `isSafeAttachmentUrl` sans `@MaxLength` ou `@Length(min, max)` ; (2) tout tableau de chaînes dont les éléments n'ont pas de `@MaxLength(n, { each: true })` ; (3) tout `@IsArray` sans `@ArrayMaxSize`. Un `@Matches` compte comme borne seulement si le motif est ancré (`^…$`) et fini (ni `*`, ni `+`, ni `{n,}`) : c'est le cas des codes à 6 chiffres, du jeton d'invitation (64 hexadécimaux) et du dépôt GitHub ; la fonction `isBoundedPattern` a son propre test. Ne sont pas du « texte libre » : `@IsUUID`, `@IsEnum`, `@IsIn`, `@IsISO8601` (format fermé). **Liste d'exceptions : vide** (la structure `EXEMPT` existe, avec un test qui impose une justification et l'existence du champ). Un test supplémentaire verrouille le calcul de la borne du secret client SSO (voir plus bas). Avant les bornes, le test révélait 69 violations ; après : 0.
+
+**Bornes posées** (colonnes lues dans `prisma/schema` et les migrations ; `@MaxLength` compte des unités UTF-16, donc jamais plus de caractères MySQL) :
+
+| DTO.champ | Borne | Justification |
+| --- | --- | --- |
+| `UpdateSprintDto.name` | 191 | VARCHAR(191), identique à la création (le 500 de r51-m3) |
+| `CreateCommentDto.content` | 16 000 | TEXT, valeur de la revue (alignée sur `NoteDto`) |
+| `CreateCommentDto.parentId` | 64 | identifiant (UUID de 36), même borne que `GithubSyncDto.projectId` |
+| `CreateMilestoneDto.name` / `.description` | 191 / 16 000 | VARCHAR(191) / TEXT |
+| `CreateDeliverableDto.title` / `.description` | 191 / 16 000 | VARCHAR(191) / TEXT |
+| `CreateDeliveryDto.summary` | 16 000 | TEXT |
+| `CreateDeliveryDto.checklist` | au plus 100 éléments de 191 | élément = `DeliveryChecklistItem.title` VARCHAR(191) ; **100 éléments : choix du fixeur** (aucune liste réelle ; en production aucune livraison) |
+| `CreateResourceAllocationDto.roleLabel` / `.userId` | 191 / 64 | VARCHAR(191) / identifiant |
+| `CreateResourceLeaveDto.reason` | 191 | colonne `reason` VARCHAR(191) (pas TEXT) |
+| `UpdateResourceProfileDto.skills` | 16 000 | TEXT |
+| `UpdateProjectFinancesDto.billingType`, `CreateProjectDto.billingType` | 50 | valeurs réelles `TIME_AND_MATERIALS` (18) et `FIXED_PRICE` ; colonne VARCHAR(191) ; **choix du fixeur** (plus strict que la colonne, très au-dessus des valeurs connues) |
+| `CreateProjectDto.workspaceId`, `AiCommandDto.workspaceId` / `.projectId`, `ExecuteAiActionsDto.workspaceId` / `.projectId`, `CreateTaskDependencyDto.dependsOnTaskId`, `CreateTaskDto` et `UpdateTaskDto` `.sprintId` | 64 | identifiants (UUID de 36) |
+| `CreateTaskDto` et `UpdateTaskDto` `.assigneeIds` | au plus 100 éléments de 64 | **choix du fixeur** : borne haute d'un nombre d'assignés par tâche (production : maximum 1) |
+| `ResolvedAiActionDto` : `id`, `taskId`, `assigneeId`, `dependsOnTaskId`, `resolvedProjectId` | 64 | identifiants |
+| `ResolvedAiActionDto` : `taskTitle`, `assigneeName`, `dependsOnTaskTitle`, `resolvedProjectName` | 191 | titres ou noms (VARCHAR(191)) |
+| `ResolvedAiActionDto.taskDescription` | 16 000 | TEXT |
+| `ResolvedAiActionDto.description`, `.warning` | 2 000 | libellés **générés par le serveur** (`ai.service.ts` : titre jusqu'à 191 plus échéance et assigné) puis renvoyés par le client ; **choix du fixeur** |
+| `ResolvedAiActionDto.dueDate`, `.timeBlockStart`, `.timeBlockEnd` | 64 | dates ISO en chaîne (24 à 32 caractères) |
+| `AttachmentDto.fileUrl` | 65 000 | colonne TEXT (65 535 octets) ; une URL `data:` est en ASCII ; au-delà, la base refuse (500) |
+| `ConfigureSsoDto.domain`, `.discoveryUrl`, `.entryPoint`, `.issuer`, `.clientId` | 191 | colonnes VARCHAR(191) |
+| `ConfigureSsoDto.cert` | 16 000 | TEXT, certificat X.509 en PEM (2 Ko environ, chaîne possible) |
+| `ConfigureSsoDto.clientSecret` | 66 (était 1 024) | voir écart ci-dessous |
+| `DiscoverSsoDto.email`, `CreateInvitationDto.email` | 254 | longueur maximale d'une adresse (RFC 5321) |
+| `AdminPaginationQueryDto.search` | 254 | recherche d'utilisateur (adresse, 254 au plus) |
+| `FirebaseLoginDto.idToken` / `.name` | 4 096 / 191 | même borne que `FirebaseLinkDto.idToken` / `User.name` VARCHAR(191) |
+| `CreateScimUserDto.schemas`, `ScimPatchRequestDto.schemas` (éléments) | 256 | URN de schéma SCIM (60 caractères environ) |
+
+Champs déjà bornés et conservés tels quels : `ImpersonateUserDto.reason` (`@Length(10, 500)`), codes MFA, jeton d'invitation et dépôt GitHub (motifs ancrés et finis).
+
+**Mesures en production (lecture seule, utilisateur applicatif, 25 `SELECT MAX(CHAR_LENGTH(…))`, aucune écriture, aucun secret affiché)** : `Comment.content` 84 (2 lignes), `Attachment.fileUrl` 0 ligne, `Milestone`, `Deliverable`, `DeliveryRecord`, `DeliveryChecklistItem`, `ResourceAllocation`, `ResourceLeave`, `Sprint`, `SSOConfiguration` : 0 ligne, `ResourceProfile.skills` 6 lignes, toutes NULL, `Invitation.email` 22 (2 lignes), `Project.billingType` 18 (5), `User.name` 31 (9), `User.email` 28 (9), `Task.title` 61 (15), `Task.labels` 6 (15), nombre maximal d'assignés par tâche : 1, éléments de liste de contrôle par livraison : aucun. **Aucune donnée existante ne dépasse une borne** : aucune mise à jour d'un enregistrement existant ne sera refusée.
+
+**Confirmation e2e du 500 de `update-sprint`** (catalogue Q-2 étendu, exécuté avec les DTO d'origine restaurés depuis `HEAD`, puis les DTO modifiés remis par `\cp` et vérifiés par `cmp`) : **15 cas sur 220 produisaient un 5xx avant les bornes** : `sprint : mise à jour avec un nom gigantesque`, commentaire (création, mise à jour), pièce jointe `data:` de 70 000 caractères, jalon (nom, description), livrable (titre, description), livraison (résumé, élément de liste), allocation (libellé), congé (motif), profil de ressource (compétences), tâche (`sprintId`), IA (exécution d'une action au titre gigantesque). Après : 220/220 sans 5xx. Les cas SSO, `billingType`, `dependsOnTaskId`, administration (`search`), IA (`command`), la liste de 5 000 éléments et les 5 000 assignés ne produisaient pas de 5xx avant (refus en amont, lecture seule ou rejet par un autre contrôle) ; ils restent au catalogue comme garde-fous, et la borne est verrouillée par le test de garde.
+
+**Catalogue Q-2** (`abuse-no-5xx.e2e-spec.ts`) : 192 à 220 cas (28 ajoutés) ; les marqueurs `:sprint`, `:comment`, `:user`, `:ws`, `:project`, `:task` sont remplacés dans le chemin et dans le corps ; un sprint et un commentaire réels sont créés en `beforeAll`. Exceptions `ALLOWED_5XX` : toujours vide.
+
+**Contre-mutations** (restauration par `\cp`, `cmp` identique à chaque fois) : `@MaxLength` retiré de `UpdateSprintDto.name` : détectée par le test de garde (1 échec) et par Q-2 (1 échec : « sprint : mise à jour… ») ; `@ArrayMaxSize(100)` retiré de la liste de contrôle : détectée (garde) ; `@MaxLength(191, { each: true })` retiré : détectée (garde) ; motif `^\d{6}$` du code MFA remplacé par `^\d+$` : détectée (garde, la borne par motif est bien vérifiée) ; description de jalon de 16 000 à 1 000 000 : détectée (Q-2, 1 échec) ; `fileUrl` de 65 000 à 1 000 000 : détectée (Q-2, 1 échec) ; `clientSecret` de 66 à 1 024 : détectée (test de garde SSO).
+
+**Écart par rapport au rapport** :
+1. **`ConfigureSsoDto.clientSecret` : 1 024 abaissé à 66.** La colonne est VARCHAR(191) et le secret y est stocké chiffré (`iv:tag:contenu` en hexadécimal, soit 58 + 2 n caractères pour n octets, `encrypt()`). Au-delà de 66 octets, le DTO d'origine laissait passer et la base refusait l'écriture. Les secrets réels sont plus courts (Google : 35 caractères, Azure AD : environ 40). Je l'ai fait parce que le constat demande de borner « selon la colonne » ; **à valider** : si l'on veut accepter des secrets plus longs, il faut changer la colonne en TEXT (migration), pas le DTO. Le test verrouille l'arithmétique (66 passe, 67 dépasse 191).
+2. **`ConfigureSsoDto.clientId` : 256 abaissé à 191**, même raison (colonne VARCHAR(191)).
+3. Aucun cas SSO du catalogue ne produisait de 5xx avant correctif (la configuration passe par des contrôles de domaine avant l'écriture) ; la borne reste justifiée par la colonne et verrouillée par le test de garde.
+
+**Questions pour l'architecte** :
+- Valider les bornes « choix du fixeur » : 100 éléments (liste de contrôle, assignés), 50 (`billingType`), 2 000 (`description` et `warning` d'une action IA).
+- Valider l'écart 1 (secret SSO à 66 octets, ou colonne en TEXT).
+- `CreateDeliveryDto.checklist` et `assigneeIds` sont maintenant refusés au-delà de 100 éléments : aucun client existant n'en envoie autant (frontend non modifié).
+
+### O-d — Retrait d'accès d'un compte (test e2e)
+
+**Statut** : CORRIGÉ – À REVOIR (le constat demandait un test, pas de correctif)
+**Changement** : nouveau fichier `backend/tests/e2e/security/account-suspension.e2e-spec.ts` (4 tests, 27 s environ, un client `ioredis` ouvert puis fermé en `afterAll`).
+**Ce que le code permet réellement** (à lire avant la revue) : **aucune route applicative n'écrit `User.isSuspended`** (`grep` sur `src` : seulement des lectures). Il n'existe donc pas de « suspension par l'administration » au sens d'une route ; l'administration dispose de `POST /admin/users/:id/revoke-sessions` (administrateur de la plateforme ; testée ici avec un SUPER_ADMIN), et le drapeau n'est posé que par la base ou un outil d'exploitation. Et **SCIM ne suspend jamais un compte** (S1, `applyActiveState`) : `active:false` retire l'appartenance à l'espace. J'ai donc testé les trois chemins qui existent :
+1. **Administration, révocation des sessions** : la session est acceptée (statut en cache, clé `session:active:<sid>` présente), l'administrateur révoque, la requête suivante répond 401 **sans attendre** (cache invalidé avec la session), le rafraîchissement répond 401, le compte peut se reconnecter.
+2. **Compte marqué suspendu (drapeau en base)** : le TTL du cache est vérifié (> 0 et ≤ 60, `SESSION_CACHE_TTL_SECONDS` vaut 60) ; après la suspension, la session déjà validée **passe encore** (fenêtre O-d documentée par une assertion), la connexion répond 403 (« suspendu ») et un rafraîchissement 401 immédiatement, avec révocation de la session concernée (cache compris) ; la fin de fenêtre est simulée en ramenant le TTL à 1 s (au lieu d'attendre jusqu'à 60 s), après quoi la session répond 401 et la décision ne revient pas dans le cache.
+3. **SCIM `active:false`** : le membre lit les membres de l'espace (200), `PATCH` SCIM, puis 403 ou 404 **immédiatement** (l'appartenance est relue en base à chaque requête), appartenance supprimée, `isSuspended` toujours faux, le compte se reconnecte. Cas complémentaire : `active:true` sur un compte non provisionné par l'espace : 404, aucune appartenance créée.
+**Contre-mutations** (restauration `\cp`, `cmp` identique) : invalidation du cache retirée de `SessionService.revoke` : détectée (2 échecs) ; `SESSION_CACHE_TTL_SECONDS` à 3 600 : détectée (1) ; contrôle `isSuspended` retiré de `isSessionActive` : détectée (1) ; suppression de l'appartenance retirée de `applyActiveState` : détectée (1).
+**Écart par rapport au rapport** : la revue r51 parle de « suspension par l'administration, par SCIM : session refusée immédiatement ». En réalité la session n'est refusée que dans le cas 1 ; dans le cas 3 c'est l'accès aux données de l'espace qui est refusé (la session, elle, reste valide) ; dans le cas 2 le délai de 60 s est bien celui d'O-d.
+**Questions pour l'architecte** : faut-il une route d'administration qui suspend un compte (écriture de `isSuspended` plus `revokeAllForUser`, ce qui ramènerait le délai à zéro) ? Aujourd'hui seule la base le permet, ce qui laisse la fenêtre de 60 s. À arbitrer avec A8 ou en Amélioration.
+
+### Mesures du lot (MySQL 8.0 et Redis 7 temporaires `p7b-mysql` et `p7b-redis`, supprimés)
+
+| Mesure | Résultat |
+| --- | --- |
+| e2e `--runInBand --detectOpenHandles` | 8 suites, **371/371**, 76 s, aucun handle ouvert |
+| jest backend (`env -u DATABASE_URL`, hors variables e2e) | 108 suites, **2 972/2 972** (la première exécution a échoué sur `prisma.service.spec.ts` car `E2E_DATABASE_URL` était encore exportée dans mon shell ; relancé sans elle : 26/26 dans le dossier `src/prisma`, le reste était vert) |
+| `nest build`, `tsc -p tests --noEmit` | 0 erreur |
+| ESLint (`src` et `tests`) | 0 erreur, 15 avertissements `no-explicit-any` préexistants |
+| Prettier (fichiers modifiés et créés) | propre |
+| vitest frontend (non modifié) | 34 fichiers, **296/296** |
+| Environnement | conteneurs supprimés, aucun processus résiduel, rien commité ni poussé, aucune écriture en production |
+
+### Constats à passer en revue
+r51-m1, r51-m2, r51-m3 (avec les écarts 1 et 2), O-d : tous `CORRIGÉ – À REVOIR`.
+
+## Revue architecte (r52) : lot P7-b
+
+#### Revue architecte
+
+**r51-m1 : VALIDÉ.** Test à horloge simulée relu (palier 1 : 900, 600, 1 s ; palier 2 : 1 800, 1 200) ; 5/5 rejoués.
+
+**r51-m2 : VALIDÉ.** `NotFoundException('Projet introuvable.')` en place ; e2e d'un espace sans projet (OWNER et ADMIN 200, MEMBER et VIEWER 403) rejoué ; contre-mutation (retour à `new Error`) : test unitaire en échec, restauré (`cmp` identique).
+
+**r51-m3 : VALIDÉ, avec réserves non bloquantes (N3 à N6, détail dans le rapport, « Revue r52 »).** Rejoués : e2e 371/371 (`--detectOpenHandles`, sans handle ouvert), jest 108 suites 2 972/2 972, build, `tsc -p tests`, ESLint (0 erreur), Prettier (src et tests), vitest 296/296. Contre-mutations : `@MaxLength(254)` de `DiscoverSsoDto.email` retiré : garde en échec ; `@ArrayMaxSize(50)` des actions IA retiré : garde en échec ; `@MaxLength(16_000)` du contenu de commentaire retiré : Q-2 en échec (2 cas) ; contournement `@Matches(/^a|b$/)` : **le garde passe**. Le garde ne peut pas être contourné par un DTO hors de son champ (balayage de tous les fichiers important `class-validator`, aucune classe non exportée avec validateurs) ni par un champ nommé autrement (lecture des métadonnées), mais : (1) `@IsISO8601` n'est pas vérifié (23 champs sans borne) ; (2) un motif à alternance non ancrée est jugé borné ; (3) un champ sans validateur de type (`@Allow`) n'est pas examiné : **un PATCH SCIM avec un `displayName` de 300 000 caractères répond 500 (reproduit, N3)**. Le compte rendu « liste d'exceptions vide » est donc exact mais le périmètre du garde est plus étroit que présenté. Les bornes relues champ par champ (SSO, administration, IA, tableaux) reprennent les colonnes et ne cassent aucun usage du frontend ni de l'IA (cas de dépassement : N5).
+Réponses : (1) `clientSecret` : colonne en TEXT et migration, borne 1 024 (N6) ; la table est vide en production (0 ligne, `MAX(CHAR_LENGTH)` à NULL) ; 66 est acceptable en attendant et le commit peut partir. `@MaxLength` compte des caractères, pas des octets : un secret non ASCII de 66 caractères dépasserait encore 191 une fois chiffré. (2) 100 (liste de contrôle, assignés) accepté ; 50 pour `billingType` accepté comme plafond, mais préférer `@IsIn(['TIME_AND_MATERIALS', 'FIXED_PRICE'])` et corriger l'incohérence avec `UpdateProjectDto` (191) ; 2 000 pour les actions IA accepté, à condition d'aligner l'aperçu (N5). (3) Route de suspension : oui, en Amélioration O-e avec A8 (suspendre, réactiver, révoquer toutes les sessions, audit, garde du dernier SUPER_ADMIN) ; en attendant, drapeau en base puis `POST /admin/users/:id/revoke-sessions`.
+Écart noté : 21 DTO modifiés, non 20.
+
+**O-d : VALIDÉ.** Les trois chemins réels sont testés (révocation par l'administration : immédiate ; drapeau en base : fenêtre de 60 s documentée, connexion et rafraîchissement refusés tout de suite ; SCIM `active:false` : appartenance retirée, compte non suspendu). L'écart signalé est exact. Pas de route de suspension : voir O-e.
+
+**Constats encore ouverts (à relancer vers `fixeur`)** : N3 (PATCH SCIM : 500), N4 (angles morts du test de garde, `billingType`), N5 (aperçu IA aligné sur le DTO), N6 (`clientSecret` en TEXT). Puis A9-b (NestJS 11), A8 (y inclure O-b et O-e), P2. Améliorations : O-f, O23, O-a, r48-a1, r48-a2. Feu vert de commit donné (5 commits, voir le rapport). Environnement : conteneurs `r52-mysql` et `r52-redis` supprimés, aucun processus résiduel, rien commité ni poussé, aucune écriture en production.
