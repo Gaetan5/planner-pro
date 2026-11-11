@@ -322,6 +322,100 @@ describe('P7 e2e : webhook GitHub et SCIM', () => {
       );
     });
 
+    it('r54-m1 : PATCH active : remove, valeur absente ou non booléenne refusés (400), membership conservée ; formats Entra et Okta acceptés', async () => {
+      const owner = await world.createUser({ label: 'scimA1' });
+      const ws = await world.createWorkspace(owner, 'Espace SCIM active');
+      const key = `scim_live_${randomUUID().replace(/-/g, '')}`;
+      await world.prisma.sCIMApiKey.create({
+        data: { workspaceId: ws, name: 'clé active', tokenHash: hash(key) },
+      });
+      const domain = `act-${randomUUID().slice(0, 8)}.example`;
+      await world.prisma.sSOConfiguration.create({
+        data: { workspaceId: ws, domain, verifiedDomain: domain },
+      });
+      const created = await scim('POST', '/scim/v2/Users', key, {
+        schemas: ['urn:ietf:params:scim:schemas:core:2.0:User'],
+        userName: `act@${domain}`,
+        displayName: 'Nom actif',
+        active: true,
+      });
+      expect(created.status).toBe(201);
+      const id = created.body.id as string;
+      const send = (operation: Record<string, unknown>) =>
+        scim('PATCH', `/scim/v2/Users/${id}`, key, {
+          schemas: ['urn:ietf:params:scim:api:messages:2.0:PatchOp'],
+          Operations: [operation],
+        });
+      const isMember = async () =>
+        (await world.prisma.membership.count({ where: { workspaceId: ws, userId: id } })) === 1;
+
+      const refused: Array<[Record<string, unknown>, string]> = [
+        [{ op: 'remove', path: 'active' }, 'mutability'],
+        [{ op: 'Remove', path: 'Active' }, 'mutability'],
+        [{ op: 'remove', value: { active: false } }, 'mutability'],
+        [{ op: 'replace', path: 'active' }, 'invalidValue'],
+        [{ op: 'add', path: 'active' }, 'invalidValue'],
+        [{ op: 'replace', path: 'active', value: null }, 'invalidValue'],
+        [{ op: 'replace', path: 'active', value: 'yes' }, 'invalidValue'],
+        [{ op: 'replace', path: 'active', value: 0 }, 'invalidValue'],
+        [{ op: 'replace', value: { active: 'oui' } }, 'invalidValue'],
+      ];
+      for (const [operation, scimType] of refused) {
+        const res = await send(operation);
+        expect(res.status).toBe(400);
+        expect(res.body.schemas).toEqual(['urn:ietf:params:scim:api:messages:2.0:Error']);
+        expect(res.body.scimType).toBe(scimType);
+        expect(await isMember()).toBe(true);
+      }
+
+      // Formats réellement émis par Entra ID (chaîne « False ») et Okta (objet sans chemin)
+      expect((await send({ op: 'Replace', path: 'active', value: 'False' })).status).toBe(200);
+      expect(await isMember()).toBe(false);
+      expect((await send({ op: 'Replace', path: 'active', value: 'True' })).status).toBe(200);
+      expect(await isMember()).toBe(true);
+      expect((await send({ op: 'replace', value: { active: false } })).status).toBe(200);
+      expect(await isMember()).toBe(false);
+      expect((await send({ op: 'replace', path: 'active', value: true })).status).toBe(200);
+      expect(await isMember()).toBe(true);
+    });
+
+    it('r54-a1 : PATCH replace de displayName vide ou blanc : 400 invalidValue, nom inchangé', async () => {
+      const owner = await world.createUser({ label: 'scimA2' });
+      const ws = await world.createWorkspace(owner, 'Espace SCIM nom vide');
+      const key = `scim_live_${randomUUID().replace(/-/g, '')}`;
+      await world.prisma.sCIMApiKey.create({
+        data: { workspaceId: ws, name: 'clé nom vide', tokenHash: hash(key) },
+      });
+      const domain = `vide-${randomUUID().slice(0, 8)}.example`;
+      await world.prisma.sSOConfiguration.create({
+        data: { workspaceId: ws, domain, verifiedDomain: domain },
+      });
+      const created = await scim('POST', '/scim/v2/Users', key, {
+        schemas: ['urn:ietf:params:scim:schemas:core:2.0:User'],
+        userName: `vide@${domain}`,
+        displayName: 'Nom à conserver',
+        active: true,
+      });
+      expect(created.status).toBe(201);
+      const id = created.body.id as string;
+      for (const operation of [
+        { op: 'replace', path: 'displayName', value: '' },
+        { op: 'replace', path: 'displayName', value: '   ' },
+        { op: 'replace', value: { displayName: '' } },
+        { op: 'replace', value: { displayName: ' \t ' } },
+      ]) {
+        const res = await scim('PATCH', `/scim/v2/Users/${id}`, key, {
+          schemas: ['urn:ietf:params:scim:api:messages:2.0:PatchOp'],
+          Operations: [operation],
+        });
+        expect(res.status).toBe(400);
+        expect(res.body.scimType).toBe('invalidValue');
+      }
+      expect((await world.prisma.user.findUniqueOrThrow({ where: { id } })).name).toBe(
+        'Nom à conserver',
+      );
+    });
+
     it('300 requêtes par minute et par clé, la suivante reçoit un 429 SCIM en français avec Retry-After', async () => {
       const key = `scim_live_${randomUUID().replace(/-/g, '')}`;
       await world.prisma.sCIMApiKey.create({

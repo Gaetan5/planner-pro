@@ -99,6 +99,26 @@ export class ScimService {
     return text;
   }
 
+  /**
+   * r54-m1 : valeur booléenne SCIM. Entra ID envoie `"False"` / `"True"` en chaîne (sans le
+   * drapeau aadOptscim062020), Okta et RFC 7644 un booléen JSON. Tout le reste : 400 `invalidValue`.
+   */
+  private scimBoolean(raw: unknown): boolean {
+    if (typeof raw === 'boolean') return raw;
+    if (typeof raw === 'string') {
+      const text = raw.toLowerCase();
+      if (text === 'true') return true;
+      if (text === 'false') return false;
+    }
+    throw new BadRequestException(
+      this.scimError(
+        400,
+        "L'attribut active doit être un booléen (true ou false).",
+        'invalidValue',
+      ),
+    );
+  }
+
   private scimError(status: number, detail: string, scimType?: string) {
     return {
       schemas: ['urn:ietf:params:scim:api:messages:2.0:Error'],
@@ -389,10 +409,19 @@ export class ScimService {
     for (const op of patchRequest.Operations || []) {
       const path = (op.path || '').toLowerCase();
       if (path === 'active' || op.value?.active !== undefined) {
-        const activeVal = path === 'active' ? op.value : op.value?.active;
-        activeUpdate = activeVal === true || activeVal === 'true' || activeVal === 'True';
+        // r54-m1 : `active` n'est jamais déduit d'une absence ou d'une valeur invalide
+        if (op.op === 'remove') {
+          throw new BadRequestException(
+            this.scimError(
+              400,
+              "L'attribut active ne peut pas être supprimé : utiliser replace avec true ou false.",
+              'mutability',
+            ),
+          );
+        }
+        activeUpdate = this.scimBoolean(path === 'active' ? op.value : op.value?.active);
       }
-      if (path === 'displayname' || op.value?.displayName) {
+      if (path === 'displayname' || op.value?.displayName !== undefined) {
         // r53-m1 : `User.name` est obligatoire ; retirer (ou vider) displayName est refusé
         if (op.op === 'remove' || (path === 'displayname' && op.value === undefined)) {
           throw new BadRequestException(
@@ -407,6 +436,12 @@ export class ScimService {
           'displayName',
           path === 'displayname' ? op.value : op.value?.displayName,
         );
+        // r54-a1 : un nom vide ou blanc n'est pas une valeur (jamais un 200 sans effet)
+        if (nameUpdate.trim() === '') {
+          throw new BadRequestException(
+            this.scimError(400, "L'attribut displayName ne peut pas être vide.", 'invalidValue'),
+          );
+        }
       }
       if (path === 'username' || op.value?.userName) {
         const requested = path === 'username' ? op.value : op.value?.userName;

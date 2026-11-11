@@ -668,6 +668,26 @@ const cases = (): AbuseCase[] => [
       body: { op: 'replace', path: 'displayName', value: Array(1000).fill('abcdefghij') },
     },
     {
+      name: 'SCIM : PATCH displayName blanc (r54-a1)',
+      method: 'PATCH',
+      body: { op: 'replace', path: 'displayName', value: '   ' },
+    },
+    {
+      name: 'SCIM : PATCH remove de active (r54-m1)',
+      method: 'PATCH',
+      body: { op: 'remove', path: 'active' },
+    },
+    {
+      name: 'SCIM : PATCH active objet imbriqué (r54-m1)',
+      method: 'PATCH',
+      body: { op: 'replace', path: 'active', value: { active: [] } },
+    },
+    {
+      name: 'SCIM : PATCH active nul dans un objet (r54-m1)',
+      method: 'PATCH',
+      body: { op: 'replace', value: { active: null } },
+    },
+    {
       name: 'SCIM : PATCH userName gigantesque',
       method: 'PATCH',
       body: { op: 'replace', path: 'userName', value: BIG },

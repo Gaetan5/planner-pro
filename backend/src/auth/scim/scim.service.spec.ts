@@ -459,6 +459,101 @@ describe('ScimService', () => {
       expect(prisma.user.update).not.toHaveBeenCalled();
     });
 
+    describe('r54-m1 : active (jamais de suspension par absence ou valeur invalide)', () => {
+      const own = () =>
+        victim({
+          id: 'u-own',
+          provisionedByWorkspaceId: 'ws-1',
+          memberships: [{ workspaceId: 'ws-1', userId: 'u-own', role: 'MEMBER' }],
+        });
+      const patch = (operation: Record<string, unknown>) =>
+        service.patchUser('ws-1', 'u-own', { schemas: [], Operations: [operation as never] });
+
+      beforeEach(() => {
+        prisma.user.findUnique.mockResolvedValue(own());
+      });
+
+      it('remove de active (chemin, casse, sans chemin) : 400 mutability, aucune écriture', async () => {
+        for (const operation of [
+          { op: 'remove', path: 'active' },
+          { op: 'remove', path: 'ACTIVE' },
+          { op: 'remove', path: 'active', value: false },
+          { op: 'remove', value: { active: false } },
+        ]) {
+          await expect(patch(operation)).rejects.toMatchObject({
+            response: { scimType: 'mutability', status: '400' },
+          });
+        }
+        expect(prisma.membership.delete).not.toHaveBeenCalled();
+        expect(prisma.user.update).not.toHaveBeenCalled();
+      });
+
+      it('valeur absente ou non booléenne : 400 invalidValue, aucune suspension', async () => {
+        for (const operation of [
+          { op: 'replace', path: 'active' },
+          { op: 'add', path: 'active' },
+          { op: 'replace', path: 'active', value: null },
+          { op: 'replace', path: 'active', value: 'yes' },
+          { op: 'replace', path: 'active', value: 1 },
+          { op: 'replace', path: 'active', value: '' },
+          { op: 'replace', path: 'active', value: {} },
+          { op: 'replace', value: { active: null } },
+          { op: 'replace', value: { active: 'oui' } },
+          { op: 'replace', value: { active: 0 } },
+        ]) {
+          await expect(patch(operation)).rejects.toMatchObject({
+            response: { scimType: 'invalidValue', status: '400' },
+          });
+        }
+        expect(prisma.membership.delete).not.toHaveBeenCalled();
+      });
+
+      it.each([
+        ['booléen true', { op: 'replace', path: 'active', value: true }, true],
+        [
+          'booléen false (Okta, Entra avec drapeau)',
+          { op: 'replace', path: 'active', value: false },
+          false,
+        ],
+        ['chaîne True', { op: 'Replace', path: 'active', value: 'True' }, true],
+        [
+          'chaîne False (Entra par défaut)',
+          { op: 'Replace', path: 'active', value: 'False' },
+          false,
+        ],
+        ['chaîne false', { op: 'replace', path: 'active', value: 'false' }, false],
+        ['objet sans chemin (Okta)', { op: 'replace', value: { active: false } }, false],
+        ['objet sans chemin, chaîne', { op: 'replace', value: { active: 'False' } }, false],
+      ])('format accepté : %s', async (_label, operation, expected) => {
+        const spy = jest
+          .spyOn(
+            service as never as { applyActiveState: () => Promise<boolean> },
+            'applyActiveState',
+          )
+          .mockResolvedValue(expected);
+        await patch(operation);
+        expect(spy).toHaveBeenCalledWith('ws-1', 'u-own', expect.anything(), expected);
+      });
+    });
+
+    it('r54-a1 : replace de displayName vide ou blanc : 400 invalidValue, aucune écriture', async () => {
+      prisma.user.findUnique.mockResolvedValue(
+        victim({ id: 'u-own', provisionedByWorkspaceId: 'ws-1' }),
+      );
+      for (const operation of [
+        { op: 'replace', path: 'displayName', value: '' },
+        { op: 'replace', path: 'displayName', value: '   ' },
+        { op: 'replace', path: 'displayName', value: ' \t\n ' },
+        { op: 'replace', value: { displayName: '' } },
+        { op: 'replace', value: { displayName: '  ' } },
+      ]) {
+        await expect(
+          service.patchUser('ws-1', 'u-own', { schemas: [], Operations: [operation as never] }),
+        ).rejects.toMatchObject({ response: { scimType: 'invalidValue', status: '400' } });
+      }
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
     it('r53-m1 : remove d’un autre attribut ignoré reste sans effet', async () => {
       prisma.user.findUnique.mockResolvedValue(
         victim({ id: 'u-own', provisionedByWorkspaceId: 'ws-1' }),
