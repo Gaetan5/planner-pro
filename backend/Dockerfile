@@ -4,7 +4,7 @@ FROM node:20-alpine
 RUN apk add --no-cache openssl libc6-compat
 
 # Installer pnpm globalement
-RUN npm install -g pnpm@9.15.4
+RUN npm install -g pnpm@10.34.9
 
 # Créer le répertoire de travail et lui attribuer les droits node
 RUN mkdir -p /home/node/app && chown -R node:node /home/node/app

@@ -4,8 +4,9 @@ import { join } from 'path';
 /**
  * S25 : les correctifs de dépendances vulnérables ne doivent pas régresser en silence. Le test lit
  * le fichier de verrouillage réellement installé par la CI (`--frozen-lockfile`) et exige une
- * version minimale pour chaque paquet corrigé, ainsi que des surcharges identiques dans les deux
- * fichiers qui les portent (pnpm 10 lit `pnpm-workspace.yaml`, pnpm 9 lit `package.json#pnpm`).
+ * version minimale pour chaque paquet corrigé. A9 : pnpm 10 est épinglé et la seule source des
+ * surcharges est `pnpm-workspace.yaml` (`package.json#pnpm` n'est plus lu par les pnpm récents et
+ * déclenche un avertissement : il ne doit plus exister).
  */
 const ROOT = join(__dirname, '../../..');
 const lock = readFileSync(join(ROOT, 'pnpm-lock.yaml'), 'utf8');
@@ -53,8 +54,7 @@ describe('S25 : versions corrigées des dépendances', () => {
     expect(outdated).toEqual([]);
   });
 
-  it('les surcharges de pnpm-workspace.yaml et de package.json#pnpm sont identiques', () => {
-    const fromJson: Record<string, string> = rootPackage.pnpm.overrides;
+  const overridesFromWorkspace = (): Record<string, string> => {
     const section = workspace.split(/^overrides:\n/m)[1] ?? '';
     const fromYaml: Record<string, string> = {};
     for (const line of section.split('\n')) {
@@ -62,14 +62,24 @@ describe('S25 : versions corrigées des dépendances', () => {
       if (match) fromYaml[match[1]] = match[2];
       else if (line.trim() !== '' && !line.startsWith('  ')) break;
     }
-    expect(fromYaml).toEqual(fromJson);
-    // Chaque paquet surchargé est borné par une version majeure (pas de saut de majeure involontaire)
-    for (const range of Object.values(fromJson)) expect(range).toMatch(/^>=[\d.]+ <\d+$/);
+    return fromYaml;
+  };
+
+  it('pnpm 10 est épinglé et package.json ne porte plus de surcharges (source unique : pnpm-workspace.yaml)', () => {
+    expect(rootPackage.packageManager).toMatch(/^pnpm@10\.\d+\.\d+$/);
+    expect(rootPackage.pnpm).toBeUndefined();
+    expect(Object.keys(overridesFromWorkspace()).length).toBeGreaterThan(0);
+  });
+
+  it('les surcharges de pnpm-workspace.yaml sont bornées par une version majeure', () => {
+    // Pas de saut de majeure involontaire
+    for (const range of Object.values(overridesFromWorkspace())) {
+      expect(range).toMatch(/^>=[\d.]+ <\d+$/);
+    }
   });
 
   it('le fichier de verrouillage porte les mêmes surcharges', () => {
-    const fromJson: Record<string, string> = rootPackage.pnpm.overrides;
-    for (const [name, range] of Object.entries(fromJson)) {
+    for (const [name, range] of Object.entries(overridesFromWorkspace())) {
       expect(lock).toMatch(
         new RegExp(`^ {2}'?${name.replace(/[/.]/g, '\\$&')}'?: '${range}'$`, 'm'),
       );

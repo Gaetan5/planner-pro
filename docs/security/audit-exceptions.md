@@ -14,8 +14,8 @@ Dernière revue : 2026-11-10. Prochaine revue : à chaque montée de version de 
 ## Avis corrigés par surcharge (S25)
 
 `multer`, `socket.io-parser`, `engine.io`, `ws`, `body-parser`, `qs`, `lodash`, `mysql2`, `fast-uri`, `@grpc/grpc-js`,
-`deepmerge-ts`, `valibot`, `file-type` sont forcés à une version corrigée par `overrides` (voir `pnpm-workspace.yaml`
-et `package.json#pnpm`, à garder identiques). `nodemailer` est monté en 10.4.0 et `cookie-parser` en 1.4.7.
+`deepmerge-ts`, `valibot`, `file-type` sont forcés à une version corrigée par `overrides` (source unique : `pnpm-workspace.yaml` ;
+pnpm 10 est épinglé par `packageManager`, `package.json#pnpm` n'existe plus, A9). `nodemailer` est monté en 10.4.0 et `cookie-parser` en 1.4.7.
 
 Procédure de revue : relancer `pnpm audit --prod`, reporter ici tout nouvel avis non corrigeable avec sa raison, supprimer
 les lignes devenues sans objet, mettre à jour la date.
