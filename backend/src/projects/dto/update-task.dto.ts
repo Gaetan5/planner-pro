@@ -8,6 +8,7 @@ import {
   Max,
   IsArray,
   MaxLength,
+  ArrayMaxSize,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { TaskStatus, TaskPriority } from '@prisma/client';
@@ -60,6 +61,8 @@ export class UpdateTaskDto {
   @IsArray()
   @IsString({ each: true })
   @IsOptional()
+  @ArrayMaxSize(100)
+  @MaxLength(64, { each: true })
   assigneeIds?: string[];
 
   @Type(() => Number)
@@ -70,5 +73,6 @@ export class UpdateTaskDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(64)
   sprintId?: string;
 }

@@ -1,10 +1,11 @@
-import { IsOptional, IsEnum, IsEmail, IsUUID, IsInt, Min, Max } from 'class-validator';
+import { IsOptional, IsEnum, IsEmail, IsUUID, IsInt, Min, Max, MaxLength } from 'class-validator';
 import { ProjectRole, WorkspaceRole } from '@prisma/client';
 import { Type } from 'class-transformer';
 
 export class CreateInvitationDto {
   @IsEmail({}, { message: "L'adresse e-mail saisie est invalide." })
   @IsOptional()
+  @MaxLength(254)
   email?: string;
 
   /** Obligatoire hors invitation à un projet ; ignoré (VIEWER) pour une invitation à un projet. */

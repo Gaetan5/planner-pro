@@ -1,4 +1,4 @@
-import { IsISO8601, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsISO8601, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class CreateResourceLeaveDto {
   @IsISO8601()
@@ -11,5 +11,6 @@ export class CreateResourceLeaveDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(191)
   reason?: string;
 }

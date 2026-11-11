@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsInt, Min } from 'class-validator';
+import { IsString, IsOptional, IsInt, Min, MaxLength } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class UpdateProjectFinancesDto {
@@ -10,5 +10,6 @@ export class UpdateProjectFinancesDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(50)
   billingType?: string;
 }

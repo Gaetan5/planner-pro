@@ -24,6 +24,7 @@ export class CreateProjectDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(64)
   workspaceId?: string;
 
   @IsEnum(ProjectStatus)
@@ -46,5 +47,6 @@ export class CreateProjectDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(50)
   billingType?: string;
 }

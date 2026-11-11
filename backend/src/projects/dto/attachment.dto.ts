@@ -40,6 +40,7 @@ export class AttachmentDto {
   fileName!: string;
 
   @IsSafeAttachmentUrl()
+  @MaxLength(65_000)
   fileUrl!: string;
 
   @IsString()

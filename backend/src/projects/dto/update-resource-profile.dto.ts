@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsInt, Min } from 'class-validator';
+import { IsString, IsOptional, IsInt, Min, MaxLength } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class UpdateResourceProfileDto {
@@ -10,6 +10,7 @@ export class UpdateResourceProfileDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(16_000)
   skills?: string;
 
   @Type(() => Number)

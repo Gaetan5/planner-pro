@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, IsString, Length, Max, Min } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsString, Length, Max, Min, MaxLength } from 'class-validator';
 import { PlatformRole } from '@prisma/client';
 
 export class AdminPaginationQueryDto {
@@ -19,6 +19,7 @@ export class AdminPaginationQueryDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(254)
   search?: string;
 }
 
