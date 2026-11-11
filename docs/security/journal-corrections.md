@@ -4437,3 +4437,262 @@ Incident : un premier script de contre-mutation, mal écrit (liste de fichiers n
 - Incident de restauration manuelle : aucun écart constaté ; pratique à retenir : sauvegarde avant toute mutation, `\cp`, `cmp`.
 - **Feu vert de commit : OUI**, commit séparé, fichiers et message dans « Revue r46 » du rapport.
 - **Ouverts** : déploiement du lot (conditions dans « Revue r46 ») ; r44-a3 ; r42-a1 ; reste de l'ordre du rapport.
+
+## Lot Phase 6-1 (fixeur) — A9
+
+Périmètre : A9 (CI, pnpm 10) avec ses reliquats (O21, `check-headers.sh` en CI, `pnpm audit` en CI, avertissement `pnpm.overrides`). Aucun commit, aucun push. Aucun fichier `.env*` touché. P7, A8, P2, Q-2 non commencés (seule l'infrastructure e2e minimale d'A9 est livrée).
+
+### A9 — Déclencheurs, jobs de CI, e2e
+**Statut** : CORRIGÉ – À REVOIR
+
+**Changements**
+- `.github/workflows/ci.yml` : déclencheurs `pull_request` (toutes branches) et `push` sur `main` et `security/**` ; `concurrency` (annule les exécutions obsolètes d'une même référence) ; `timeout-minutes` par job. Jobs : `secrets-scan` (S30, inchangé : gitleaks arbre + commits de PR + mots de passe du seed), `audit` (`pnpm audit --prod --audit-level=high`), `build-and-test` (inchangé, plus l'étape `tsc -p tests --noEmit`), `e2e` (MySQL 8.0 et Redis 7 en services avec healthchecks, `prisma generate`, `prisma migrate deploy`, `jest --config jest-e2e.json --runInBand`), `migrations` (`migrate deploy` puis `prisma migrate diff --from-config-datasource --to-schema prisma/schema --exit-code`), `frontend-headers` (build de `frontend/Dockerfile.prod`, `docker run`, attente, `scripts/check-headers.sh`, nettoyage `if: always()`). Toutes les actions restent épinglées par SHA complet (mêmes SHA qu'avant, aucune nouvelle action). `--frozen-lockfile` partout, `node-version: 20` partout, `pnpm/action-setup` sans version (lit `packageManager`).
+- `backend/jest-e2e.json` (nouveau) : racine `tests/e2e`, motif `*.e2e-spec.ts`, `jest-env.ts` (donc `E2E_DATABASE_URL`, déjà prévu par A7), `forceExit: true` (voir O22 ci-dessous).
+- `backend/tests/e2e/support/e2e-app.ts` (nouveau) : démarre l'`AppModule` réel (vraie base, vrai Redis, gardes globaux) avec la configuration HTTP de `main.ts` (hors helmet et CORS), `trust proxy` à 1 saut : chaque exécution choisit son `X-Forwarded-For` aléatoire, donc son propre compteur de débit (les routes `login` et `mfa/challenge` sont limitées à 5/min). Garde-fou : `E2E_DATABASE_URL` obligatoire et nom de base finissant par `_test` ou `_e2e`, sinon la suite refuse de démarrer.
+- `backend/tests/e2e/security/s3-mfa-ticket.e2e-spec.ts` (nouveau, 5 tests) : compte MFA créé en base, `POST /auth/login` réel, puis (1) sans jeton : 401 ; (2) ticket MFA en Bearer sur `GET /projects/workspaces` : 401 ; (3) ticket en cookie `accessToken` : 401 ; (4) jeton signé avec `JWT_SECRET` sans `typ` : 401 ; (5) challenge réussi, session valable (200), puis rejeu du ticket avec le code TOTP du pas suivant (non consommé, donc seul l'usage unique du ticket peut expliquer le refus) : 401. Nettoyage en `afterAll` (journal d'audit, appartenances, espace de travail créé à la première lecture de `/projects/workspaces`, compte).
+- `docs/security/ci.md` (nouveau) : description des jobs et commande locale de la suite e2e.
+
+**Tests et mesures**
+- Suite e2e sur MySQL 8.0 et Redis 7 en conteneurs temporaires (ports 33306 et 36379, supprimés) : `prisma migrate deploy` (17 migrations) puis `jest --config jest-e2e.json --runInBand` : 5/5, code de sortie 0.
+- Contre-mutation 1 (S3 réintroduit : ticket signé avec la clé des jetons d'accès et sans audience, `verifyAccessToken` sans contrôle de `typ`, `mfaPending` ni `sid`, `SessionService.verifyAccess` sans contrôle de session) : **3 échecs sur 5** (Bearer, cookie, jeton sans `typ`), code de sortie 1, donc la CI échouerait. Fichiers `token.service.ts` et `session.service.ts` restaurés depuis sauvegarde avec `\cp`, `cmp` identique, `git status` sans résidu sous `src/`.
+- Contre-mutation 2 (usage unique du ticket neutralisé dans `verifyMfaChallenge`) : 1 échec sur 5 (le test de rejeu). Première version du test (rejeu avec le même code TOTP) ne l'aurait pas détectée : l'anti-rejeu TOTP refusait le code à sa place. Test corrigé (code du pas suivant). `auth.service.ts` restauré, `cmp` identique, suite verte (5/5).
+- actionlint (image `rhysd/actionlint:latest`, Docker) : 0 erreur sur `ci.yml`. Vérifié qu'il détecte bien une erreur (copie volontairement cassée : `runs-on` manquant signalé).
+- `audit` en local : `pnpm audit --prod --audit-level=high` (pnpm 10.34.9) : code 0, « 15 vulnerabilities found, 2 low, 13 moderate » (documentées dans `audit-exceptions.md`).
+- `frontend-headers` en local : image construite avec `frontend/Dockerfile.prod` (« Done in 3m 7.9s using pnpm v10.34.9 », `node:20-alpine`), conteneur démarré avec `VITE_API_URL`, `scripts/check-headers.sh` : « Tous les en-têtes attendus sont présents » (page d'entrée et asset `.js`). Conteneur supprimé.
+- Mesures habituelles (Node 20.20.2, pnpm 10.34.9) : jest backend (`env -u DATABASE_URL`) **106 suites, 2960/2960** ; `nest build` OK (via `pnpm build`) ; `tsc -p tests --noEmit` OK ; vitest 32 fichiers, 285/285 ; `pnpm build` OK, grep de `dist` (`mock/login`, `Simuler une session`, `fonts.googleapis`) : aucune occurrence ; `pnpm lint` 0 erreur (51 avertissements préexistants) ; Prettier propre sur tous les fichiers touchés (seuls des documents `docs/` préexistants sont signalés par `prettier --check .`, dont `journal-corrections.md` et `rapport-audit.md`, comme avant).
+
+**Écart par rapport au rapport**
+1. La dérive est mesurée avec `--from-config-datasource` (base migrée par `migrate deploy`) et non `--from-migrations` : Prisma 7 exige une base fantôme (`datasource.shadowDatabaseUrl`) pour `--from-migrations`, ce qui impose un second schéma MySQL et des droits `CREATE DATABASE`. Le résultat est équivalent (la base migrée est l'état produit par les migrations).
+2. `build-and-test` garde ses services MySQL et Redis (A7 les rend inutiles pour jest, mais leur retrait n'est pas dans A9).
+3. Pas d'étape Prettier en CI : `prettier --check .` échoue aujourd'hui sur des documents `docs/` préexistants ; hors périmètre.
+
+### A9 — Dérive des migrations révélée par `migrate diff` (nouveau constat de fond)
+**Statut** : À VALIDER PAR L'ARCHITECTE
+
+Le premier `prisma migrate diff` sur une base migrée à neuf a **échoué (code 2)** : l'historique des migrations ne produit pas exactement le schéma. Deux écarts, tous deux issus de la migration écrite à la main `20261107140000_enterprise_sso_scim_mfa` : (a) `SSOConfiguration.updatedAt` garde un `DEFAULT` en base alors que le schéma n'en déclare pas (`@updatedAt`) ; (b) l'unique de `User.ssoUid` s'appelle `ssoUid` en base (nom implicite MySQL) au lieu de `User_ssoUid_key`. Sans correctif, le job `migrations` serait rouge dès le premier PR.
+
+**Changement** : `backend/prisma/migrations/20261116000000_a9_migration_drift/migration.sql` : `ALTER TABLE SSOConfiguration ALTER COLUMN updatedAt DROP DEFAULT;` et `ALTER TABLE User RENAME INDEX ssoUid TO User_ssoUid_key;`. Après `migrate deploy`, `migrate diff --exit-code` : « No difference detected », code 0.
+
+**Impact sur les données et déploiement** : opérations de métadonnées (aucune ligne lue ou réécrite). Le renommage d'index conserve l'unicité de `ssoUid` (aucune fenêtre sans contrainte unique). Le retrait du `DEFAULT` est sans effet : Prisma renseigne `updatedAt` à chaque écriture (aucune insertion SQL brute dans `SSOConfiguration`). **À appliquer** par `prisma migrate deploy` au prochain déploiement, comme toute migration. Reprise : `ALTER TABLE SSOConfiguration ALTER COLUMN updatedAt SET DEFAULT CURRENT_TIMESTAMP(3)` (si l'ancien défaut est voulu) et `ALTER TABLE User RENAME INDEX User_ssoUid_key TO ssoUid`.
+
+**Question pour l'architecte** : migration accueillie telle quelle (recommandé), ou préférez-vous aligner le schéma sur la base (pas de migration, mais `@updatedAt` perdu et nom d'index forcé par `map:`) ? Ma recommandation : la migration.
+
+### A9 — Montée vers pnpm 10 et suppression de `package.json#pnpm`
+**Statut** : CORRIGÉ – À REVOIR
+
+**Changements**
+- `package.json` : `packageManager: pnpm@10.34.9` (dernière 10.x publiée au moment du lot), bloc `pnpm.overrides` supprimé.
+- `backend/Dockerfile`, `frontend/Dockerfile`, `frontend/Dockerfile.prod` : `npm install -g pnpm@10.34.9` (images `node:20-alpine` inchangées, donc CI et Dockerfiles en Node 20).
+- `pnpm-workspace.yaml` : commentaire mis à jour (source unique des overrides).
+- `backend/tests/unit/dependency-overrides.spec.ts` : le test « identiques dans les deux fichiers » est remplacé par : `packageManager` en `pnpm@10.x.y` et absence de `package.json#pnpm` ; plages bornées par une majeure ; lockfile cohérent avec `pnpm-workspace.yaml`.
+- `docs/security/audit-exceptions.md` : mention de la source unique.
+
+**Lockfile** : régénéré avec pnpm 10.34.9 (`pnpm install --lockfile-only`, overrides lus depuis `pnpm-workspace.yaml` seul, `package.json#pnpm` déjà retiré). Résultat : **identique au lockfile existant** une fois passé au formateur du dépôt (le lockfile est mis en forme par Prettier ; le format brut de pnpm n'est pas conservé). Aucune version résolue ne change. Le fichier `pnpm-lock.yaml` n'est donc pas modifié par ce lot.
+
+**Critères du rapport**
+- Installation sans avertissement d'override ignoré : `pnpm install --frozen-lockfile` sur une copie propre (sans `node_modules`, Node 20, pnpm 10.34.9) : aucun avertissement `pnpm.overrides` ni autre avertissement de configuration (seul reste le bruit réseau « Tarball download average speed » de la machine). Avec le pnpm 11 de la machine de développement, l'avertissement « no longer read » disparaît aussi, puisque le bloc n'existe plus.
+- `pnpm why mariadb -r` : `mariadb@3.5.4` (une seule version), en local et dans l'image backend.
+
+**Point d'attention (comportement de pnpm 10)** : pnpm 10 n'exécute plus les scripts d'installation par défaut. `pnpm-workspace.yaml` contient déjà `allowBuilds` (prisma, esbuild, @nestjs/core, @prisma/engines, unrs-resolver : exécutés). Restent ignorés, avec un encadré « Ignored build scripts » : `argon2@0.44.0`, `protobufjs@7.6.6`, `@firebase/util` (deux versions). Vérifié sans conséquence : `argon2` charge ses binaires précompilés (`prebuilds/`) et hache correctement sous Node 20 en local et dans l'image `node:20-alpine` ; `protobufjs` et `@firebase/util` n'ont qu'un script de confort. Ce n'est pas un avertissement d'override. **Question** : les déclarer explicitement refusés dans `pnpm-workspace.yaml` pour faire taire l'encadré (non testé : l'essai a été interrompu), ou laisser le refus par défaut ? Recommandation : laisser (refus par défaut, plus sûr), à revoir si une montée de `argon2` supprime ses binaires précompilés.
+
+**Images Docker** : `backend/Dockerfile` construite : `node v20.20.2`, `pnpm 10.34.9`, `dist/main.js` présent, `argon2` OK, `mariadb@3.5.4`. `frontend/Dockerfile.prod` construite et servie (voir plus haut). `frontend/Dockerfile` (développement) construite aussi (« Done in 2m 44.5s using pnpm v10.34.9 »). Toutes les images et conteneurs temporaires ont été supprimés.
+
+### A9 — O21 : `rootDir` du `tsconfig.json` backend
+**Statut** : CORRIGÉ – À REVOIR
+
+**Cause confirmée** : `tsc -p tsconfig.json --noEmit` échouait avant correctif avec `TS6059` sur `src/tracking/tracking.gateway.spec.ts(12,46)` (import de `tests/support/session.test-support.ts` hors de `rootDir: ./src`). **Changement** : `backend/tsconfig.json` exclut `src/**/*.spec.ts` (le build utilise `tsconfig.build.json`, déjà exclu ; `tsconfig.test.json` redéfinit `include`/`exclude` et garde les specs). **Vérifié** : avant, 1 erreur ; après, 0 erreur ; `tsc -p tests --noEmit` et `nest build` inchangés (OK).
+
+### A9 — Migration NestJS 11
+**Statut** : NON TRAITÉ (proposition de lot séparé)
+
+Les revues la rattachent à A9 (rapport : « planifier la migration NestJS 11 (ticket séparé, A9) » ; `audit-exceptions.md` : GHSA-36xv-jgw5-4q75, `uuid`). Je ne la fais pas dans ce lot : majeure (Express 5, `@nestjs/*` 11, `@nestjs/throttler`, `@nestjs/config`, `@nestjs/platform-socket.io`, `reflect-metadata`, `rxjs`), qui touche le routage (syntaxe des chemins), le body parsing et le throttler. Les avis visés sont de gravité moyenne et non atteignables (aucun `@Sse()`). **Proposition** : lot dédié « A9-b : NestJS 11 », après ce lot, avec la suite e2e et la matrice RBAC comme filet de sécurité, et un passage de `jose` 4 vers 6 (noté en r28) dans le même lot ou un lot voisin.
+
+### O22 (nouvelle observation, Amélioration) — clients Redis de l'adaptateur Socket.IO jamais fermés
+`TrackingGateway.afterInit` (`backend/src/tracking/tracking.gateway.ts:77-82`) crée deux clients Redis (`createClient` + `duplicate`) pour l'adaptateur et ne les ferme dans aucun hook d'arrêt : après `app.close()`, le processus reste vivant (jest ne se termine pas, observé en e2e). Contournement dans ce lot : `forceExit: true` dans `jest-e2e.json`. Correctif de fond proposé (hors A9) : conserver les clients et les fermer dans `OnModuleDestroy`/`beforeApplicationShutdown` ; relève aussi de l'arrêt propre en production.
+
+### Autres constats et rappels
+- Un répertoire vide non suivi `backend/prisma/migrations/20261026024000_firestore_sync_outbox/` (reste d'un renommage) faisait échouer `prisma migrate deploy` localement (`P3015`, fichier `migration.sql` introuvable). Il n'est pas dans Git, donc absent de la CI ; je l'ai supprimé (`rmdir`, vide) sur cette machine. À faire aussi sur toute machine où il existerait.
+- `PrismaService.seedDefaultUser` (`backend/src/prisma/prisma.service.ts:96-115`) crée au démarrage, hors `NODE_ENV=production`, un compte `gaetan@planner.pro` sans mot de passe (id `default-user-id`) : c'est lui qu'on retrouve dans la base e2e. Sans danger en production (garde explicite), non examiné davantage ici (hors A9).
+- Q-2 (exiger `< 500` pour les profils autorisés dans la matrice) reste à faire avec P7 : non commencé.
+
+### Déploiement et changements cassants
+- **Aucun changement de contrat d'API ni de format de jeton.**
+- Images : reconstruire backend et frontend pour embarquer pnpm 10.34.9 (`docker compose ... up -d --build`). Comportement fonctionnel inchangé (même lockfile, mêmes versions).
+- Migration `20261116000000_a9_migration_drift` à appliquer avec `prisma migrate deploy` (métadonnées seulement).
+- Développeurs : `packageManager` devient `pnpm@10.34.9` (corepack ou pnpm récent le sélectionne ; pnpm 9 local refusera ou basculera selon sa configuration).
+- Si les branches protégées exigent des vérifications nommées, ajouter les nouveaux jobs `audit`, `e2e`, `migrations`, `frontend-headers` aux vérifications requises (réglage GitHub, hors dépôt).
+
+### Questions pour l'architecte
+1. Migration de dérive `20261116000000_a9_migration_drift` : acceptée (recommandé) ?
+2. Encadré « Ignored build scripts » de pnpm 10 (argon2, protobufjs, @firebase/util) : laisser (recommandé) ou refuser explicitement ?
+3. Migration NestJS 11 : lot séparé « A9-b » après validation de celui-ci ?
+4. O22 : correctif d'arrêt propre des clients Redis de l'adaptateur Socket.IO dans un lot voisin (recommandé) ?
+5. Le job `frontend-headers` construit l'image complète (3 à 8 minutes selon le réseau) à chaque PR : acceptable, ou le limiter aux PR qui touchent `frontend/`, `scripts/check-headers.sh` ou les Dockerfiles ?
+
+## Revue architecte (r47) : lot Phase 6-1 (A9)
+
+Détail complet, mesures et contre-mutation : section « Revue r47 » de `docs/security/rapport-audit.md`.
+
+### A9 — Déclencheurs, jobs de CI, e2e
+#### Revue architecte
+**Verdict : VALIDÉ.** Les 6 jobs (`secrets-scan`, `audit`, `build-and-test`, `e2e`, `migrations`, `frontend-headers`) sont conformes ; actions épinglées par SHA de 40 caractères, permissions `contents: read`, `pull_request` sans `pull_request_target` ni secret (sûr pour les forks), actionlint à 0 erreur. Suite e2e rejouée sur MySQL 8.0 et Redis 7 jetables : 5/5. Contre-mutation S3 rejouée : 3 échecs sur 5, la CI échouerait ; fichiers restaurés et comparés à `HEAD`. Réserves non bloquantes : r47-a1 (SHA de tag annoté pour `pnpm/action-setup`), r47-a2 (`cancel-in-progress` sur `main`).
+
+### A9 — Dérive des migrations (`20261116000000_a9_migration_drift`)
+#### Revue architecte
+**Verdict : À REPRENDRE (bloquant pour le déploiement).** Principe accepté (migration plutôt que modification du schéma), mais la migration échoue sur la production : lecture seule de la base (MySQL 8.0.46) : `User_ssoUid_key` existe déjà (pas d'index `ssoUid`) et `SSOConfiguration.updatedAt` n'a déjà aucun DEFAULT. `RENAME INDEX ssoUid` produit P3018 (code 1176), puis P3009 sur chaque `migrate deploy` suivant. Reproduit sur MySQL jetable. **À faire** : garde par `information_schema` + `PREPARE`/`EXECUTE` (script fourni et testé dans le rapport, constat r47-m1), puis étape de CI qui rejoue le fichier SQL une seconde fois après `migrate deploy` (état « production ») et vérifie `migrate diff --exit-code` à 0. Ne pas toucher `20261107140000`. Remettre l'entrée en `CORRIGÉ – À REVOIR`.
+
+### A9 — Montée vers pnpm 10 et suppression de `package.json#pnpm`
+#### Revue architecte
+**Verdict : VALIDÉ.** Lockfile régénéré puis formaté : identique à `HEAD` ; `pnpm why mariadb -r` en 3.5.4 ; audit code 0 ; image backend construite (Node 20.20.2, pnpm 10.34.9, `dist/main.js`, `argon2` OK). **Réponse à la question 2** : laisser le refus par défaut des scripts de `argon2`, `protobufjs` et `@firebase/util` (`argon2` utilise ses binaires précompilés via `node-gyp-build`, couvert par le login réel de l'e2e) ; ne rien ajouter à `pnpm-workspace.yaml`.
+
+### A9 — O21 (`rootDir` du `tsconfig.json`)
+#### Revue architecte
+**Verdict : VALIDÉ.** `tsc -p tsconfig.json --noEmit`, `tsc -p tests --noEmit` et `nest build` : 0 erreur.
+
+### A9 — Migration NestJS 11, O22 et question 5
+#### Revue architecte
+- **NestJS 11 (A9-b)** : lot séparé, après P7 (filet e2e), avec `jose` 4 vers 6 dans le même lot ou un lot voisin.
+- **O22** : oui, correctif d'arrêt propre (`OnModuleDestroy`) dans un lot voisin, avant ou avec P7 ; retirer ensuite `forceExit: true`.
+- **Job `frontend-headers`** : ne pas filtrer par chemin (les jobs sautés posent problème aux vérifications requises) ; si le coût gêne, cache de couches Docker.
+
+### Mesures de l'architecte
+jest backend (`env -u DATABASE_URL`) 106 suites, 2960/2960 ; `nest build`, `tsc -p tests`, `tsc -p tsconfig.json` OK ; vitest 32 fichiers, 285/285 ; `pnpm build` OK, 0 occurrence dans `dist` ; ESLint 0 erreur (51 avertissements préexistants) ; Prettier propre sur les fichiers touchés ; `pnpm audit --prod --audit-level=high` code 0 ; actionlint 0 erreur ; e2e 5/5.
+
+### Nouveaux constats (reportés dans le rapport)
+- **r47-m1** (Majeur, bloquant) : migration de dérive non idempotente (voir ci-dessus).
+- **r47-m2** (Mineur) : le 429 du limiteur global renvoie `ThrottlerException: Too Many Requests` en anglais, affiché tel quel par le frontend (observé en production). Surcharger `throwThrottlingException` dans `AppThrottlerGuard` et `ScimKeyThrottlerGuard`, message français, `Retry-After` conservé ; message français dédié pour tout 429 côté frontend ; tests backend et vitest.
+- **r47-a1** (Amélioration) : `pnpm/action-setup` épinglé sur l'objet de tag annoté `v4`, pas sur un commit. **r47-a2** (Amélioration) : `cancel-in-progress` à limiter aux PR.
+
+### Feu vert de commit : NON tant que r47-m1 n'est pas repris (découpage en 4 commits prévu dans le rapport).
+
+### Constats encore ouverts (pour relancer le fixeur)
+1. r47-m1 (migration gardée + étape de CI d'idempotence), bloquant.
+2. r47-m2 (429 en français).
+3. r47-a1, r47-a2, O22 (Améliorations).
+4. Suite de la Phase 6 : P7, puis A9-b (NestJS 11), A8, P2.
+
+## Reprise r47 (fixeur)
+
+### r47-m1 — Migration de dérive idempotente
+**Statut** : CORRIGÉ – À REVOIR
+**Changement** : `backend/prisma/migrations/20261116000000_a9_migration_drift/migration.sql` : `DROP DEFAULT` conservé (sans effet sur une colonne sans défaut) ; le `RENAME INDEX ssoUid TO User_ssoUid_key` est gardé par un comptage dans `information_schema.STATISTICS` puis exécuté par `PREPARE`/`EXECUTE` (`DO 0` si l'index `ssoUid` n'existe pas), script de l'architecte avec des noms de variables préfixés `a9_`. `.github/workflows/ci.yml` (job `migrations`) : deux étapes après `migrate diff` : rejeu du SQL par `prisma db execute --file`, puis second `migrate diff --exit-code`. `docs/security/ci.md` (ligne `migrations`) mise à jour. `20261107140000_enterprise_sso_scim_mfa` non touchée (`git status` vide sur ce dossier).
+**Tests** (MySQL 8.0 jetables en conteneurs ; 16 migrations appliquées puis état forcé) :
+- État « production » (`User_ssoUid_key` présent, `ssoUid` absent, `updatedAt` sans DEFAULT) : `migrate deploy` réussit ; second passage (`db execute`) : succès sans effet ; `migrate diff --exit-code` : 0.
+- État « dérive » (index `ssoUid`, DEFAULT `CURRENT_TIMESTAMP(3)`) : `migrate deploy` réussit ; index `User_ssoUid_key`, `NON_UNIQUE = 0`, DEFAULT supprimé ; un doublon de `ssoUid` est refusé (`Duplicate entry … for key 'User.User_ssoUid_key'`) ; second passage OK ; diff 0.
+- Contre-mutation (version non gardée, copie de l'ancienne) sur une base « production » distincte : `P3018 … Key 'ssoUid' doesn't exist in table 'User'`, puis `P3009` au lancement suivant. Version gardée restaurée et vérifiée par `cmp` contre la copie.
+- Base neuve de l'e2e : 17 migrations appliquées.
+**Écart par rapport au rapport** : aucun.
+**Questions pour l'architecte** : aucune. Rappel : les étapes de CI n'ont pas été exécutées sur GitHub, seulement leurs commandes équivalentes en local (actionlint : 0 erreur).
+
+### r47-m2 — 429 en français
+**Statut** : CORRIGÉ – À REVOIR
+**Changement** : `backend/src/common/app-throttler.guard.ts` : constante `THROTTLE_MESSAGE` (« Trop de requêtes. Réessayez dans quelques instants. »), surcharge de `getErrorMessage()` dans `AppThrottlerGuard` (le message anglais venait de la valeur par défaut de `ThrottlerGuard` 5.1.2 ; `Retry-After` reste posé par la classe de base), et `ScimKeyThrottlerGuard` lève `new ThrottlerException(THROTTLE_MESSAGE)` aux deux endroits. Sur SCIM, `ScimExceptionFilter` reprend le message dans `detail` : format d'erreur SCIM conservé (`schemas`, `status: "429"`). Frontend : nouveau `frontend/src/http-errors.ts` (`TOO_MANY_REQUESTS_MESSAGE`, `apiErrorMessage`, `readApiError`) : tout 429 donne « Trop de requêtes. Patientez quelques instants avant de réessayer. », y compris pour un corps non JSON (page de Nginx). Branché dans `security-api.ts`, `github-oauth.ts`, `github-repos.ts`, `account-api.ts`, `invitation-store.ts`, `AppContext.tsx` (`reportApiError` et les 5 appels de connexion, MFA, SSO, inscription, Firebase) et `AdminConsole.tsx` (changement de rôle).
+**Tests** : `backend/tests/http/scim-throttler.spec.ts` : 301e requête SCIM (message dans `detail`, `Retry-After` > 0) et nouveau test du 429 global (`body.message`, `Retry-After`, absence de `ThrottlerException`) ; rouge avant correctif (`Received: "ThrottlerException: Too Many Requests"`, 2 échecs), vert après (8/8). `frontend/src/http-errors.spec.ts` (5 tests) ; contre-mutation (suppression des deux tests de statut 429 dans `http-errors.ts`) : 4 échecs sur 5, puis fichier restauré et vérifié par `cmp`.
+**Écart par rapport au rapport** : le 429 de verrouillage de compte (S24) côté frontend est aussi remplacé par le message générique, conformément à « tout statut 429 » ; à confirmer si un message plus précis est souhaité pour la connexion. Les autres appels `fetch` du frontend (composants non listés) n'ont pas été tous repris.
+**Questions pour l'architecte** : faut-il conserver le message serveur pour le 429 de verrouillage de compte à la connexion ?
+
+### r47-a1 — Épinglage de `pnpm/action-setup` sur un commit
+**Statut** : CORRIGÉ – À REVOIR
+**Changement** : `.github/workflows/ci.yml` (4 usages) : `b906affcce14559ad1aafd4ab0e942779e9f58b1  # v4.3.0 (commit pointé par v4)`. `git ls-remote` : `refs/tags/v4` = `f40ffcd9…` (objet de tag annoté), `refs/tags/v4^{}` = `b906affc…` ; ce commit est aussi celui de `refs/tags/v4.3.0^{}`.
+**Écart par rapport au rapport** : le rapport proposait v4.4.0 (`fc06bc12…`, déréférencé). J'ai gardé le commit exact que `v4` désignait, c'est-à-dire celui qui a servi aux mesures, sans changement de comportement. Passer à v4.4.0 se limite à remplacer le SHA.
+**Tests** : actionlint : 0 erreur. **Questions** : v4.3.0 ou v4.4.0 ?
+
+### r47-a2 — `cancel-in-progress` limité aux PR
+**Statut** : CORRIGÉ – À REVOIR
+**Changement** : `.github/workflows/ci.yml` : `cancel-in-progress: ${{ github.event_name == 'pull_request' }}`. **Tests** : actionlint : 0 erreur.
+
+### Mesures de la reprise
+jest backend (`env -u DATABASE_URL`) 106 suites, 2961/2961 ; `nest build`, `tsc -p tests`, `tsc -p tsconfig.json` : 0 erreur ; vitest 33 fichiers, 290/290 ; `tsc --noEmit` frontend : 0 erreur ; `pnpm build` (pnpm 10.34.9) OK, 0 occurrence de `mock/login`, `Simuler une session`, `fonts.googleapis` dans `dist` ; ESLint 0 erreur (51 avertissements préexistants) ; Prettier propre sur les fichiers touchés ; actionlint 0 ; `pnpm audit --prod --audit-level=high` code 0 (2 faibles, 13 modérés) ; `pnpm-lock.yaml` inchangé ; e2e (MySQL 8.0 + Redis 7 jetables) 5/5. Conteneurs `r47fx-*` supprimés, aucun processus résiduel.
+
+## Revue architecte (r48) : reprise r47
+
+### r47-m1 — Migration de dérive idempotente
+#### Revue architecte
+**Verdict : VALIDÉ.** Rejoué sur deux MySQL 8.0 jetables (16 migrations via une copie du dossier sans A9, puis état forcé) : état « production » et état « dérive » : `migrate deploy` réussit, index `User_ssoUid_key` unique (doublon refusé : erreur 1062), `updatedAt` sans DEFAULT, `migrate diff --exit-code` = 0, rejeu du SQL deux fois par `db execute` OK, diff = 0. Contre-mutation : le renommage non gardé sur l'état « production » donne l'erreur 1176. Les variables de session survivent à `db execute` : l'étape CI est réaliste. `20261107140000_enterprise_sso_scim_mfa` intacte. Conteneurs supprimés.
+
+### r47-m2 — 429 en français
+#### Revue architecte
+**Verdict : VALIDÉ côté backend ; À REPRENDRE côté frontend (r48-m1, Mineur).** Backend : contre-mutation (retrait de la surcharge et des messages) : 2 échecs sur 8, puis `\cp` et `cmp` identiques, 8/8. Frontend : le remplacement inconditionnel de tout 429 par « Patientez quelques instants » masque les messages utiles du serveur (« compte temporairement verrouillé », « réessayez dans une minute »). **Réponse à la question** : oui, le message du serveur prime ; le générique ne sert qu'en repli (corps non JSON ou vide, par exemple une page de Nginx). Appliquer la même règle dans `reportApiError` d'`AppContext.tsx`, mettre à jour `http-errors.spec.ts` (cas verrouillage conservé, cas HTML ou vide générique, tableau joint) avec une contre-mutation. Les autres `fetch` : **plus tard** (r48-a1), lot dédié avec un client HTTP commun.
+
+### r47-a1 — `pnpm/action-setup`
+#### Revue architecte
+**Verdict : VALIDÉ.** `v4^{}` = `b906affc…` = `v4.3.0^{}`, 4 usages. **Réponse** : rester sur v4.3.0 ; v4.4.0 relève de la maintenance habituelle des SHA, pas de ce lot.
+
+### r47-a2 — `cancel-in-progress`
+#### Revue architecte
+**Verdict : VALIDÉ.**
+
+### Environnement : `pnpm` global cassé
+Cause : le pnpm 11.5.2 global installe `@pnpm/exe` 10.34.9 (champ `packageManager`) sans exécuter son `preinstall` (scripts de build bloqués par défaut, marqueur `.pnpm-needs-build`) ; le binaire reste un fichier d'attente texte exécuté par `sh` (« This: not found »). Le passage à pnpm 10 est donc le déclencheur, pas la cause intrinsèque. 10.34.9 fonctionne via corepack (toutes mes mesures). CI et Dockerfiles non concernés. Contournement : `corepack pnpm …` ou nvm avant `~/.local/share/pnpm` dans le `PATH` ; réparation durable : autoriser le build de `@pnpm/exe` dans la configuration globale de pnpm 11 puis supprimer l'installation incomplète (hypothèse non testée). Rien modifié dans l'installation globale.
+
+### Mesures de l'architecte
+jest backend (`env -u DATABASE_URL`) 106 suites, 2961/2961 ; `nest build`, `tsc -p tests`, `tsc -p tsconfig.json`, `tsc` frontend : 0 erreur ; vitest 33 fichiers, 290/290 ; `pnpm build` OK, 0 occurrence dans `dist` ; ESLint 0 erreur (51 avertissements préexistants) ; Prettier propre ; actionlint 0 erreur ; `pnpm audit --prod --audit-level=high` code 0 ; e2e 5/5.
+
+### Nouveaux constats (reportés dans le rapport)
+- **r48-m1** (Mineur) : le message serveur d'un 429 doit primer sur le générique côté frontend.
+- **r48-a1** (Amélioration) : autres `fetch`, client HTTP commun, plus tard. **r48-a2** (Amélioration) : pnpm global du poste, action de l'utilisateur.
+
+### Feu vert de commit : OUI, sauf le commit frontend (5) qui attend r48-m1 (découpage en 6 commits dans le rapport, section « Revue r48 »).
+
+### Constats encore ouverts (pour relancer le fixeur)
+1. r48-m1 (frontend, message serveur du 429).
+2. Améliorations : r48-a1, O22, Q-2.
+3. Suite de la Phase 6 : P7, puis A9-b (NestJS 11), A8, P2.
+
+## Reprise r48 (fixeur) — r48-m1
+
+### r48-m1 — Message du serveur conservé pour un 429 (frontend)
+
+**Statut** : CORRIGÉ – À REVOIR
+
+**Changement**
+- `frontend/src/http-errors.ts` : `apiErrorMessage` renvoie le message du serveur (chaîne non vide, ou tableau joint par un espace) pour tout statut ; `TOO_MANY_REQUESTS_MESSAGE` n'est qu'un repli pour un 429 sans message exploitable. `readApiError` ne court-circuite plus le 429 et lit le corps. Nouvelle fonction `serverMessageOf` (extrait `message` d'un corps JSON, chaîne ou tableau de chaînes).
+- `frontend/src/context/AppContext.tsx` (`reportApiError`) : suppression du retour anticipé sur 429 ; le corps est lu, puis pour un 429 on utilise `apiErrorMessage(429, serverMessageOf(corps), '')` (HTML de Nginx, corps vide ou non JSON : message générique). Autres statuts inchangés.
+
+**Tests (vitest)**
+- `frontend/src/http-errors.spec.ts` (réécrit) : 429 avec message de verrouillage en français conservé (`apiErrorMessage`, `readApiError`, client de sécurité, compte, invitation) ; tableau joint ; page HTML, corps vide, `{}`, message blanc ou tableau vide : message générique ; statut 429 conservé dans `SecurityApiError`.
+- `frontend/src/context/AppContext.rate-limit.spec.tsx` (nouveau) : chemin `reportApiError` via `createProject` : message serveur, tableau, HTML de Nginx, corps vide ; `apiError` du contexte vérifié.
+- Résultat : 34 fichiers, 295/295.
+- Contre-mutation (« tout 429 donne le message générique » dans `http-errors.ts` et `reportApiError`) : 6 échecs sur 10 dans les deux fichiers. Restauré par `\cp`, `cmp` identique.
+
+**Mesures** : `tsc --noEmit` 0 erreur ; `pnpm build` OK, 0 occurrence de `mock/login`, `Simuler une session`, `fonts.googleapis` dans `dist` ; ESLint 0 erreur sur les 4 fichiers touchés ; Prettier propre. Aucun processus laissé.
+
+**Écart par rapport au rapport** : aucun. Précision : le séparateur des tableaux est l'espace dans `apiErrorMessage` (déjà en place) ; `reportApiError` garde `, ` pour les autres statuts, d'où un séparateur différent pour un 429 en tableau (cas théorique, le backend renvoie des chaînes).
+
+**Questions pour l'architecte** : faut-il uniformiser le séparateur des tableaux (espace ou `, `) ? Non fait pour ne pas modifier les autres statuts.
+
+#### Revue architecte (r49)
+
+**Verdict r48-m1 : À REPRENDRE** (un chemin). Partie frontend de r47-m2 : **VALIDÉE** hors ce chemin.
+
+Vérifié sur le code et rejoué : vitest 34 fichiers, 295/295 ; `tsc --noEmit` 0 erreur ; `pnpm build` OK, 0 occurrence dans `dist` ; ESLint 0 erreur ; Prettier propre. Contre-mutation (« 429 toujours générique ») : 6 échecs sur 10, restauration par `\cp`, `cmp` identique. Le message du serveur prime bien pour `http-errors.ts`, `reportApiError`, les clients de compte, de sécurité, GitHub, `AdminConsole` et les appels d'`AppContext`.
+
+**Reste à reprendre (r49-m1)** : `invitationErrorFrom` (`frontend/src/invitation-store.ts`) renvoie le HTML brut de Nginx pour un 429 (`JSON.parse` échoue, `message` garde le texte, `apiErrorMessage` le renvoie). Reproduit par un test jetable (supprimé). Correctif : pour `res.status === 429`, ne pas retenir le texte brut (message vide donc générique) ; les autres statuts gardent le texte brut. Ajouter dans `http-errors.spec.ts` : 429 HTML donne `TOO_MANY_REQUESTS_MESSAGE` ; 403 texte brut inchangé ; contre-mutation documentée. Relecture ensuite en revue courte.
+
+**Réponse à ta question (séparateur des tableaux)** : ne pas uniformiser. Cas théorique pour un 429 (le backend renvoie des chaînes) ; `', '` est l'historique des autres statuts de `reportApiError`. À trancher une seule fois si un client HTTP commun est créé (r48-a1).
+
+**Commits** : feu vert du commit 5 conditionné à r49-m1 (liste exacte dans le rapport, avec `AppContext.rate-limit.spec.tsx`), commit 6 (docs) en dernier. Conditions de déploiement et périmètre de P7 : voir « Revue r49 » du rapport.
+
+**Constats encore ouverts pour relancer le fixeur** : r49-m1 (Mineur). Puis P7 (avec O22 en tête, Q-2), A9-b, A8, P2 ; améliorations r48-a1, r48-a2.
+
+## Reprise r49 (fixeur) — r49-m1
+
+### r49-m1 — `invitationErrorFrom` renvoyait le HTML brut de Nginx pour un 429
+
+**Statut** : CORRIGÉ – À REVOIR
+
+**Changement** : `frontend/src/invitation-store.ts` (`invitationErrorFrom`, bloc `catch`) : si le corps n'est pas du JSON et que `res.status === 429`, `message` est vidé, donc `apiErrorMessage` renvoie `TOO_MANY_REQUESTS_MESSAGE`. Un message JSON du serveur prime toujours ; les autres statuts gardent le texte brut.
+
+**Tests** : ajout dans `frontend/src/http-errors.spec.ts` d'un cas (429 HTML Nginx donne le message générique ; 429 JSON affiche le message du serveur ; 403 texte brut inchangé). Vitest : 34 fichiers, 296/296. Contre-mutation (retrait de la garde) : le nouveau test échoue (1 échec sur 7 dans le fichier) ; restauration par `\cp`, `cmp` identique. `tsc --noEmit` 0 erreur ; `pnpm build` OK, 0 occurrence de `mock/login`, `Simuler une session`, `fonts.googleapis` dans `dist` ; ESLint et Prettier propres sur les 2 fichiers touchés. Aucun processus résiduel.
+
+**Écart par rapport au rapport** : aucun.
+
+**Questions pour l'architecte** : aucune.
+
+#### Revue architecte (r50)
+
+**r49-m1 : VALIDÉ.** Code relu (`invitationErrorFrom`, garde 429 dans le `catch`) et test rejoué. vitest 34 fichiers, 296/296 ; `tsc --noEmit` 0 erreur ; contre-mutation (retrait de la garde) : 1 échec sur 7, restauré par `\cp`, `cmp` identique. r48-m1 et la partie frontend de r47-m2 sont clos.
+
+**Feu vert** : commit 5 (10 fichiers frontend de r49) : `fix(frontend): messages d'erreur HTTP communs, message du serveur prioritaire et repli générique pour un 429 sans corps exploitable (r47-m2, r48-m1)`. Commit 6 (docs, en dernier) : `docs(security): revues r47 à r49 du lot A9, migration de dérive et message du 429 frontend`.
+
+**Constats encore ouverts** : aucun Mineur ou supérieur dans ce lot. Suite : P7 (périmètre en r49, O22 en tête, Q-2 rattaché), puis A9-b, A8, P2 ; améliorations r48-a1, r48-a2.

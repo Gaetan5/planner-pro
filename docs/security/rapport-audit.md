@@ -5365,3 +5365,273 @@ Le lot est commité en local, non poussé. Avant le `up` :
 2. r44-a3 (bornes des 41 champs, lot dédié, à confirmer par l'utilisateur), r42-a1 (décision utilisateur), parcours manuel avant `CSP_MODE=enforce`, avertissement jest « worker process has failed to exit gracefully » (`--detectOpenHandles`, non bloquant).
 3. S30, actions d'exploitation (recensement des webhooks clients), recensement S19/S20.
 4. S26, A5 à A7, P5, P8, O10 à O15, O17, O21, Phase 6 (dont `pnpm audit` et `check-headers.sh` en CI, migration NestJS 11 = A9, avertissement `pnpm.overrides`).
+
+## Revue r47 : lot Phase 6-1 (A9, CI, pnpm 10, e2e) : A9 VALIDÉ sauf la migration de dérive (À REPRENDRE, bloquante pour le déploiement)
+
+**Statut** : CI, pnpm 10.34.9, O21, infrastructure e2e et `docs/security/ci.md` **VALIDÉS**. Migration `20261116000000_a9_migration_drift` **À REPRENDRE** : appliquée telle quelle sur la base de production, elle échoue (voir r47-m1). Un constat Majeur (déploiement), un Mineur (429 en anglais) et deux Améliorations nouveaux.
+
+### Contexte de production (2026-11-11)
+Production déployée sur 93711a8 (S23, S24, r44, r45). Vérifié par l'utilisateur : webhook 401 vingt fois puis 429 ; clés Redis portant l'adresse réelle (jamais un `X-Forwarded-For` forgé) ; Nginx : 429 sur la limite de débit et 413 au-delà de 2 Mo ; connexion 401 cinq fois puis 429. S21, S23 et S24 sont donc **confirmés en production**.
+
+### Nouveaux constats
+
+| ID | Sévérité | Constat | Remédiation et critère d'acceptation |
+| --- | --- | --- | --- |
+| **r47-m1** | **Majeur** (bloquant le déploiement ; pas de fuite de données, risque de disponibilité et d'état de migration « échouée ») | `backend/prisma/migrations/20261116000000_a9_migration_drift/migration.sql` : `ALTER TABLE User RENAME INDEX ssoUid TO User_ssoUid_key` **n'est pas idempotente**. Lecture seule de la production (MySQL 8.0.46, `information_schema`) : l'unique de `User.ssoUid` s'y appelle **déjà `User_ssoUid_key`** (pas d'index `ssoUid`), et `SSOConfiguration.updatedAt` n'a **déjà aucun DEFAULT** (`datetime(3) NOT NULL ON UPDATE CURRENT_TIMESTAMP(3)`, identique à une base neuve après la migration). La base de production n'a donc pas la dérive que la CI corrige (elle vient de `init_production` et de correctifs manuels antérieurs, ou d'un historique non rejoué). Reproduit sur MySQL 8.0 jetable : `prisma migrate deploy` sur l'état « production » donne `P3018 … Key 'ssoUid' doesn't exist in table 'User'` (code 1176, requête n° 2), puis `P3009` à chaque `migrate deploy` suivant, jusqu'à un `prisma migrate resolve --rolled-back`. MySQL n'a pas de DDL transactionnel : le `DROP DEFAULT` (no-op ici) reste appliqué, la migration est marquée « échouée » et **plus aucune migration ne s'applique**. | Rendre la migration **tolérante aux deux états**. Le `DROP DEFAULT` est déjà idempotent (vérifié : sans effet sur une colonne sans défaut). Pour l'index, garde par `information_schema` : `SET @i := (SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'User' AND INDEX_NAME = 'ssoUid'); SET @s := IF(@i > 0, 'ALTER TABLE \`User\` RENAME INDEX \`ssoUid\` TO \`User_ssoUid_key\`', 'DO 0'); PREPARE p FROM @s; EXECUTE p; DEALLOCATE PREPARE p;`. **Testé par l'architecte** avec `prisma db execute --file` sur MySQL 8.0 : état « production » (index déjà renommé) : succès sans effet ; état « dérive » (index `ssoUid`, DEFAULT présent) : succès, unicité conservée (`NON_UNIQUE = 0`), `prisma migrate diff --exit-code` renvoie « No difference detected » (code 0). **Ne pas modifier** `20261107140000_enterprise_sso_scim_mfa` (déjà appliquée en production, somme de contrôle). **Test attendu** : étape de CI dans le job `migrations`, après `migrate deploy` : rejouer `prisma db execute --file prisma/migrations/20261116000000_a9_migration_drift/migration.sql` (deuxième passage = état « production »), puis `migrate diff --exit-code` toujours à 0. **Avant le déploiement** : relever en lecture seule la même information sur la production (déjà faite le 2026-11-11, état conforme à la table ci-contre). |
+| **r47-m2** | Mineur | Le 429 du limiteur global renvoie le message anglais `ThrottlerException: Too Many Requests` (observé en production), affiché tel quel par le frontend. `app-throttler.guard.ts` : `AppThrottlerGuard` hérite de `ThrottlerGuard` sans surcharger `throwThrottlingException`. | Surcharger `throwThrottlingException` (garde global et `ScimKeyThrottlerGuard` qui lève `new ThrottlerException()` aux lignes 45 et 51) pour lever `new ThrottlerException('Trop de requêtes. Réessayez dans quelques instants.')` ; conserver l'en-tête `Retry-After`. Côté frontend, afficher un message français dédié pour tout statut 429 plutôt que le texte du serveur. **Tests** : requête au-delà de la limite renvoie 429 avec ce message ; vitest sur l'affichage du 429. |
+| **r47-a1** | Amélioration | `pnpm/action-setup@f40ffcd9…  # v4` : ce SHA est celui de l'**objet de tag annoté** mobile `v4` (commit pointé : `b906affc…`), pas d'un commit ; l'épinglage est immuable mais le commentaire « v4 » est trompeur et les outils (Dependabot, zizmor) l'acceptent mal. `actions/checkout` (v4.3.1) et `actions/setup-node` (v4.4.0) sont des SHA de commit corrects. | Épingler le SHA de **commit** d'une version précise (`gh api repos/pnpm/action-setup/git/ref/tags/v4.4.0`, puis déréférencer si le tag est annoté) et commenter `# v4.4.0`. Non bloquant. |
+| **r47-a2** | Amélioration | `concurrency.cancel-in-progress: true` s'applique aussi aux poussées sur `main` et `security/**` : une poussée rapide annule la CI de la précédente, qui peut être la dernière vérification d'un état déployé. | `cancel-in-progress: ${{ github.event_name == 'pull_request' }}`. Non bloquant. |
+
+### Vérifications de l'architecte
+
+| Point | Résultat |
+| --- | --- |
+| Périmètre du diff | 10 fichiers modifiés et 4 chemins non suivis, exactement ceux annoncés. `pnpm-lock.yaml` inchangé. |
+| Production, lecture seule (SELECT, `information_schema`) | MySQL 8.0.46 ; 16 migrations appliquées, toutes terminées ; `User_ssoUid_key` (unique) présent, `ssoUid` absent ; `SSOConfiguration.updatedAt` sans DEFAULT ; 9 utilisateurs, 0 configuration SSO. Aucune écriture, aucun secret affiché (accès par l'utilisateur applicatif). |
+| Migration sur base neuve | `migrate deploy` (17 migrations) OK ; index `User_ssoUid_key` ; `updatedAt` sans DEFAULT (la clause `ON UPDATE` subsiste, sans effet pour Prisma) ; identique à la production. |
+| Migration sur l'état « production » | **Échec P3018 puis P3009** (r47-m1). Version gardée de l'architecte : succès sur les deux états. |
+| e2e sur MySQL 8.0 et Redis 7 (conteneurs jetables, supprimés) | `migrate deploy` puis `jest --config jest-e2e.json --runInBand` : 5/5. |
+| Critère « un PR qui réintroduit S3 fait échouer la CI » | Contre-mutation (ticket MFA signé avec `JWT_SECRET` et sans audience, `verifyAccessToken` sans contrôle de `typ`, `mfaPending` ni `sid`, `SessionService.verifyAccess` sans contrôle de session) : **3 échecs sur 5** (Bearer, cookie, jeton sans `typ`), jest en code non nul : la CI échouerait. Fichiers `token.service.ts` et `session.service.ts` restaurés, comparés à `git show HEAD:` avec `cmp` : identiques ; `git status` sans résidu sous `src/`. |
+| Incident de procédure | Une copie de sauvegarde par `cp` s'est bloquée sur une invite d'écrasement (alias interactif) puis le script a repris : la mutation a été appliquée, mesurée (3 échecs) puis la restauration a été vérifiée contre `HEAD` (pas contre la sauvegarde périmée). Le lockfile a été reformaté par une commande de lecture de ma part (`--lockfile-only`), puis remis par Prettier : `git diff` vide. |
+| pnpm 10.34.9 | `packageManager` et 3 Dockerfiles alignés ; `package.json#pnpm` supprimé ; `pnpm install --frozen-lockfile --lockfile-only` OK ; lockfile régénéré puis formaté par Prettier : **identique à HEAD** ; `pnpm why mariadb -r` : 3.5.4 unique ; `pnpm audit --prod --audit-level=high` : code 0 (2 faibles, 13 modérés, documentés). |
+| Scripts d'installation ignorés | `argon2` : `install` = `node-gyp-build`, qui ne fait que résoudre les binaires précompilés (`prebuilds/linux-x64` etc.) : hachage et vérification OK sous Node 20, y compris dans l'image Alpine et en e2e (login réel). `protobufjs`, `@firebase/util` : scripts de confort. `allowBuilds` fonctionne avec 10.34.9 (`prisma generate` et `nest build` réussissent dans l'image). Sans danger. |
+| Image backend | Construite avec `backend/Dockerfile` : Node 20.20.2, pnpm 10.34.9, `dist/main.js`, `argon2` OK, Prisma chargé ; image supprimée. (L'image `frontend/Dockerfile.prod` a été construite et servie par le fixeur ; le build frontend de l'architecte est OK.) |
+| Actions GitHub | 3 actions, 14 usages, toutes en SHA de 40 caractères (voir r47-a1 pour une nuance). Image gitleaks épinglée par empreinte `sha256`. |
+| Permissions et forks | `permissions: contents: read` au niveau du workflow, aucune surcharge par job. Déclencheur `pull_request` (jamais `pull_request_target`) : les PR de forks n'ont ni secret ni jeton en écriture. Aucun `secrets.*` référencé. Les identifiants MySQL du workflow sont des valeurs jetables de CI. Les seules interpolations `${{ }}` dans un `run` sont les SHA de base et de tête de la PR (non contrôlables). Aucune exécution de code de PR avec privilège. |
+| jest backend (`env -u DATABASE_URL`) | 106 suites, **2960/2960**. |
+| `nest build`, `tsc -p tests`, `tsc -p tsconfig.json` (O21) | OK, 0 erreur. |
+| vitest | 32 fichiers, 285/285. |
+| `pnpm build` frontend et grep de `dist` | OK ; 0 occurrence de `mock/login`, `Simuler une session`, `fonts.googleapis`. |
+| ESLint | 0 erreur, 51 avertissements préexistants. |
+| Prettier | propre sur `.github`, `backend/jest-e2e.json`, `backend/tests`, `backend/tsconfig.json`, `package.json`, `pnpm-workspace.yaml`, `docs/security/ci.md`, `audit-exceptions.md`. |
+| actionlint (`rhysd/actionlint:latest`) | 0 erreur. |
+| Processus et conteneurs | Conteneurs `r47-*` et image supprimés ; aucune écriture en production ; `.env.production` non touché. |
+
+### Verdicts
+
+| Point | Verdict |
+| --- | --- |
+| Déclencheurs (toutes les PR, `main`, `security/**`), `timeout-minutes`, `--frozen-lockfile`, Node 20 | **VALIDÉ** |
+| Jobs `audit`, `e2e`, `frontend-headers`, `secrets-scan`, `build-and-test` | **VALIDÉ** |
+| Job `migrations` (`migrate deploy` puis `migrate diff --from-config-datasource --exit-code`) | **VALIDÉ** pour ce qu'il mesure (écart de 1 : la base de production n'est pas une base neuve, voir r47-m1 et son test d'idempotence) |
+| Infrastructure e2e (`jest-e2e.json`, `e2e-app.ts` avec garde-fou `_test`/`_e2e`) et `s3-mfa-ticket.e2e-spec.ts` (5 tests) | **VALIDÉ** (critère S3 → CI en échec : démontré) |
+| pnpm 10.34.9, suppression de `package.json#pnpm`, test `dependency-overrides.spec.ts` | **VALIDÉ** (critère r3 d'A9 rempli) |
+| O21 (`tsconfig.json` sans specs) | **VALIDÉ** |
+| `docs/security/ci.md` | **VALIDÉ** |
+| Migration `20261116000000_a9_migration_drift` | **À REPRENDRE** (r47-m1) |
+| Écart « `--from-config-datasource` au lieu de `--from-migrations` » | **ACCEPTÉ** (équivalent, sans base fantôme) |
+
+### Réponses aux 5 questions du fixeur
+1. **Migration de dérive** : le principe (migration plutôt qu'aligner le schéma sur la base) est le bon : le schéma est la référence, le `@updatedAt` doit rester, et les bases neuves (CI, nouveaux environnements) en ont besoin. Mais « telle quelle » est **refusée** : la production n'a pas la dérive, et le renommage non gardé fait échouer le déploiement (r47-m1). Version gardée par `information_schema` + test d'idempotence en CI. Sûreté MySQL 8 : `RENAME INDEX` est une opération de métadonnées en place (pas de reconstruction, verrou de métadonnées bref sur 9 lignes), l'unicité n'est jamais suspendue ; `DROP DEFAULT` sans effet sur les données.
+2. **« Ignored build scripts »** : laisser le refus par défaut. Le risque (binaire `argon2` absent après une montée) est couvert par l'e2e (login réel) et par l'image. Ne rien ajouter dans `pnpm-workspace.yaml`.
+3. **NestJS 11 en lot A9-b** : oui, lot séparé, **après P7** (la suite e2e de sécurité sert de filet pour Express 5, le routage et le throttler) ; avec `jose` 4 vers 6 dans le même lot ou voisin. Pas bloquant pour A9.
+4. **O22 (clients Redis de l'adaptateur Socket.IO)** : oui, correctif d'arrêt propre dans un lot voisin (`OnModuleDestroy`), à livrer avant ou avec P7, puis retirer `forceExit: true` de `jest-e2e.json` et corriger au passage l'avertissement « worker process has failed to exit gracefully ». Amélioration, non bloquant.
+5. **Filtrage du job `frontend-headers`** : ne pas filtrer. Un filtre par chemin au niveau du workflow ferait « sauter » aussi les autres jobs, et un filtre par job exigerait une action tierce supplémentaire (à épingler) ; les vérifications requises de GitHub traitent mal un job sauté. 3 à 8 minutes en parallèle des autres jobs sont acceptables. Si le coût devient gênant : cache de couches Docker, pas de filtre.
+
+### Feu vert de commit : **NON, pas encore** (conditionné à la reprise de r47-m1)
+Aucun commit tant que la migration n'est pas gardée et testée : le job `migrations` et `e2e` passent sur base neuve, mais la migration casserait le déploiement. Une fois r47-m1 repris et revu, découpage (chemins explicites, jamais `git add -A`, sans `.claude/` ni `.env`) :
+1. **Build** : `package.json`, `pnpm-workspace.yaml`, `backend/Dockerfile`, `frontend/Dockerfile`, `frontend/Dockerfile.prod`, `backend/tests/unit/dependency-overrides.spec.ts`, `docs/security/audit-exceptions.md`, `backend/tsconfig.json`. Message : `build: pnpm 10.34.9 épinglé partout, surcharges uniquement dans pnpm-workspace.yaml et tsconfig backend sans les specs (A9, O21)`.
+2. **Migration** : `backend/prisma/migrations/20261116000000_a9_migration_drift/migration.sql`. Message : `fix(db): migration de résorption de la dérive entre l'historique et le schéma, tolérante à une base déjà conforme (A9)`.
+3. **CI et e2e** : `.github/workflows/ci.yml`, `backend/jest-e2e.json`, `backend/tests/e2e/`, `docs/security/ci.md`. Message : `ci: déclencheurs sur toutes les PR, jobs audit, e2e, migrations et en-têtes, premier test e2e de sécurité (S3) (A9)`.
+4. **Documentation d'audit** : `docs/security/rapport-audit.md`, `docs/security/journal-corrections.md`. Message : `docs(security): revue r47 du lot A9 (CI, pnpm 10, migration de dérive)`.
+Ordre : 1, 2, puis 3 (la CI du commit 3 doit être verte), puis 4. Aucune mention d'outil d'assistance ni `Co-Authored-By`.
+
+### Conditions de déploiement (après VALIDÉ de la reprise)
+1. **Base** : la seule migration en attente est `20261116000000_a9_migration_drift` (16 appliquées en production). Avec la version gardée, elle ne modifie rien en production (aucun défaut à retirer, index déjà conforme) et s'enregistre dans `_prisma_migrations`. **Sauvegarde préalable** : `mysqldump` complet selon le runbook S28 (précaution habituelle, aucune donnée touchée). Aucun temps d'arrêt attendu.
+2. **Avant** : relire en lecture seule l'état de `User_ssoUid_key` et de `SSOConfiguration.updatedAt` (déjà conforme le 2026-11-11). Recommandé : comparer l'ensemble du schéma de production au schéma Prisma (`mysqldump --no-data` vers une base jetable, puis `prisma migrate diff --from-url … --to-schema … --exit-code`) pour détecter d'autres écarts entre l'historique et la production, que la CI sur base neuve ne voit pas.
+3. **Images** : reconstruire backend et frontend (`docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build`) pour embarquer pnpm 10.34.9 ; mêmes versions résolues, aucun changement d'API ni de format de jeton. Vérifier au démarrage : `node dist/main` OK, connexion (hachage `argon2`) OK.
+4. **Si la migration non gardée avait été appliquée** : `prisma migrate resolve --rolled-back 20261116000000_a9_migration_drift` puis `migrate deploy` avec la version corrigée (changement de la somme de contrôle : la migration n'ayant pas été enregistrée comme appliquée, c'est sans conséquence).
+5. **GitHub** (hors dépôt) : marquer `audit`, `e2e`, `migrations`, `frontend-headers`, `secrets-scan`, `build-and-test` comme vérifications requises de la branche `main`, sinon la CI n'empêche rien. À confirmer par l'utilisateur ; je n'ai pas vérifié ce réglage.
+6. **Limites de cette revue** : le comportement réel des workflows sur GitHub (durée, caches, résolution du SHA de `pnpm/action-setup`) n'a pas été observé, seulement `actionlint` et l'équivalent local de chaque job.
+
+### Ordre des constats ouverts (fin de r47)
+1. **r47-m1** (Majeur, bloquant) : reprise de la migration de dérive ; fixeur.
+2. **r47-m2** (Mineur) : message français du 429 global et affichage frontend.
+3. Améliorations : r47-a1 (SHA de commit de `pnpm/action-setup`), r47-a2 (annulation de la CI sur `main`), O22 (arrêt propre des clients Redis, puis retrait de `forceExit`), Q-2 (borne `< 500` de la matrice, avec P7).
+4. **Suite de la Phase 6** : **P7** (suite `backend/tests/e2e/security/` regroupant les tests d'abus, au-dessus de l'infrastructure d'A9), puis **A9-b** (NestJS 11, après P7), puis **A8** (audit transactionnel unifié), puis **P2** (bandeaux d'obsolescence, définition de terminé).
+5. Reliquats antérieurs : r44-a3 (bornes des 41 champs, à confirmer par l'utilisateur), r42-a1 (décision utilisateur), parcours manuel avant `CSP_MODE=enforce`, S30 (actions d'exploitation), recensement S19/S20, S26, A5 à A7, P5, P8, O10 à O15, O17.
+6. Actions d'exploitation : sauvegarde et vérification en lecture seule avant la migration ; vérifications GitHub requises ; `TRUST_PROXY_HOPS` et Nginx déjà en place en production (vérifiés le 2026-11-11).
+
+## Revue r48 : reprise r47 (migration gardée, 429 en français, épinglages CI) : VALIDÉ, une réserve Mineure sur l'affichage frontend du 429
+
+**Statut** : r47-m1 **VALIDÉ** (rejoué par l'architecte sur deux MySQL 8.0 jetables). r47-a1 et r47-a2 **VALIDÉS**. r47-m2 **VALIDÉ côté backend** ; côté frontend **VALIDÉ avec réserve** : nouveau constat **r48-m1** (Mineur, non bloquant pour la migration ni pour le backend). Aucune faille de sécurité nouvelle.
+
+### Nouveaux constats
+
+| ID | Sévérité | Constat | Remédiation et critère d'acceptation |
+| --- | --- | --- | --- |
+| **r48-m1** | **Mineur** (UX, régression d'information ; pas de risque de sécurité) | `frontend/src/http-errors.ts` (`apiErrorMessage`, `readApiError`) et `AppContext.tsx` (`reportApiError`) remplacent **tout** 429 par « Patientez quelques instants ». Or le backend a trois 429 qui portent une information utile et déjà en français : `account-lockout.ts:73` « compte temporairement verrouillé, réessayez plus tard », `account-lockout.ts:80` « réessayez dans une minute », et le limiteur global (`THROTTLE_MESSAGE`, r47-m2). Avant ce lot, l'utilisateur verrouillé voyait « compte temporairement verrouillé » ; après, il croit à un simple ralentissement et réessaie, ce qui entretient le verrou. | Pour un 429 : afficher le `message` du serveur s'il est une chaîne non vide (JSON Nest) ; n'utiliser `TOO_MANY_REQUESTS_MESSAGE` qu'en repli (corps absent, non JSON, par exemple la page HTML de Nginx). Même règle dans `reportApiError` (lire le corps avant de trancher). Tests vitest : (a) 429 JSON avec message de verrouillage : message conservé ; (b) 429 HTML ou corps vide : message générique ; (c) tableau de messages joint ; contre-mutation (retour au « toujours générique ») : au moins un échec. |
+| **r48-a1** | Amélioration | Les `fetch` non repris (`Login.tsx`, `sso-oauth.ts`, `IntegrationsPanel.tsx`, `CapacityView.tsx`, `AgileView.tsx`, `FinancesView.tsx`, `NotificationInbox.tsx`, `TaskCommentsPanel.tsx`, etc.) affichent le message du serveur. Avec le backend r47-m2 déployé, il est en français : seul un 429 de Nginx (corps HTML) resterait mal rendu. | Lot dédié ultérieur (un client HTTP commun plutôt que `readApiError` appel par appel). Pas dans ce lot. |
+| **r48-a2** | Amélioration (environnement du poste, hors dépôt) | `pnpm` global du poste inutilisable dans le dépôt (voir « Environnement »). | Correction côté poste proposée ci-dessous ; aucune modification du dépôt requise. |
+
+### Vérifications de l'architecte (tout rejoué, rien repris de la description)
+
+| Point | Résultat |
+| --- | --- |
+| r47-m1, état « production » (MySQL 8.0 jetable ; 16 migrations appliquées via une copie du dossier sans A9, puis `User_ssoUid_key` présent, `ssoUid` absent, `updatedAt` sans DEFAULT) | `migrate deploy` réussit (17 migrations), index `User_ssoUid_key` unique, `migrate diff --exit-code` = 0, rejeu du SQL deux fois par `db execute` : succès, diff = 0, `migrate deploy` suivant : « No pending migrations ». |
+| r47-m1, état « dérive » (index `ssoUid`, DEFAULT `CURRENT_TIMESTAMP(3)`, vérifié avant) | `migrate deploy` réussit ; index renommé `User_ssoUid_key` (`non_unique = 0`), DEFAULT supprimé ; deux lignes avec le même `ssoUid` : `ERROR 1062 Duplicate entry 'S' for key 'User.User_ssoUid_key'` ; rejeu x2 OK ; diff = 0. |
+| Contre-mutation r47-m1 | `ALTER TABLE User RENAME INDEX ssoUid TO User_ssoUid_key` non gardé sur l'état « production » : `ERROR 1176 Key 'ssoUid' doesn't exist in table 'User'` (donc la garde est nécessaire). Le rejeu via `prisma db execute` conserve bien les variables de session (`SET @a9_*`, `PREPARE`, `EXECUTE`) : le job CI `migrations` est réaliste. |
+| `20261107140000_enterprise_sso_scim_mfa` | Intacte (`git diff HEAD` vide sur le dossier). Seul le nouveau dossier `20261116000000_a9_migration_drift` est non suivi. |
+| r47-m2 backend | `getErrorMessage()` surchargé dans `AppThrottlerGuard`, `ThrottlerException(THROTTLE_MESSAGE)` dans `ScimKeyThrottlerGuard` (2 endroits) ; `Retry-After` conservé ; format d'erreur SCIM conservé. **Contre-mutation** (retrait de la surcharge et des messages) : 2 échecs sur 8 (`Received: "ThrottlerException: Too Many Requests"`) ; restauré par `\cp`, `cmp` identique, 8/8. |
+| r47-a1 | `git ls-remote pnpm/action-setup` : `v4` = `f40ffcd9…` (tag annoté) → `v4^{}` = `b906affc…` = `v4.3.0^{}`. Les 4 usages portent ce commit. `v4.4.0^{}` = `fc06bc12…` existe mais n'est pas la cible de `v4`. |
+| r47-a2 | `cancel-in-progress: ${{ github.event_name == 'pull_request' }}` ; groupe par workflow et ref. |
+| jest backend (`env -u DATABASE_URL`) | 106 suites, **2961/2961**. |
+| `nest build`, `tsc -p tests`, `tsc -p tsconfig.json`, `tsc --noEmit` frontend | 0 erreur. |
+| vitest | 33 fichiers, **290/290**. |
+| `pnpm build` frontend et grep de `dist` | OK ; 0 occurrence de `mock/login`, `Simuler une session`, `fonts.googleapis`. |
+| ESLint | 0 erreur, 51 avertissements préexistants. |
+| Prettier (tous les fichiers modifiés et non suivis `.ts/.tsx/.json/.yml/.yaml`) | propre. |
+| actionlint (`rhysd/actionlint:latest`, fichier passé sur l'entrée standard) | 0 erreur. |
+| `pnpm audit --prod --audit-level=high` | code 0. Lockfile inchangé (`git diff HEAD` vide). |
+| e2e (MySQL 8.0 et Redis 7 jetables, base `planner_e2e`) | **5/5** ; le garde-fou refuse bien une base sans suffixe `_test`/`_e2e` (essai initial sur `e2e`, refusé). |
+| Environnement | Conteneurs `r48-*` supprimés (vérifié) ; aucun processus résiduel ; aucune écriture en production ni sur la VM ; fichiers temporaires de config Prisma supprimés. Les conteneurs préexistants du poste (`planner_*`, `costudia-*`) n'ont pas été touchés. |
+
+### Environnement : `pnpm` global cassé (« This: not found »)
+- **Cause établie** : ce n'est pas pnpm 10 en soi, c'est l'**interaction du pnpm 11.5.2 global** (`~/.local/share/pnpm`, shim lié à `global/v11`) avec le champ `packageManager` du dépôt. Pnpm 11 télécharge la version demandée, `@pnpm/exe` 10.34.9, dans `~/.local/share/pnpm/store/v11/links/@pnpm/exe/10.34.9/…`. Le binaire `pnpm` de ce paquet est un **fichier d'attente de 34 octets** (« This file intentionally left blank ») que le script `preinstall: node setup.js` doit remplacer par le vrai binaire. Ce script n'a pas été exécuté (marqueur `.pnpm-needs-build` présent : pnpm 11 bloque les scripts de build par défaut). Le shell exécute donc le fichier texte comme un script `sh` : « This: not found ». Avec 9.15.4, la version était installée sous une autre forme (`.tools/pnpm/9.15.4`, qui fonctionne), d'où l'apparition du problème avec le passage à 10.
+- **Preuve que 10.34.9 fonctionne** : avec le `PATH` de nvm en premier (shim `corepack`), `pnpm -v` donne 10.34.9 et toutes les mesures de cette revue (jest, build, e2e, audit, prettier) ont tourné sans problème. Le job CI n'est pas concerné (`pnpm/action-setup` installe pnpm lui-même ; les Dockerfiles font `npm install -g pnpm@10.34.9`, image construite en r47).
+- **Gêne pour l'utilisateur** : toute commande `pnpm` lancée dans le dépôt depuis un shell au `PATH` par défaut (celui où `~/.local/share/pnpm` précède nvm) échoue, y compris en dehors de ce dépôt tant qu'un `packageManager` 10.x est lu ; hors dépôt, `pnpm -v` répond 11.3.0/11.5.2.
+- **Corrections proposées (non appliquées, je n'ai pas touché à l'installation globale)** :
+  1. **Contournement immédiat, sans rien modifier** : lancer `corepack pnpm …` ou placer le répertoire de nvm avant `~/.local/share/pnpm` dans le `PATH` (le shim `pnpm` de corepack, 0.34.6, installe et sert 10.34.9).
+  2. **Réparation durable du pnpm global** (à faire par l'utilisateur) : autoriser le script de build de `@pnpm/exe` dans la configuration globale de pnpm 11 (`allowBuilds: '@pnpm/exe': true`, ou `pnpm approve-builds -g`), supprimer l'installation incomplète de `@pnpm/exe` 10.34.9 sous `~/.local/share/pnpm`, puis relancer une commande `pnpm` dans le dépôt pour qu'elle soit retéléchargée. Hypothèse non testée de mon côté (je n'ai pas le droit de modifier l'installation globale) ; si elle échoue, utiliser le contournement 1.
+  3. **Non recommandé** : désactiver `manage-package-manager-versions` pour que pnpm 11 travaille directement sur le dépôt : le lockfile, `allowBuilds` et les surcharges sont validés avec 10.34.9, pas avec 11.
+  - Reliquat inoffensif : `~/.local/share/pnpm/.tools/pnpm/9.15.4_tmp_168978_0` (installation interrompue de 9.15.4).
+
+### Réponses aux 3 questions du fixeur
+1. **Message du serveur pour le 429 de verrouillage** : **oui, il prime**. Les messages serveur des 429 sont déjà en français et informatifs (« compte temporairement verrouillé », « réessayez dans une minute ») ; le générique ne doit servir que de repli quand le corps n'est pas un JSON Nest avec un `message` (page HTML de Nginx, corps vide). C'est r48-m1. L'objectif de r47-m2 (ne plus afficher `ThrottlerException: Too Many Requests`) est déjà atteint par le backend.
+2. **v4.3.0 ou v4.4.0** : **rester sur v4.3.0** (`b906affc…`), qui est ce que `v4` désigne aujourd'hui et ce qui a servi aux mesures. Passer à v4.4.0 serait un changement de comportement sans bénéfice pour cette revue ; à traiter par la maintenance habituelle (Dependabot ou revue trimestrielle des SHA), pas dans ce lot.
+3. **Autres `fetch` du frontend** : **plus tard**, lot dédié (r48-a1), idéalement avec un client HTTP commun. Raison : avec le backend r47-m2, le message serveur est déjà en français ; ne reste que le 429 de Nginx en HTML. Étendre `readApiError` appel par appel multiplie les modifications pour un gain faible.
+
+### Verdicts
+
+| Point | Verdict |
+| --- | --- |
+| r47-m1 : migration gardée (`information_schema`, `PREPARE`/`EXECUTE`), étapes CI de rejeu et second diff | **VALIDÉ** |
+| r47-m2 backend (`AppThrottlerGuard`, `ScimKeyThrottlerGuard`, tests) | **VALIDÉ** |
+| r47-m2 frontend (`http-errors.ts` et branchements) | **VALIDÉ avec réserve** : r48-m1 à reprendre (petit correctif), non bloquant pour la migration ni le backend |
+| r47-a1 (commit `b906affc…`, v4.3.0) | **VALIDÉ** |
+| r47-a2 (`cancel-in-progress` sur PR seulement) | **VALIDÉ** |
+
+### Feu vert de commit : **OUI** pour l'ensemble, sauf le commit frontend (5) qui attend r48-m1
+Chemins explicites, jamais `git add -A` (ni `.claude/`, ni `.env*`). Messages en français, sans mention d'outil d'assistance ni `Co-Authored-By`. Ordre :
+1. **Build** : `package.json`, `pnpm-workspace.yaml`, `backend/Dockerfile`, `frontend/Dockerfile`, `frontend/Dockerfile.prod`, `backend/tsconfig.json`, `backend/tests/unit/dependency-overrides.spec.ts`, `docs/security/audit-exceptions.md`. Message : `build: pnpm 10.34.9 épinglé partout, surcharges uniquement dans pnpm-workspace.yaml, tsconfig backend sans les specs (A9, O21)`.
+2. **Migration** : `backend/prisma/migrations/20261116000000_a9_migration_drift/migration.sql`. Message : `fix(db): migration de résorption de la dérive entre l'historique et le schéma, gardée et idempotente (A9, r47-m1)`.
+3. **CI et e2e** : `.github/workflows/ci.yml`, `backend/jest-e2e.json`, `backend/tests/e2e/`, `docs/security/ci.md`. Message : `ci: déclencheurs sur toutes les PR, jobs audit, e2e, migrations (avec rejeu idempotent) et en-têtes, premier test e2e de sécurité, pnpm/action-setup épinglé sur un commit (A9, r47-a1, r47-a2)`.
+4. **429 backend** : `backend/src/common/app-throttler.guard.ts`, `backend/tests/http/scim-throttler.spec.ts`. Message : `fix(security): message du 429 du limiteur global et de SCIM en français, Retry-After conservé (r47-m2)`.
+5. **429 frontend** (après r48-m1) : `frontend/src/http-errors.ts`, `frontend/src/http-errors.spec.ts`, `frontend/src/account-api.ts`, `frontend/src/security-api.ts`, `frontend/src/github-oauth.ts`, `frontend/src/github-repos.ts`, `frontend/src/invitation-store.ts`, `frontend/src/context/AppContext.tsx`, `frontend/src/components/AdminConsole.tsx`. Message : `fix(frontend): messages d'erreur HTTP communs, message dédié en repli pour un 429 sans corps exploitable (r47-m2, r48-m1)`.
+6. **Documentation d'audit** : `docs/security/rapport-audit.md`, `docs/security/journal-corrections.md`. Message : `docs(security): revues r47 et r48 du lot A9 et reprise de la migration de dérive`.
+La CI du commit 3 doit être verte avant le 4 ; le commit 6 en dernier.
+
+### Conditions de déploiement
+1. **Périmètre** : backend (commit 4), migration (2) et images reconstruites (1) peuvent partir sans attendre r48-m1 : le frontend actuellement en production affiche déjà le message du serveur, donc le 429 français du backend s'affiche correctement. Le frontend (5) part avec ou après r48-m1.
+2. **Sauvegarde** `mysqldump` complet avant (runbook S28) ; relecture en lecture seule de `User_ssoUid_key` et de `SSOConfiguration.updatedAt` (conformes le 2026-11-11). La migration gardée n'effectue alors aucune modification ; elle s'enregistre dans `_prisma_migrations` (17 migrations). Pas d'arrêt de service.
+3. **Recommandé** : comparer l'ensemble du schéma de production au schéma Prisma (`mysqldump --no-data` vers une base jetable, puis `prisma migrate diff --from-url … --to-schema … --exit-code`) : la CI sur base neuve ne voit pas d'autres écarts éventuels entre production et historique.
+4. **Images** : `docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build`. Vérifier le démarrage (`node dist/main`), une connexion (hachage `argon2`), puis un 429 réel : le corps doit être `Trop de requêtes. Réessayez dans quelques instants.` avec `Retry-After`.
+5. **Rollback** : retour aux images précédentes ; la migration est sans effet sur une base conforme et n'a pas de retour arrière à jouer.
+6. **GitHub** (hors dépôt, à confirmer par l'utilisateur) : vérifications requises sur `main` (`audit`, `e2e`, `migrations`, `frontend-headers`, `secrets-scan`, `build-and-test`).
+7. **Limites** : le comportement réel des workflows sur GitHub n'a pas été observé (actionlint et équivalents locaux seulement) ; l'hypothèse de réparation du pnpm global (point 2 de l'environnement) n'est pas testée.
+
+### Ordre des constats ouverts (fin de r48)
+1. **r48-m1** (Mineur) : affichage du message serveur pour un 429 côté frontend ; fixeur, avant le commit 5.
+2. Améliorations : r48-a1 (autres `fetch`, client HTTP commun, lot ultérieur), r48-a2 (pnpm global du poste, action de l'utilisateur), O22 (arrêt propre des clients Redis puis retrait de `forceExit`), Q-2 (borne `< 500` de la matrice, avec P7).
+3. **Suite de la Phase 6** : **P7** (suite `backend/tests/e2e/security/`), puis **A9-b** (NestJS 11, après P7, avec `jose` 4 vers 6), puis **A8**, puis **P2**.
+4. Reliquats antérieurs : r44-a3 (à confirmer par l'utilisateur), r42-a1 (décision utilisateur), parcours manuel avant `CSP_MODE=enforce`, S30 (actions d'exploitation), recensement S19/S20, S26, A5 à A7, P5, P8, O10 à O15, O17.
+5. Actions d'exploitation : sauvegarde avant migration ; comparaison complète du schéma de production ; vérifications GitHub requises ; `TRUST_PROXY_HOPS` et Nginx déjà en place.
+6. Clos par cette revue : r47-m1, r47-m2 (backend), r47-a1, r47-a2.
+
+## Revue r49 : reprise r48-m1 (message du 429 côté frontend) : À REPRENDRE, un défaut Mineur résiduel (r49-m1)
+
+**Statut** : r48-m1 **À REPRENDRE** (un seul chemin ne respecte pas le critère : `invitationErrorFrom`). Partie frontend de r47-m2 : **VALIDÉE** pour tous les autres branchements. Aucune faille de sécurité nouvelle.
+
+### Nouveau constat
+
+| ID | Sévérité | Constat | Remédiation et critère d'acceptation |
+| --- | --- | --- | --- |
+| **r49-m1** | **Mineur** (UX ; pas de risque de sécurité : React échappe le texte) | `frontend/src/invitation-store.ts`, `invitationErrorFrom` : pour un corps non JSON (page HTML de Nginx), `JSON.parse` lève, `message` reste égal au texte brut, et `apiErrorMessage(429, texteBrut, …)` le renvoie tel quel. **Reproduit** : `invitationErrorFrom(new Response('<html><h1>429 Too Many Requests</h1></html>', {status: 429}), 'repli').message` vaut `<html><h1>429 Too Many Requests</h1></html>` au lieu du message générique. Le test existant ne couvre que le corps vide. | Pour un 429, ne jamais retenir le texte brut : dans le `catch` (ou après), forcer `message = ''` si `res.status === 429` (les autres statuts gardent le « texte brut » voulu). Variante équivalente : extraire via `serverMessageOf` pour le JSON. Tests : 429 HTML donne `TOO_MANY_REQUESTS_MESSAGE` ; 429 JSON de verrouillage conservé ; 403 en texte brut inchangé (non-régression). Contre-mutation : retirer la garde doit faire échouer le test HTML. |
+
+### Vérifications de l'architecte (rejouées)
+
+| Point | Résultat |
+| --- | --- |
+| vitest | 34 fichiers, **295/295** |
+| `tsc --noEmit` frontend | 0 erreur |
+| `pnpm build` et grep de `dist` (`mock/login`, `Simuler une session`, `fonts.googleapis`) | OK, 0 occurrence |
+| ESLint (10 fichiers touchés) | 0 erreur |
+| Prettier (10 fichiers `.ts/.tsx`) | propre |
+| Contre-mutation (`if (message && status !== 429)` dans `apiErrorMessage`, soit « 429 toujours générique ») | **6 échecs sur 10** dans `http-errors.spec.ts` et `AppContext.rate-limit.spec.tsx` ; restauré par `\cp`, `cmp` identique |
+| Test jetable sur `invitationErrorFrom` (429 HTML) | échec, défaut r49-m1 confirmé ; fichier supprimé |
+| Revue de code | `serverMessageOf` / `apiErrorMessage` / `readApiError` conformes (message prioritaire, repli pour HTML, vide, absent, blanc, tableau vide). `account-api`, `security-api`, `github-oauth`, `github-repos` passent par `res.json().catch(() => ({}))` : un HTML donne `{}` donc le repli, correct. `reportApiError` : correct pour 429 (HTML, vide, JSON, tableau) ; autres statuts inchangés. Les 5 appels d'`AppContext` et `AdminConsole` passent par `readApiError` : l'ancien `await res.json()` qui levait sur un corps HTML est corrigé au passage (bénéfice). |
+| Environnement | `corepack pnpm` avec nvm en tête du PATH ; aucun processus résiduel lié aux mesures ; aucune écriture en production ni sur la VM ; rien commité ni poussé. |
+
+### Réponse à la question du fixeur : séparateur des tableaux
+**Ne pas uniformiser.** Le cas (429 avec `message` en tableau) est théorique : le backend renvoie des chaînes pour tous ses 429. Le `', '` de `reportApiError` est le comportement historique des autres statuts et des tests existants ; l'espace d'`apiErrorMessage` est celui des clients de compte, de sécurité, GitHub et d'invitation. Uniformiser toucherait des statuts hors périmètre sans gain. À noter seulement : si un client HTTP commun voit le jour (r48-a1), il retiendra un seul séparateur à ce moment-là.
+
+### Verdicts
+
+| Point | Verdict |
+| --- | --- |
+| `http-errors.ts` (`serverMessageOf`, `apiErrorMessage`, `readApiError`) | **VALIDÉ** |
+| `reportApiError` (`AppContext.tsx`) | **VALIDÉ** |
+| `account-api`, `security-api`, `github-oauth`, `github-repos`, `AdminConsole`, appels d'`AppContext` | **VALIDÉ** |
+| `invitation-store.ts` (`invitationErrorFrom`) | **À REPRENDRE** (r49-m1) |
+| Tests (`http-errors.spec.ts`, `AppContext.rate-limit.spec.tsx`) | **VALIDÉ**, à compléter par le cas 429 HTML d'invitation |
+| r48-m1 dans son ensemble | **À REPRENDRE** (petit correctif, une ligne et un test) |
+
+### Feu vert de commit
+- Commits **1 à 4** : déjà faits en local (722df54, 21a8b40, f76e709, a65ceb7), non poussés, inchangés.
+- **Commit 5 (frontend) : feu vert conditionné à r49-m1** (le fixeur corrige, l'architecte relit en revue courte ; pas de nouveau cycle complet). Liste exacte, chemins explicites, jamais `git add -A` ni `.claude/` ni `.env*` : `frontend/src/http-errors.ts`, `frontend/src/http-errors.spec.ts`, `frontend/src/context/AppContext.rate-limit.spec.tsx`, `frontend/src/account-api.ts`, `frontend/src/security-api.ts`, `frontend/src/github-oauth.ts`, `frontend/src/github-repos.ts`, `frontend/src/invitation-store.ts`, `frontend/src/context/AppContext.tsx`, `frontend/src/components/AdminConsole.tsx`. Message : `fix(frontend): messages d'erreur HTTP communs, message du serveur prioritaire et repli générique pour un 429 sans corps exploitable (r47-m2, r48-m1)`.
+- **Commit 6 (docs)** : `docs/security/rapport-audit.md`, `docs/security/journal-corrections.md`, en dernier, après la revue de clôture de r49-m1. Message : `docs(security): revues r47 à r49 du lot A9, migration de dérive et message du 429 frontend`. Aucune mention d'outil d'assistance ni `Co-Authored-By`.
+
+### Conditions de déploiement de l'ensemble 722df54 à commit 6 (production actuelle : 93711a8)
+1. **Ordre et prérequis** : CI verte sur le commit 3 avant le 4 ; rien ne part en production avant r49-m1 clos si le frontend est inclus. Backend (4), migration (2) et images (1) peuvent partir sans le frontend : le frontend en production affiche déjà le message du serveur.
+2. **Sauvegarde** `mysqldump` complet avant (runbook S28) ; relecture en lecture seule de `User_ssoUid_key` et `SSOConfiguration.updatedAt`. La migration `20261116000000_a9_migration_drift` est gardée : sur une base conforme elle ne modifie rien et s'enregistre (17 migrations). Pas d'arrêt de service.
+3. **Recommandé** : comparaison du schéma complet de production avec le schéma Prisma (`mysqldump --no-data` vers une base jetable, puis `prisma migrate diff --exit-code`).
+4. **Images à reconstruire** (backend et frontend : pnpm 10.34.9 dans les Dockerfiles, backend modifié, frontend modifié) : `docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build`. Vérifier : démarrage (`node dist/main`), connexion (argon2), un 429 réel (corps `Trop de requêtes. Réessayez dans quelques instants.` avec `Retry-After`), un verrouillage de compte affiché tel quel dans l'interface, un 429 Nginx (HTML) affiché en message générique.
+5. **Rollback** : images précédentes ; la migration n'a pas de retour arrière à jouer.
+6. **Hors dépôt, à confirmer par l'utilisateur** : vérifications requises sur `main` (`audit`, `e2e`, `migrations`, `frontend-headers`, `secrets-scan`, `build-and-test`). Comportement réel des workflows sur GitHub non observé.
+
+### Périmètre du lot P7 (suite `backend/tests/e2e/security/`)
+Infrastructure existante : `tests/e2e/support/e2e-app.ts` et `s3-mfa-ticket.e2e-spec.ts`, base `*_e2e`, garde-fou de nom de base. Le lot P7 doit couvrir :
+1. **O22 en premier (prérequis)** : `OnModuleDestroy` fermant les clients Redis de l'adaptateur Socket.IO ; `app.close()` propre dans `e2e-app.ts` ; retrait de `forceExit: true` de `backend/jest-e2e.json` ; plus d'avertissement « worker process has failed to exit gracefully ». Critère : `jest --config jest-e2e.json --detectOpenHandles` sans handle ouvert, avec 5/5 existants.
+2. **Authentification et session** : verrouillage de compte (le 429 renvoie le message de verrouillage, `Retry-After` présent) ; rotation et réutilisation du refresh token (révocation de la famille) ; cookies (`HttpOnly`, `Secure`, `SameSite`) ; 401 sans cookie ; MFA (ticket déjà couvert, ajouter code TOTP rejoué et épuisement des tentatives).
+3. **Autorisation (IDOR/BOLA)** : un utilisateur d'un espace A ne lit ni ne modifie projets, tâches, notes, membres ni dépôts de l'espace B ; rôles de la matrice RBAC (`docs/security/matrice-rbac.md`) par route sensible ; impersonation : interdite ou limitée aux routes prévues.
+4. **Limiteurs et abus** : 429 du limiteur global et de SCIM (message français, `Retry-After`, format SCIM conservé) ; limites des routes publiques ; `trust proxy` (`X-Forwarded-For` falsifié sans effet au-delà de `TRUST_PROXY_HOPS`).
+5. **Webhook GitHub et SCIM** : signature invalide ou absente rejetée, rejeu, charge utile surdimensionnée ; clé SCIM invalide.
+6. **Q-2 rattaché à P7** : la borne `< 500` de la matrice (vérifier que toute réponse d'abus est un 4xx, jamais un 5xx) devient un test paramétré qui parcourt les cas d'abus ci-dessus et échoue sur tout statut `>= 500`.
+7. **Critères d'acceptation** : chaque test d'abus a sa contre-mutation documentée (retrait du garde-fou : au moins un échec) ; suite exécutée dans le job CI `e2e` ; aucune dépendance à la production ; durée raisonnable (cible < 5 min).
+Hors P7 : r48-a1 (client HTTP commun), A9-b, A8, P2.
+
+### Ordre des constats ouverts (fin de r49)
+1. **r49-m1** (Mineur) : `invitationErrorFrom` renvoie le HTML brut pour un 429 ; fixeur, avant le commit 5 (r48-m1 reste ouvert jusqu'à là).
+2. Améliorations : r48-a1 (autres `fetch`, client HTTP commun), r48-a2 (pnpm global du poste, action de l'utilisateur), O22 (en tête de P7), Q-2 (avec P7).
+3. **Suite de la Phase 6** : **P7**, puis **A9-b** (NestJS 11, après P7, avec `jose` 4 vers 6), puis **A8**, puis **P2**.
+4. Reliquats antérieurs : r44-a3 (à confirmer par l'utilisateur), r42-a1 (décision utilisateur), parcours manuel avant `CSP_MODE=enforce`, S30 (actions d'exploitation), recensement S19/S20, S26, A5 à A7, P5, P8, O10 à O15, O17.
+5. Actions d'exploitation : sauvegarde avant migration ; comparaison complète du schéma de production ; vérifications GitHub requises.
+6. Clos par cette revue : partie frontend de r47-m2 (hors r49-m1).
+
+---
+
+## Revue r50 (architecte) : clôture courte de r49-m1
+
+**Verdict r49-m1 : VALIDÉ.** `invitationErrorFrom` vide le message pour un 429 non JSON (HTML Nginx), donc `apiErrorMessage` renvoie le message générique ; un 429 JSON garde le message du serveur ; les autres statuts gardent le texte brut. Le test couvre les trois cas. r48-m1 est clos, et la partie frontend de r47-m2 aussi.
+
+| Point | Résultat |
+| --- | --- |
+| vitest | 34 fichiers, **296/296** |
+| `tsc --noEmit` frontend | 0 erreur |
+| Contre-mutation (retrait de `if (res.status === 429) message = ''`) | 1 échec sur 7 dans `http-errors.spec.ts` (le test d'invitation) ; restauré par `\cp`, `cmp` identique |
+| Environnement | `corepack pnpm`, nvm en tête du PATH ; aucun processus résiduel ; rien commité ni poussé |
+
+### Feu vert final de commit (les commits 1 à 4 sont faits : 722df54, 21a8b40, f76e709, a65ceb7)
+- **Commit 5 (frontend)**, chemins explicites, jamais `git add -A`, ni `.claude/`, ni `.env*` : `frontend/src/http-errors.ts`, `frontend/src/http-errors.spec.ts`, `frontend/src/context/AppContext.rate-limit.spec.tsx`, `frontend/src/account-api.ts`, `frontend/src/security-api.ts`, `frontend/src/github-oauth.ts`, `frontend/src/github-repos.ts`, `frontend/src/invitation-store.ts`, `frontend/src/context/AppContext.tsx`, `frontend/src/components/AdminConsole.tsx`.
+  Message : `fix(frontend): messages d'erreur HTTP communs, message du serveur prioritaire et repli générique pour un 429 sans corps exploitable (r47-m2, r48-m1)`
+- **Commit 6 (docs)**, en dernier : `docs/security/rapport-audit.md`, `docs/security/journal-corrections.md`.
+  Message : `docs(security): revues r47 à r49 du lot A9, migration de dérive et message du 429 frontend`
+- Aucune mention d'outil d'assistance ni `Co-Authored-By`. Conditions de déploiement : voir « Revue r49 ».
+
+### Ordre des constats ouverts (fin de r50)
+1. Aucun constat Mineur ou supérieur ouvert dans le lot A9 / r47 à r49.
+2. **Suite : P7**, périmètre défini en r49 (O22 en tête, authentification et session, IDOR/BOLA, limiteurs, webhook et SCIM, Q-2, critères d'acceptation avec contre-mutations et job CI `e2e`).
+3. Ensuite A9-b (NestJS 11, après P7), A8, P2.
+4. Améliorations : r48-a1 (client HTTP commun), r48-a2 (pnpm global du poste, action utilisateur), O22 et Q-2 (dans P7).
+5. Reliquats antérieurs : r44-a3, r42-a1, parcours manuel avant `CSP_MODE=enforce`, S30, recensement S19/S20, S26, A5 à A7, P5, P8, O10 à O15, O17.
+6. Actions d'exploitation : sauvegarde avant migration, comparaison complète du schéma de production, vérifications GitHub requises.
