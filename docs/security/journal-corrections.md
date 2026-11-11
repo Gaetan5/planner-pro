@@ -5096,3 +5096,60 @@ Batterie rejouée (`r53-mysql`, `r53-redis`, supprimés) : jest 109 suites 2 985
 Réponses : (1) `remove` de `displayName` : oui, correctif séparé, r53-m1 (400 SCIM `mutability`). (2) Bloquer `resolved: false` : non, ni serveur (`resolved` vient du client, `executeActions` valide chaque champ) ni dans ce lot ; décision d'interface ouverte en r53-a2 (le texte de l'aperçu promet un blocage qui n'existe pas). (3) CI : garder. Écart noté : « huit autres » DTO contre dix n'apparaît pas dans le journal écrit (12 fichiers, 22 champs).
 
 **Constats encore ouverts (à relancer vers `fixeur`)** : r53-m1 (petit lot P7-d). Puis A9-b (NestJS 11), A8 (y inclure O-b et O-e), P2. Améliorations : r53-a1, r53-a2, O-f, O23, O-a, r48-a1, r48-a2. Feu vert de commit donné (5 commits : N3 ; N4 et N6 ensemble ; N5 ; e2e ; docs, voir le rapport). Environnement : conteneurs `r53-mysql` et `r53-redis` supprimés, rien commité ni poussé, aucune écriture en production.
+
+## Lot P7-d (fixeur)
+
+Revue de référence : r53 (architecte), constat r53-m1. Aucune migration, aucune dépendance, aucun changement de schéma. Aucune modification du frontend.
+
+### r53-m1 — `remove` de `displayName` écrivait « undefined » comme nom du compte
+
+**Statut** : CORRIGÉ – À REVOIR
+
+**Changement** :
+- `backend/src/auth/scim/scim.service.ts`, `patchUser` (branche `displayname`) : une opération `remove` (quelle que soit la casse de `op`, déjà normalisée en minuscules par le DTO), ou une opération à chemin `displayName` sans valeur, lève un 400 SCIM `scimType: 'mutability'` avant toute écriture (les écritures ont lieu après la boucle des opérations : le refus est global, une opération valide qui précède n'est pas appliquée).
+- `scimText` : `undefined` n'est plus toléré (il passait par `String(undefined)`), il est refusé en `invalidValue` ; commentaire mis à jour. Ceci couvre aussi `replace`/`add` sur `displayName` sans valeur, qui produisaient le même défaut.
+
+**Variantes vérifiées** : chemin `displayName`, `DISPLAYNAME`, `DisplayName` avec `Remove` (e2e) ; `remove` sans chemin avec `value.displayName` ; `remove` avec chemin et valeur ; `replace` de `displayName` sans valeur. `remove` de `userName` : déjà refusé (`String(undefined)` différent de l'adresse, `assertEmailUnchanged`), `remove` de `emails` : aucune valeur candidate, sans effet. `remove` d'un attribut non géré (`title`) : inchangé, sans effet.
+
+**Tests** :
+- Unitaire `scim.service.spec.ts` : `r53-m1 : remove de displayName (…)` (6 cas + opération valide suivie d'un remove, `prisma.user.update` non appelé) et `remove d'un autre attribut ignoré reste sans effet` ; le test N3 qui figeait l'ancien comportement (« remove sans valeur résolu ») est corrigé (titre et assertion retirée), le remplacement valide de 191 caractères est conservé.
+- e2e `webhook-scim.e2e-spec.ts` : `r53-m1 : PATCH remove de displayName : 400 SCIM mutability, nom inchangé en base` (3 variantes, corps au format SCIM Error, nom relu en base).
+- Résultat : unitaire SCIM 25/25, e2e SCIM 15/15 (fichier complet), batterie complète ci-dessous.
+
+**Contre-mutations** : `scim.service.ts` remplacé par la version `HEAD` (retour à `String(op.value)`), sauvegarde du fichier corrigé, restauration par `\cp` puis `cmp` identique. Unitaire SCIM : 1 échec (`r53-m1 : remove de displayName…`), 24 réussis. e2e `webhook-scim` : 1 échec (`r53-m1 : PATCH remove…`), 13 réussis. Fichier restauré : `cmp` identique.
+
+**Écart par rapport au rapport** : deux, mineurs. (1) Le refus s'applique aussi à `replace`/`add` de `displayName` sans valeur (même défaut, même cause). (2) Une valeur `null` reste refusée en `invalidValue` (non textuelle), pas en `mutability`.
+
+**Questions pour l'architecte** :
+1. `remove` du chemin `active` (sans valeur) calcule `activeUpdate = false` et **suspend** le compte. Autre défaut distinct, non traité ici (hors périmètre, comportement possiblement voulu par certains IdP). À ouvrir ou à accepter ?
+2. Le `PUT` ne passe pas par ce chemin (`displayName` absent : nom conservé) : aucun changement.
+
+### Mesures du lot
+
+| Contrôle | Résultat |
+| --- | --- |
+| e2e `--runInBand --detectOpenHandles` | 8 suites, 382/382, aucun handle ouvert signalé |
+| jest unitaire (`env -u DATABASE_URL -u E2E_DATABASE_URL`) | 109 suites, 2 987/2 987 |
+| `nest build` | OK |
+| `tsc -p tests --noEmit` | OK |
+| ESLint | 0 erreur, 15 avertissements `no-explicit-any` préexistants |
+| Prettier (`src`, `tests`) | propre |
+| vitest frontend | 34 fichiers, 296/296 (non modifié) |
+| Environnement | conteneurs `p7d-mysql` et `p7d-redis` supprimés (base `p7d_e2e`), rien commité ni poussé, aucune écriture en production |
+
+### Constats à passer en revue
+r53-m1 : `CORRIGÉ – À REVOIR`.
+
+## Revue architecte (r54) : lot P7-d
+
+Batterie rejouée sur `r54-mysql` et `r54-redis` (supprimés) : e2e 8 suites 382/382 (`--runInBand --detectOpenHandles`), jest 109 suites 2 987/2 987, `nest build`, `tsc -p tests --noEmit`, ESLint (0 erreur, 15 avertissements préexistants), Prettier, vitest 296/296. Trois contre-mutations détectées (refus neutralisé : unitaire et e2e ; `scimText` tolérant `undefined` : unitaire ; refus limité aux `remove` avec chemin : unitaire et e2e), restauration `\cp` et `cmp` identique.
+
+### r53-m1 : `remove` de `displayName`
+**Verdict : VALIDÉ.** Code relu : refus avant toute écriture, atomique, casse de chemin et de `op` couverte, `scimText` sans `undefined`. Remarque sans conséquence : le journal annonce 15 tests e2e SCIM, j'en mesure 14 dans le fichier. Écarts acceptés (`replace`/`add` sans valeur refusés ; `null` en `invalidValue`).
+
+### Réponses
+(1) `remove` de `active` suspend le compte : à ouvrir, **r54-m1** (400 `mutability` sur `remove`, 400 `invalidValue` sur valeur absente ou non booléenne ; vérifier les formats Entra ID et Okta). (2) `PUT` sans `displayName` : accepté, non concerné. Constat ajouté : **r54-a1** (`replace` de `displayName` avec `''` répond 200 sans effet : répondre 400).
+
+**Feu vert de commit** : 2 commits, voir le rapport (code et tests SCIM ensemble, puis docs). **Conditions de déploiement** : aucune migration ni variable, pas de changement de proxy ; ne pas activer SCIM en production avant r54-m1.
+
+**Constats encore ouverts (à relancer vers `fixeur`)** : P7-e : r54-m1 et r54-a1. Puis A9-b (NestJS 11), A8 (y inclure O-b et O-e), P2. Améliorations : r53-a1, r53-a2, O-f, O23, O-a, r48-a1, r48-a2. Environnement : conteneurs `r54-mysql` et `r54-redis` supprimés, rien commité ni poussé, aucune écriture en production.

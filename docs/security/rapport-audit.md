@@ -8,7 +8,7 @@
 | Périmètre | `backend/` (NestJS 10, Prisma 7 / adaptateur MariaDB, MySQL 8, Socket.IO, Redis), `frontend/` (React 18 / Vite), `docker-compose*.yml`, `.github/workflows/ci.yml`, `firestore.rules` |
 | Méthode | Revue de code manuelle ligne par ligne, `pnpm audit --prod`, exécution de la suite Jest backend (32 suites, 185 tests, tous verts : **aucun ne couvre les scénarios d'attaque ci-dessous**) |
 | Statut | **Source de vérité** pour l'agent `fixeur`. Les identifiants sont stables : ne jamais renuméroter, ajouter les nouveaux constats à la suite. |
-| Révision | r53 (2026-11-11) : lot P7-c (N3, N4, N5, N6) VALIDÉ, feu vert de commit ; reste ouvert r53-m1 (SCIM `remove` de `displayName`), puis A9-b, A8, P2. Voir la section « Revue r53 » à la fin. |
+| Révision | r54 (2026-11-11) : lot P7-d (r53-m1) VALIDÉ, feu vert de commit ; ouverts r54-m1 (SCIM `remove` de `active` suspend le compte), r54-a1, puis A9-b, A8, P2. Voir la section « Revue r54 » à la fin. |
 
 > Note de reconstruction : le plan de référence S1–S21 / A1–A9 / P1–P8 n'avait jamais été enregistré. La numérotation ci-dessous a été reconstruite en respectant le découpage par phase. Chaque constat a été **revérifié dans le code actuel** ; les anciens documents (`docs/audit_roadmap_phases.md`, `docs/etat_des_lieux.md`, `docs/manifeste_actions_restantes.md`) contiennent des affirmations fausses, signalées en section 1.3.
 
@@ -5861,3 +5861,55 @@ Aucune mention d'outil d'assistance ni `Co-Authored-By`. Pousser après les 5 co
 4. Reliquats antérieurs : r44-a3, r42-a1, parcours manuel avant `CSP_MODE=enforce`, S30, recensement S19/S20, S26, A5 à A7, P5, P8, O10 à O15, O17.
 5. Actions d'exploitation : sauvegarde avant migration, comparaison complète du schéma de production, vérifications GitHub requises, confirmation de `TRUST_PROXY_HOPS` de production (O-c).
 6. Clos par cette revue : N3, N4, N5, N6.
+
+## Revue r54 (architecte) : lot P7-d (r53-m1) : VALIDÉ, un constat Mineur et une Amélioration (non bloquants)
+
+**Verdict global : VALIDÉ, feu vert de commit.** Le `remove` de `displayName` répond 400 SCIM `mutability` sans écriture, `undefined` n'est plus converti en chaîne, et le refus est global (les écritures ont lieu après la boucle des opérations). Les deux écarts déclarés sont acceptés. Un défaut voisin, non traité et hors du périmètre du lot, est ouvert (r54-m1 : `remove` de `active`).
+
+| Point | Verdict |
+| --- | --- |
+| r53-m1 (`remove` de `displayName` : 400 `mutability`, `scimText` refuse `undefined`) | **VALIDÉ** : 3 contre-mutations détectées, diff relu, périmètre limité à `patchUser` et `scimText` |
+| Test N3 modifié (retrait de « remove sans valeur résolu ») | **ACCEPTÉ** : il figeait le défaut ; le cas valide de 191 caractères est conservé |
+
+### Vérifications indépendantes (MySQL 8.0 et Redis 7 jetables `r54-mysql` et `r54-redis`, supprimés)
+- e2e `--runInBand --detectOpenHandles` : 8 suites, **382/382**, aucun handle ouvert. Jest unitaire (`env -u DATABASE_URL -u E2E_DATABASE_URL`) : 109 suites, **2 987/2 987**. `nest build` OK ; `tsc -p tests --noEmit` OK ; ESLint 0 erreur, 15 avertissements préexistants ; Prettier propre ; vitest 34 fichiers, 296/296.
+- **Contre-mutations** (restauration `\cp`, `cmp` identique à chaque fois) :
+  1. Refus `remove` neutralisé (`if (false)`) : unitaire en échec (1/25) et e2e en échec (1/14).
+  2. `scimText` qui retolère `undefined` (`String(raw)`), refus `remove` conservé : unitaire en échec (`replace` de `displayName` sans valeur), e2e vert : le cas `replace` sans valeur n'est gardé que par l'unitaire, suffisant.
+  3. Refus limité à `remove` avec chemin (le `remove` sans chemin avec `value.displayName` repasse) : unitaire et e2e en échec.
+  4. Tentative de contournement : casse du chemin (`DISPLAYNAME`) et de `op` (`Remove`) : refusées (déjà dans les tests) ; opération valide suivie d'un `remove` : aucune écriture (relu et mesuré).
+- **Relecture** : `nameUpdate` n'est écrit qu'après la boucle ; `replace` de `displayName` avec la valeur `''` ne lève rien et n'écrit rien (`nameUpdate` falsy), voir r54-a1. Écart de compte : le journal annonce « e2e SCIM 15/15 », je mesure **14/14** dans `webhook-scim.e2e-spec.ts` (13 avant, plus 1). Sans conséquence, la batterie complète est à 382.
+
+### Constats
+**r54-m1 (Mineur, CVSS 3.8 AV:N/AC:L/PR:H/UI:N/S:U/C:N/I:L/A:L) : `PATCH` SCIM `remove` du chemin `active` (ou `replace`/`add` sans valeur, ou valeur non booléenne) suspend le compte.**
+- **Fichier** : `backend/src/auth/scim/scim.service.ts`, `patchUser`, branche `active` : `activeUpdate = activeVal === true || 'true' || 'True'` donne `false` pour `undefined`, `null`, `'yes'`, `1`, ce qui retire la membership (`applyActiveState`) et révoque les invitations en attente.
+- **Impact** : même famille que r53-m1 : une absence de valeur est interprétée comme une décision destructive. Un IdP qui efface l'attribut `active` coupe l'accès d'un utilisateur. Réversible (réactivation par `active: true`), clé SCIM requise.
+- **Remédiation** : `remove` de `active` refusé en 400 `mutability` (cohérent avec r53-m1, l'IdP voit l'échec) ; `replace`/`add` sans valeur ou valeur ni booléenne ni `'true'`/`'false'` (casse ignorée) refusés en 400 `invalidValue`. Aucune écriture, refus global.
+- **Critère d'acceptation** : unitaire (`remove` de `active`, `replace` sans valeur, `'yes'` : 400, `applyActiveState` non appelé ; `true`, `false`, `'True'`, `'false'` inchangés) et e2e (membership conservée) ; contre-mutation : retour à l'évaluation actuelle fait échouer les deux. Vérifier au préalable le comportement d'Entra ID et d'Okta (ils envoient des booléens ou des chaînes « True »/« False »).
+
+**r54-a1 (Amélioration) : `replace` de `displayName` avec `''` répond 200 sans rien changer.** Le client croit le nom vidé. Répondre 400 `invalidValue` (valeur vide), au même lot que r54-m1.
+
+### Réponses aux questions du fixeur
+1. **`remove` de `active` : oui, à ouvrir**, r54-m1. Le comportement n'est défendable pour aucun IdP : la RFC 7644 ne fait pas d'un attribut absent une désactivation, et les IdP désactivent par `active: false`. Séparé de r53-m1 car le périmètre du lot était `displayName` ; petit lot P7-e, sans dépendance, à placer avant l'activation de SCIM en production.
+2. **`PUT` sans `displayName` : non concerné, accepté.** Le nom est conservé (`dto.displayName || dto.name?.formatted`), pas d'écriture de « undefined », test existant. La sémantique stricte d'un PUT (remplacement complet) n'est pas poursuivie : pas de changement.
+3. Écarts du lot : **acceptés**. Le refus pour `replace`/`add` sans valeur est la bonne extension (même cause) ; une valeur `null` en `invalidValue` est correcte (type, pas mutabilité).
+
+### Feu vert de commit (chemins explicites, jamais `git add -A`, ni `.claude/`, ni `.env*`) : 2 commits, dans cet ordre
+1. `fix(security): PATCH SCIM, remove de displayName refusé en 400 mutability, undefined jamais converti en nom (r53-m1)` : `backend/src/auth/scim/scim.service.ts`, `backend/src/auth/scim/scim.service.spec.ts`, `backend/tests/e2e/security/webhook-scim.e2e-spec.ts` (code et tests ensemble : chaque commit passe isolément).
+2. `docs(security): revue r54, lot P7-d (r53-m1)` : `docs/security/rapport-audit.md`, `docs/security/journal-corrections.md`, en dernier.
+Aucune mention d'outil d'assistance ni `Co-Authored-By`.
+
+### Conditions de déploiement (production actuelle : 93711a8 ; l'ensemble couvre aussi P7-b et P7-c, voir r53)
+1. **Prérequis** : CI verte sur tous les jobs ; conditions de r53 inchangées, dont la **sauvegarde `mysqldump` complet** avant la migration `20261117000000_n6_sso_client_secret_text` (déjà en attente de déploiement).
+2. **Migration** : aucune dans ce lot. Aucune dépendance, aucune variable, **aucun changement de proxy** (`ekose-nginx-1` inchangé).
+3. **Vérifications après déploiement** : si SCIM est actif, `PATCH /scim/v2/Users/<id>` avec `remove` de `displayName` : 400 `mutability`, nom inchangé ; `replace` valide : 200 ; vérifier dans les journaux d'un IdP réel qu'il n'émet pas de `remove` de `displayName` en routine (il verrait désormais un échec de synchronisation).
+4. **Rollback** : image précédente, sans effet de données.
+5. **Connu et accepté** : r54-m1 et r54-a1 ; r53-a1, r53-a2. **r53-m1 n'est plus un risque accepté** une fois ce lot déployé. Recommandation : ne pas activer SCIM en production avant r54-m1.
+
+### Ordre des constats ouverts (fin de r54)
+1. **P7-e (petit lot, avant A9-b)** : **r54-m1** (`active` : `remove` en 400 `mutability`, valeur absente ou non booléenne en 400 `invalidValue`), avec **r54-a1** (`displayName` vide).
+2. **Suite de la Phase 6** : **A9-b** (NestJS 11, avec `jose` 4 vers 6), puis **A8** (y inclure O-b et **O-e**), puis **P2**.
+3. Améliorations : **r53-a1**, **r53-a2**, O-f, O23, O-a, r48-a1, r48-a2.
+4. Reliquats antérieurs : r44-a3, r42-a1, parcours manuel avant `CSP_MODE=enforce`, S30, recensement S19/S20, S26, A5 à A7, P5, P8, O10 à O15, O17.
+5. Actions d'exploitation : sauvegarde avant migration, comparaison complète du schéma de production, vérifications GitHub requises, confirmation de `TRUST_PROXY_HOPS` de production (O-c).
+6. Clos par cette revue : r53-m1.
