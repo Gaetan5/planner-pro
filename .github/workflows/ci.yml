@@ -1,9 +1,16 @@
 name: CI
+# A9 : les PR de toutes les branches sont vérifiées (pas seulement celles qui visent main), ainsi
+# que les poussées sur main et sur les branches de sécurité.
 on:
   push:
-    branches: [main]
+    branches: [main, 'security/**']
   pull_request:
-    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # r47-a2 : seules les PR annulent l'exécution précédente ; les poussées sur main et security/**
+  # vont jusqu'au bout (dernière vérification d'un état déployé).
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -39,8 +46,23 @@ jobs:
             exit 1
           fi
 
+  # A9 : avis de sécurité des dépendances de production (seuil : high). Les avis restants, de
+  # gravité moindre, sont justifiés dans docs/security/audit-exceptions.md. Lit le lockfile seul.
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0 (commit pointé par v4)
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+      - name: pnpm audit
+        run: pnpm audit --prod --audit-level=high
+
   build-and-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       mysql:
         image: mysql:8.0
@@ -58,7 +80,7 @@ jobs:
         ports: ['6379:6379']
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0 (commit pointé par v4)
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
@@ -76,6 +98,8 @@ jobs:
           fi
       - name: Lint
         run: pnpm lint
+      - name: Typecheck des tests backend
+        run: pnpm --filter backend exec tsc -p tests --noEmit
       - name: Test Frontend
         run: pnpm --filter frontend test:run
       - name: Test Backend
@@ -86,3 +110,129 @@ jobs:
           ENCRYPTION_KEY: abcdefghijklmnopqrstuvwxyz123456
           REDIS_HOST: localhost
           REDIS_PORT: 6379
+
+  # A9 : suite e2e sur l'application complète (vraie base MySQL, vrai Redis). Un PR qui
+  # réintroduirait S3 (ticket MFA accepté comme jeton d'accès) échoue ici.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test_password
+          MYSQL_DATABASE: planner_pro_e2e
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -ptest_password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+    env:
+      NODE_ENV: test
+      DATABASE_URL: mysql://root:test_password@127.0.0.1:3306/planner_pro_e2e
+      E2E_DATABASE_URL: mysql://root:test_password@127.0.0.1:3306/planner_pro_e2e
+      JWT_SECRET: e2e-jwt-secret-key-32-chars-minimum!
+      ENCRYPTION_KEY: abcdefghijklmnopqrstuvwxyz123456
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: 6379
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0 (commit pointé par v4)
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Client Prisma
+        run: pnpm --filter backend exec prisma generate
+      - name: Migrations
+        run: pnpm --filter backend exec prisma migrate deploy
+      - name: Tests e2e
+        run: pnpm --filter backend exec jest --config jest-e2e.json --runInBand
+
+  # A9 : les migrations versionnées doivent produire exactement le schéma de schema/*.prisma.
+  # La base est migrée par `migrate deploy`, puis comparée au schéma (sans base fantôme) ; tout
+  # écart (code de sortie 2) fait échouer le job.
+  migrations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test_password
+          MYSQL_DATABASE: planner_pro_drift
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -ptest_password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      NODE_ENV: test
+      DATABASE_URL: mysql://root:test_password@127.0.0.1:3306/planner_pro_drift
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0 (commit pointé par v4)
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Appliquer les migrations
+        run: pnpm --filter backend exec prisma migrate deploy
+      - name: Dérive entre migrations et schéma
+        run: >-
+          pnpm --filter backend exec prisma migrate diff
+          --from-config-datasource --to-schema prisma/schema --exit-code
+      # r47-m1 : la migration de dérive doit aussi passer sur une base déjà conforme (état de la
+      # production : index User_ssoUid_key présent, pas de DEFAULT sur updatedAt). Le rejeu du SQL
+      # après `migrate deploy` reproduit cet état ; il ne doit ni échouer ni créer d'écart.
+      - name: Rejeu idempotent de la migration de dérive
+        run: >-
+          pnpm --filter backend exec prisma db execute
+          --file prisma/migrations/20261116000000_a9_migration_drift/migration.sql
+      - name: Dérive après rejeu
+        run: >-
+          pnpm --filter backend exec prisma migrate diff
+          --from-config-datasource --to-schema prisma/schema --exit-code
+
+  # A9 (r42) : en-têtes de sécurité de l'image frontend de production, mesurés sur le conteneur
+  # réel (image construite avec pnpm 10 et Node 20), sur la page d'entrée et sur un asset .js.
+  frontend-headers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Construire l'image frontend de production
+        run: >-
+          docker build -f frontend/Dockerfile.prod
+          --build-arg VITE_API_URL=https://api.ci.example
+          -t planner-frontend-ci .
+      - name: Démarrer le conteneur
+        run: >-
+          docker run -d --name planner-frontend-ci -p 8080:80
+          -e VITE_API_URL=https://api.ci.example planner-frontend-ci
+      - name: Attendre la disponibilité
+        run: |
+          for _ in $(seq 1 30); do
+            if curl -fsS -o /dev/null http://localhost:8080/; then exit 0; fi
+            sleep 1
+          done
+          docker logs planner-frontend-ci
+          echo "Le conteneur frontend ne répond pas." >&2
+          exit 1
+      - name: Vérifier les en-têtes
+        run: sh scripts/check-headers.sh http://localhost:8080
+      - name: Nettoyage
+        if: always()
+        run: docker rm -f planner-frontend-ci
