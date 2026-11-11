@@ -74,11 +74,10 @@ export class ScimService {
   /**
    * N3 : valeur textuelle d'un attribut SCIM destinée à une colonne VARCHAR(191) (`User.name`,
    * `User.email`). Refus 400 `invalidValue` (RFC 7644 §3.12) au lieu d'une erreur de base (500).
-   * `undefined` (opération `remove` sans valeur) n'est pas refusé : il passe par `String()` comme
-   * avant ce correctif (comportement historique conservé, hors périmètre de N3).
+   * r53-m1 : `undefined` est refusé aussi (jamais converti en la chaîne « undefined »).
    */
   private scimText(attribute: string, raw: unknown): string {
-    if (raw !== undefined && typeof raw !== 'string') {
+    if (typeof raw !== 'string') {
       throw new BadRequestException(
         this.scimError(
           400,
@@ -87,7 +86,7 @@ export class ScimService {
         ),
       );
     }
-    const text = String(raw);
+    const text = raw;
     if (text.length > SCIM_TEXT_MAX) {
       throw new BadRequestException(
         this.scimError(
@@ -394,6 +393,16 @@ export class ScimService {
         activeUpdate = activeVal === true || activeVal === 'true' || activeVal === 'True';
       }
       if (path === 'displayname' || op.value?.displayName) {
+        // r53-m1 : `User.name` est obligatoire ; retirer (ou vider) displayName est refusé
+        if (op.op === 'remove' || (path === 'displayname' && op.value === undefined)) {
+          throw new BadRequestException(
+            this.scimError(
+              400,
+              "L'attribut displayName est obligatoire et ne peut pas être supprimé.",
+              'mutability',
+            ),
+          );
+        }
         nameUpdate = this.scimText(
           'displayName',
           path === 'displayname' ? op.value : op.value?.displayName,

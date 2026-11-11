@@ -285,6 +285,43 @@ describe('P7 e2e : webhook GitHub et SCIM', () => {
       expect((await world.prisma.user.findUniqueOrThrow({ where: { id } })).name).toBe(exact);
     });
 
+    it('r53-m1 : PATCH remove de displayName : 400 SCIM mutability, nom inchangé en base', async () => {
+      const owner = await world.createUser({ label: 'scimM1' });
+      const ws = await world.createWorkspace(owner, 'Espace SCIM m1');
+      const key = `scim_live_${randomUUID().replace(/-/g, '')}`;
+      await world.prisma.sCIMApiKey.create({
+        data: { workspaceId: ws, name: 'clé m1', tokenHash: hash(key) },
+      });
+      const domain = `m1-${randomUUID().slice(0, 8)}.example`;
+      await world.prisma.sSOConfiguration.create({
+        data: { workspaceId: ws, domain, verifiedDomain: domain },
+      });
+      const created = await scim('POST', '/scim/v2/Users', key, {
+        schemas: ['urn:ietf:params:scim:schemas:core:2.0:User'],
+        userName: `m1@${domain}`,
+        displayName: 'Nom à conserver',
+        active: true,
+      });
+      expect(created.status).toBe(201);
+      const id = created.body.id as string;
+      for (const operation of [
+        { op: 'remove', path: 'displayName' },
+        { op: 'Remove', path: 'DisplayName' },
+        { op: 'remove', value: { displayName: 'x' } },
+      ]) {
+        const res = await scim('PATCH', `/scim/v2/Users/${id}`, key, {
+          schemas: ['urn:ietf:params:scim:api:messages:2.0:PatchOp'],
+          Operations: [operation],
+        });
+        expect(res.status).toBe(400);
+        expect(res.body.schemas).toEqual(['urn:ietf:params:scim:api:messages:2.0:Error']);
+        expect(res.body.scimType).toBe('mutability');
+      }
+      expect((await world.prisma.user.findUniqueOrThrow({ where: { id } })).name).toBe(
+        'Nom à conserver',
+      );
+    });
+
     it('300 requêtes par minute et par clé, la suivante reçoit un 429 SCIM en français avec Retry-After', async () => {
       const key = `scim_live_${randomUUID().replace(/-/g, '')}`;
       await world.prisma.sCIMApiKey.create({

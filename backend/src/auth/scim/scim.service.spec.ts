@@ -413,7 +413,7 @@ describe('ScimService', () => {
       expect(prisma.user.update).not.toHaveBeenCalled();
     });
 
-    it('N3 : PATCH displayName de 191 caractères accepté ; un remove sans valeur n’est pas refusé (comportement historique)', async () => {
+    it('N3 : PATCH displayName de 191 caractères accepté', async () => {
       prisma.user.findUnique.mockResolvedValue(
         victim({ id: 'u-own', provisionedByWorkspaceId: 'ws-1' }),
       );
@@ -426,12 +426,50 @@ describe('ScimService', () => {
       expect(prisma.user.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: { name: 'é'.repeat(191) } }),
       );
+    });
+
+    it('r53-m1 : remove de displayName (chemin, casse, sans chemin, sans valeur) : 400 mutability, aucune écriture', async () => {
+      prisma.user.findUnique.mockResolvedValue(
+        victim({ id: 'u-own', provisionedByWorkspaceId: 'ws-1' }),
+      );
+      const patch = (operation: Record<string, unknown>) =>
+        service.patchUser('ws-1', 'u-own', { schemas: [], Operations: [operation as never] });
+
+      for (const operation of [
+        { op: 'remove', path: 'displayName' },
+        { op: 'remove', path: 'DISPLAYNAME' },
+        { op: 'remove', path: 'displayName', value: 'Autre' },
+        { op: 'remove', value: { displayName: 'Autre' } },
+        { op: 'replace', path: 'displayName' },
+      ]) {
+        await expect(patch(operation)).rejects.toMatchObject({
+          response: { scimType: 'mutability', status: '400' },
+        });
+      }
+      // Refus global : une opération valide qui précède n'est pas appliquée
       await expect(
         service.patchUser('ws-1', 'u-own', {
           schemas: [],
-          Operations: [{ op: 'remove', path: 'displayName' }],
+          Operations: [
+            { op: 'replace', path: 'displayName', value: 'Nouveau' },
+            { op: 'remove', path: 'displayName' },
+          ] as never,
+        }),
+      ).rejects.toMatchObject({ response: { scimType: 'mutability' } });
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('r53-m1 : remove d’un autre attribut ignoré reste sans effet', async () => {
+      prisma.user.findUnique.mockResolvedValue(
+        victim({ id: 'u-own', provisionedByWorkspaceId: 'ws-1' }),
+      );
+      await expect(
+        service.patchUser('ws-1', 'u-own', {
+          schemas: [],
+          Operations: [{ op: 'remove', path: 'title' }],
         }),
       ).resolves.toBeDefined();
+      expect(prisma.user.update).not.toHaveBeenCalled();
     });
 
     it('un utilisateur ni membre ni provisionné par ce workspace est introuvable (404)', async () => {
