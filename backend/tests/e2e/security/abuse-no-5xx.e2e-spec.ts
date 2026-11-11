@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from 'crypto';
 import { E2eRequestInit, E2eUser, E2eWorld } from '../support/e2e-world';
 
 /**
@@ -576,7 +577,7 @@ const cases = (): AbuseCase[] => [
     body: { command: 'crée une tâche', workspaceId: ':ws', projectId: BIG },
   },
   {
-    name: 'SSO : secret client de 100 caractères (chiffré, colonne VARCHAR(191))',
+    name: 'SSO : secret client de 100 caractères (chiffré, colonne TEXT)',
     method: 'POST',
     path: '/workspaces/:ws/sso',
     auth: 'user',
@@ -644,6 +645,59 @@ const cases = (): AbuseCase[] => [
     path: '/scim/v2/Users/pas-un-uuid',
     headers: { Authorization: 'Bearer inconnu' },
   },
+  // SCIM avec une clé valide (N3) : les valeurs démesurées sont refusées en 400, jamais en 500
+  ...[
+    {
+      name: 'SCIM : PATCH displayName gigantesque (chemin)',
+      method: 'PATCH',
+      body: { op: 'replace', path: 'displayName', value: BIG },
+    },
+    {
+      name: 'SCIM : PATCH displayName gigantesque (objet)',
+      method: 'PATCH',
+      body: { op: 'replace', value: { displayName: BIG } },
+    },
+    {
+      name: 'SCIM : PATCH displayName de 192 caractères (colonne VARCHAR(191))',
+      method: 'PATCH',
+      body: { op: 'replace', path: 'displayName', value: 'd'.repeat(192) },
+    },
+    {
+      name: 'SCIM : PATCH displayName tableau de chaînes',
+      method: 'PATCH',
+      body: { op: 'replace', path: 'displayName', value: Array(1000).fill('abcdefghij') },
+    },
+    {
+      name: 'SCIM : PATCH userName gigantesque',
+      method: 'PATCH',
+      body: { op: 'replace', path: 'userName', value: BIG },
+    },
+    {
+      name: 'SCIM : PATCH emails gigantesque',
+      method: 'PATCH',
+      body: { op: 'replace', path: 'emails', value: [{ value: BIG }] },
+    },
+  ].map(({ name, method, body }): AbuseCase => ({
+    name,
+    method,
+    path: '/scim/v2/Users/:scimuser',
+    headers: { Authorization: 'Bearer :scimkey', 'Content-Type': 'application/scim+json' },
+    body: { schemas: ['urn:ietf:params:scim:api:messages:2.0:PatchOp'], Operations: [body] },
+  })),
+  {
+    name: 'SCIM : PUT displayName de 192 caractères',
+    method: 'PUT',
+    path: '/scim/v2/Users/:scimuser',
+    headers: { Authorization: 'Bearer :scimkey' },
+    body: { userName: ':scimemail', displayName: 'd'.repeat(192) },
+  },
+  {
+    name: 'SCIM : création avec un displayName de 192 caractères',
+    method: 'POST',
+    path: '/scim/v2/Users',
+    headers: { Authorization: 'Bearer :scimkey' },
+    body: { userName: 'q2-scim-new@q2.example', displayName: 'd'.repeat(192) },
+  },
   {
     name: 'webhook : projet non UUID',
     method: 'POST',
@@ -690,9 +744,22 @@ describe('Q-2 e2e : aucun cas d’abus ne produit un 5xx', () => {
   let world: E2eWorld;
   let user: E2eUser;
   let accessToken: string;
-  const refs = { project: '', task: '', ws: '', sprint: '', comment: '', user: '' };
+  const refs = {
+    project: '',
+    task: '',
+    ws: '',
+    sprint: '',
+    comment: '',
+    user: '',
+    scimUser: '',
+    scimKey: '',
+    scimEmail: '',
+  };
 
   beforeAll(async () => {
+    // Sans ces drapeaux, les routes SSO et SCIM répondent 404 et le catalogue ne les éprouve pas
+    process.env.FEATURE_SCIM_ENABLED = 'true';
+    process.env.FEATURE_SSO_ENABLED = 'true';
     world = await E2eWorld.start();
     user = await world.createUser({ label: 'q2' });
     refs.ws = await world.createWorkspace(user, 'Espace Q-2');
@@ -714,9 +781,32 @@ describe('Q-2 e2e : aucun cas d’abus ne produit un 5xx', () => {
         data: { content: 'Commentaire Q-2', taskId: refs.task, userId: user.id },
       })
     ).id;
+    // Compte provisionné par SCIM dans l'espace, avec sa clé (N3) : le PATCH n'atteint la base
+    // que pour un compte créé par l'espace
+    refs.scimKey = `scim_live_${randomUUID().replace(/-/g, '')}`;
+    await world.prisma.sCIMApiKey.create({
+      data: {
+        workspaceId: refs.ws,
+        name: 'clé Q-2',
+        tokenHash: createHash('sha256').update(refs.scimKey).digest('hex'),
+      },
+    });
+    refs.scimEmail = `q2-scim-${randomUUID()}@q2.example`;
+    refs.scimUser = (
+      await world.prisma.user.create({
+        data: {
+          email: refs.scimEmail,
+          name: 'Compte SCIM Q-2',
+          provisionedByWorkspaceId: refs.ws,
+          memberships: { create: { workspaceId: refs.ws, role: 'MEMBER' } },
+        },
+      })
+    ).id;
     accessToken = (await world.login(user)).accessToken;
   });
   afterAll(async () => {
+    delete process.env.FEATURE_SCIM_ENABLED;
+    delete process.env.FEATURE_SSO_ENABLED;
     await world?.close();
   });
 
@@ -728,6 +818,9 @@ describe('Q-2 e2e : aucun cas d’abus ne produit un 5xx', () => {
 
   it.each(list.map((c) => [c.name, c] as const))('%s', async (_name, abuse) => {
     const init: E2eRequestInit = { headers: { ...abuse.headers }, contentType: abuse.contentType };
+    for (const [header, value] of Object.entries(init.headers!)) {
+      init.headers![header] = value.replace(/:scimkey\b/g, refs.scimKey);
+    }
     if (abuse.auth === 'user') init.accessToken = accessToken;
     if (abuse.cookies === 'garbage') {
       init.headers!['Cookie'] = 'accessToken=%E0%A4%A; refreshToken=;;==; foo';
@@ -743,6 +836,9 @@ describe('Q-2 e2e : aucun cas d’abus ne produit un 5xx', () => {
         .replace(/:sprint\b/g, refs.sprint)
         .replace(/:comment\b/g, refs.comment)
         .replace(/:user\b/g, refs.user)
+        .replace(/:scimuser\b/g, refs.scimUser)
+        .replace(/:scimkey\b/g, refs.scimKey)
+        .replace(/:scimemail\b/g, refs.scimEmail)
         .replace(/:ws\b/g, refs.ws);
     if (abuse.raw !== undefined) init.raw = abuse.raw;
     else if (abuse.body !== undefined) init.body = JSON.parse(fill(JSON.stringify(abuse.body)));
@@ -757,6 +853,29 @@ describe('Q-2 e2e : aucun cas d’abus ne produit un 5xx', () => {
     expect(res.text).not.toMatch(
       /\bat \S+ \(.+:\d+:\d+\)|PrismaClient|ER_[A-Z_]+|SQLSTATE|node_modules/,
     );
+  });
+
+  it('N6 : secret client de 1 024 caractères non ASCII enregistré chiffré dans la colonne TEXT, 1 025 refusé (400)', async () => {
+    const configure = (clientSecret: string) =>
+      world.request('POST', `/workspaces/${refs.ws}/sso`, {
+        accessToken,
+        body: {
+          provider: 'OIDC_GOOGLE',
+          domain: 'n6.example',
+          clientId: 'client',
+          clientSecret,
+        },
+      });
+    // « € » : 3 octets en UTF-8, le pire cas du chiffrement (6 202 caractères hexadécimaux)
+    const widest = '€'.repeat(1024);
+    const ok = await configure(widest);
+    expect(ok.status).toBeLessThan(300);
+    const row = await world.prisma.sSOConfiguration.findUniqueOrThrow({
+      where: { workspaceId: refs.ws },
+    });
+    expect(row.clientSecret!.length).toBe(58 + 2 * 3 * 1024);
+    expect(row.clientSecret).not.toContain('€');
+    expect((await configure('€'.repeat(1025))).status).toBe(400);
   });
 
   it('chaque exception admise est justifiée', () => {
