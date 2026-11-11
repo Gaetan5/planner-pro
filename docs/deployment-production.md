@@ -109,13 +109,15 @@ Planner-Pro ne crée jamais de compte Firebase Authentication à la place de l�
 
    Webhook GitHub (S23, S24) : le backend lit au plus **2 Mo** sur cette route (413 au-delà),
    sans analyser le corps tant que la signature n'est pas vérifiée, et répond 429 sans lire le
-   corps après 20 refus par minute pour un couple adresse/projet. Côté Nginx, limiter le débit de
+   corps après 20 refus par minute pour un couple adresse/projet, ou après 100 refus par minute pour
+   une adresse tous projets confondus (compteur agrégé : changer d'identifiant de projet ne
+   contourne pas la limite). Côté Nginx, limiter le débit de
    cette route et aligner la taille de corps (dans `http { }` puis dans le serveur de l'API) :
 
    ```nginx
    limit_req_zone $binary_remote_addr zone=gh_webhook:10m rate=30r/m;
 
-   location ~ ^/projects/[^/]+/webhooks/github$ {
+   location ~* ^/projects/[^/]+/webhooks/github/?$ {
        limit_req zone=gh_webhook burst=10 nodelay;
        limit_req_status 429;
        client_max_body_size 2m;
@@ -124,6 +126,12 @@ Planner-Pro ne crée jamais de compte Firebase Authentication à la place de l�
        # mêmes en-têtes Host / Upgrade que les autres routes de l'API
    }
    ```
+
+   **Obligatoire avant la mise en production de ce lot (r45-m1)** : `limit_req` et
+   `client_max_body_size 2m` doivent être en place et vérifiés. Le `location` est insensible à la
+   casse (`~*`) et accepte la barre finale (`/?`), comme le routage d'Express : sans cela, ces
+   variantes d'URL échappent à la limite de débit. L'application n'a plus de limite de débit
+   propre sur cette route (`@SkipThrottle()`) : hors refus d'authentification, seul Nginx la borne.
 
    Les adresses de GitHub sont partagées entre tous ses clients : si des livraisons légitimes
    reçoivent des 429 de Nginx, relever `rate` et `burst`. Le défaut de 1 Mo de

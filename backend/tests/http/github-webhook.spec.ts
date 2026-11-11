@@ -5,6 +5,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { AppThrottlerGuard } from '../../src/common/app-throttler.guard';
 import { RedisThrottlerStorage } from '../../src/common/redis-throttler.storage';
+import { webhookLimits } from '../../src/projects/github-webhook.util';
 import { JSON_BODY_LIMIT, WEBHOOK_BODY_LIMIT } from '../../src/common/body-parsers';
 import { createHmac } from 'crypto';
 import * as http from 'http';
@@ -688,6 +689,149 @@ describe('S21 : webhook GitHub par projet', () => {
         expect(res.status).toBe(201);
         expect(JSON.parse(res.text)).toEqual({ closedTaskIds: [TASK_P2] });
       });
+    });
+
+    describe('r45-m1 : compteur agrégé par adresse, casse et variantes d’URL', () => {
+      const forged = 'sha256=' + '0'.repeat(64);
+      const AGGREGATE_THRESHOLD = 10;
+      const defaultThreshold = webhookLimits.failuresPerAddressPerMinute;
+      const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+      beforeEach(() => {
+        webhookLimits.failuresPerAddressPerMinute = AGGREGATE_THRESHOLD;
+      });
+      afterEach(() => {
+        webhookLimits.failuresPerAddressPerMinute = defaultThreshold;
+      });
+
+      /** Livraison vers un chemin arbitraire (casse ou `/` final). */
+      async function deliverPath(path: string, body: string, opts: { signature?: string } = {}) {
+        const res = await fetch(`${baseUrl}${path}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Hub-Signature-256': opts.signature ?? sign(SECRET_P2, body),
+            'X-GitHub-Delivery': 'r45-0001-aaaa',
+          },
+          body,
+        });
+        return { status: res.status, text: await res.text() };
+      }
+
+      it('seuil par défaut : 100 refus par minute et par adresse', () => {
+        expect(defaultThreshold).toBe(100);
+      });
+
+      it('(a) 21 UUID différents depuis la même adresse : 429 une fois le seuil agrégé atteint', async () => {
+        const statuses: number[] = [];
+        for (let i = 0; i < 21; i++) {
+          statuses.push((await deliver(uuid(i), ok(), { signature: forged })).status);
+        }
+        // Aucun UUID n'atteint 20 refus : seul le compteur agrégé peut produire ces 429
+        expect(statuses.slice(0, AGGREGATE_THRESHOLD).every((s) => s === 401)).toBe(true);
+        expect(statuses.slice(AGGREGATE_THRESHOLD).every((s) => s === 429)).toBe(true);
+        expect(statuses.filter((s) => s === 429).length).toBeGreaterThanOrEqual(1);
+      });
+
+      it('(a) le 429 agrégé est rendu AVANT la lecture du corps', async () => {
+        for (let i = 0; i < AGGREGATE_THRESHOLD; i++) {
+          await deliver(uuid(i), ok(), { signature: forged });
+        }
+        const status = await new Promise<number>((resolve, reject) => {
+          const url = new URL(`${baseUrl}/projects/${uuid(500)}/webhooks/github`);
+          const req = http.request(
+            {
+              host: url.hostname,
+              port: url.port,
+              path: url.pathname,
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': String(1_800_000),
+                'X-Hub-Signature-256': forged,
+                'X-GitHub-Delivery': 'r45-0002-aaaa',
+              },
+            },
+            (res) => {
+              res.resume();
+              resolve(res.statusCode ?? 0);
+              req.destroy();
+            },
+          );
+          req.on('error', () => undefined);
+          req.write('x'.repeat(1024));
+          setTimeout(() => {
+            req.destroy();
+            reject(new Error('aucune réponse sans le corps complet'));
+          }, 3000);
+        });
+        expect(status).toBe(429);
+      });
+
+      it('le compteur agrégé expire avec la fenêtre d’une minute', async () => {
+        for (let i = 0; i < AGGREGATE_THRESHOLD + 2; i++) {
+          await deliver(uuid(i), ok(), { signature: forged });
+        }
+        redis.advance(61_000);
+        expect((await deliver(id('P2'), ok(), { delivery: delivery(950) })).status).toBe(201);
+      });
+
+      it('(b) un même UUID en majuscules et en minuscules partage le même compteur', async () => {
+        // Identifiant contenant des lettres hexadécimales : les deux casses diffèrent réellement
+        const project = 'abcdef01-2345-4abc-8def-0123456789ab';
+        expect(project.toUpperCase()).not.toBe(project);
+        for (let i = 0; i < WEBHOOK_FAILURES_PER_MINUTE; i++) {
+          const variant = i % 2 === 0 ? project.toUpperCase() : project.toLowerCase();
+          webhookLimits.failuresPerAddressPerMinute = 1000; // isole le compteur par projet
+          expect((await deliver(variant, ok(), { signature: forged })).status).toBe(401);
+        }
+        expect((await deliver(project.toUpperCase(), ok(), { signature: forged })).status).toBe(
+          429,
+        );
+        expect((await deliver(project.toLowerCase(), ok(), { signature: forged })).status).toBe(
+          429,
+        );
+        const keys = Array.from(redis.store.keys()).filter((k) =>
+          k.startsWith('github-webhook-failures:'),
+        );
+        expect(keys.filter((k) => k.split(':').length === 3)).toHaveLength(1);
+      });
+
+      it('(c) /webhooks/GITHUB : pré-contrôle appliqué (429 après le seuil par projet)', async () => {
+        webhookLimits.failuresPerAddressPerMinute = 1000;
+        for (let i = 0; i < WEBHOOK_FAILURES_PER_MINUTE; i++) {
+          await deliverPath(`/projects/${id('P2')}/webhooks/GITHUB`, ok(), { signature: forged });
+        }
+        const res = await deliverPath(`/projects/${id('P2')}/webhooks/GITHUB`, ok(), {
+          signature: forged,
+        });
+        expect(res.status).toBe(429);
+      });
+
+      it('(c) /webhooks/github/ (barre finale) : pré-contrôle appliqué', async () => {
+        webhookLimits.failuresPerAddressPerMinute = 1000;
+        for (let i = 0; i < WEBHOOK_FAILURES_PER_MINUTE; i++) {
+          await deliverPath(`/projects/${id('P2')}/webhooks/github/`, ok(), { signature: forged });
+        }
+        const res = await deliverPath(`/projects/${id('P2')}/webhooks/github/`, ok(), {
+          signature: forged,
+        });
+        expect(res.status).toBe(429);
+      });
+
+      it.each(['/webhooks/GITHUB', '/webhooks/github/', '/WEBHOOKS/Github/'])(
+        '(c) %s : plafond de 2 Mo (1,5 Mo signé accepté, plus de 2 Mo en 413)',
+        async (suffix) => {
+          const big = (bytes: number) =>
+            `{ "repository": { "full_name": "Acme/Web" }, "commits": [ { "message": "fixes #${TASK_P2}" }, { "message": "${'x'.repeat(bytes)}" } ] }`;
+          const accepted = await deliverPath(`/projects/${id('P2')}${suffix}`, big(1_500_000));
+          expect(accepted.status).toBe(201);
+          const refused = await deliverPath(
+            `/projects/${id('P2')}${suffix}`,
+            big(2 * 1024 * 1024 + 1024),
+          );
+          expect(refused.status).toBe(413);
+        },
+      );
     });
 
     it('Redis indisponible : les refus restent des 401 (compteur au mieux, jamais de 5xx)', async () => {

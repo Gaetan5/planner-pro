@@ -19,7 +19,9 @@ import {
   verifyGitHubSignature,
   WEBHOOK_FAILURE_WINDOW_SECONDS,
   WEBHOOK_FAILURES_PER_MINUTE,
+  webhookAddressFailureKey,
   webhookFailureKey,
+  webhookLimits,
 } from './github-webhook.util';
 
 export { WEBHOOK_FAILURES_PER_MINUTE };
@@ -85,17 +87,28 @@ export class GitHubWebhookService {
   private async registerFailure(clientIp: string | undefined, projectId: string): Promise<void> {
     if (!clientIp) return;
     let failures: number;
+    let addressFailures: number;
     try {
-      failures = await this.withRedisTimeout(() =>
-        this.redis.incrementWithTtl(
-          webhookFailureKey(clientIp, projectId),
-          WEBHOOK_FAILURE_WINDOW_SECONDS,
-        ),
+      [failures, addressFailures] = await this.withRedisTimeout(() =>
+        Promise.all([
+          this.redis.incrementWithTtl(
+            webhookFailureKey(clientIp, projectId),
+            WEBHOOK_FAILURE_WINDOW_SECONDS,
+          ),
+          // Compteur agrégé : s'incrémente quel que soit le projet visé (r45-m1)
+          this.redis.incrementWithTtl(
+            webhookAddressFailureKey(clientIp),
+            WEBHOOK_FAILURE_WINDOW_SECONDS,
+          ),
+        ]),
       );
     } catch {
       return;
     }
-    if (failures > WEBHOOK_FAILURES_PER_MINUTE) {
+    if (
+      failures > WEBHOOK_FAILURES_PER_MINUTE ||
+      addressFailures > webhookLimits.failuresPerAddressPerMinute
+    ) {
       throw new HttpException('Trop de requêtes refusées.', HttpStatus.TOO_MANY_REQUESTS);
     }
   }

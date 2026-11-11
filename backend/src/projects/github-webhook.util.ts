@@ -41,5 +41,17 @@ export function extractTaskIdsFromText(text: string): string[] {
  */
 export const WEBHOOK_FAILURES_PER_MINUTE = 20;
 export const WEBHOOK_FAILURE_WINDOW_SECONDS = 60;
+/**
+ * L'identifiant est mis en minuscules : `ParseUUIDPipe` accepte les deux casses, sans quoi les
+ * variantes de casse d'un même UUID donneraient chacune leur compteur (r45-m1).
+ */
 export const webhookFailureKey = (ip: string, projectId: string): string =>
-  `github-webhook-failures:${ip}:${projectId}`;
+  `github-webhook-failures:${ip}:${projectId.toLowerCase()}`;
+/**
+ * Compteur agrégé par adresse, tous projets confondus (r45-m1) : sans lui, changer d'identifiant de
+ * projet à chaque requête donnerait 20 refus gratuits par identifiant. Seuil plus haut que celui
+ * par projet : une adresse GitHub partagée ne l'atteint que si elle envoie elle-même plus de 100
+ * livraisons refusées par minute. Seuil modifiable (objet) pour pouvoir l'abaisser dans les tests.
+ */
+export const webhookLimits = { failuresPerAddressPerMinute: 100 };
+export const webhookAddressFailureKey = (ip: string): string => `github-webhook-failures:${ip}`;
