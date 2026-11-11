@@ -12,6 +12,7 @@ import { SSOProvider, WorkspaceRole } from '@prisma/client';
 export class DiscoverSsoDto {
   @IsEmail({}, { message: 'Une adresse e-mail valide est requise.' })
   @IsNotEmpty({ message: "L'e-mail est obligatoire." })
+  @MaxLength(254)
   email!: string;
 }
 
@@ -44,32 +45,39 @@ export class ConfigureSsoDto {
 
   @IsString()
   @IsNotEmpty({ message: 'Le domaine de messagerie entreprise est requis (ex: acme.com).' })
+  @MaxLength(191)
   domain!: string;
 
   @IsString()
   @IsOptional()
-  @MaxLength(256)
+  @MaxLength(191)
   clientId?: string;
 
   @IsString()
   @IsOptional()
-  @MaxLength(1024)
+  // Colonne VARCHAR(191) qui stocke le secret chiffré (`iv:tag:contenu` en hexadécimal, 58 + 2 n
+  // caractères pour n octets) : 66 octets au plus, sinon la base refuse l'écriture (500)
+  @MaxLength(66)
   clientSecret?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(191)
   discoveryUrl?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(191)
   entryPoint?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(16_000)
   cert?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(191)
   issuer?: string;
 
   // Jamais OWNER ni ADMIN : un IdP ne confère pas de droits d'administration (S10)

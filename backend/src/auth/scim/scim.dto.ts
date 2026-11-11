@@ -97,6 +97,7 @@ export class CreateScimUserDto {
   @IsArray()
   @ArrayMaxSize(10)
   @IsString({ each: true })
+  @MaxLength(256, { each: true })
   schemas?: string[];
 
   @IsString()
@@ -155,6 +156,7 @@ export class ScimPatchRequestDto {
   @IsArray()
   @ArrayMaxSize(10)
   @IsString({ each: true })
+  @MaxLength(256, { each: true })
   schemas?: string[];
 
   @IsArray()
