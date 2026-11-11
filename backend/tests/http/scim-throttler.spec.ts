@@ -12,7 +12,11 @@ import { ScimService } from '../../src/auth/scim/scim.service';
 import { FirestoreSyncService } from '../../src/firestore-sync/firestore-sync.service';
 import { SessionService } from '../../src/auth/session.service';
 import { TokenService } from '../../src/auth/token.service';
-import { AppThrottlerGuard, resolveThrottlerTracker } from '../../src/common/app-throttler.guard';
+import {
+  AppThrottlerGuard,
+  resolveThrottlerTracker,
+  THROTTLE_MESSAGE,
+} from '../../src/common/app-throttler.guard';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { STUB_SID, sessionServiceStub } from '../support/session.test-support';
 import { FakePrisma } from './fake-prisma';
@@ -186,6 +190,9 @@ describe('S11-a : Débit SCIM par clé et non par IP', () => {
       const body301A = await res301A.json();
       expect(body301A.schemas).toContain(SCIM_ERROR);
       expect(body301A.status).toBe('429');
+      // r47-m2 : message français (format d'erreur SCIM conservé) et Retry-After
+      expect(body301A.detail).toBe(THROTTLE_MESSAGE);
+      expect(Number(res301A.headers.get('retry-after'))).toBeGreaterThan(0);
 
       // Org B, utilisant la même IP (127.0.0.1), NE DOIT PAS être bloquée (compteur indépendant)
       const resB = await fetch(`${baseUrl}/scim/v2/Users`, {
@@ -274,6 +281,18 @@ describe('S11-b : le limiteur de débit ne peut pas être contourné par l’URL
       expect(statuses.slice(5)).toEqual([429, 429, 429, 429, 429]);
     },
   );
+
+  it('le 429 du limiteur global est en français, avec Retry-After (r47-m2)', async () => {
+    let last: Response | undefined;
+    for (let i = 0; i < 6; i++) {
+      last = await fetch(`${baseUrl}/auth/login`, { method: 'POST' });
+    }
+    expect(last?.status).toBe(429);
+    expect(Number(last?.headers.get('retry-after'))).toBeGreaterThan(0);
+    const body = await last?.json();
+    expect(body.message).toBe(THROTTLE_MESSAGE);
+    expect(JSON.stringify(body)).not.toContain('ThrottlerException');
+  });
 
   it('GET /scim/v2/Users avec des clés invalides aléatoires depuis une même IP : 429 au format SCIM au-delà de la limite IP', async () => {
     const statuses = new Map<number, number>();

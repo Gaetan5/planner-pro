@@ -7,6 +7,8 @@ export const SCIM_KEY_LIMIT = 300;
 /** Requêtes par minute et par adresse IP sur une route SCIM : large, car des IdP partagent leurs IP sortantes (S11-b). */
 export const SCIM_IP_LIMIT = 3000;
 export const SCIM_WINDOW_MS = 60000;
+/** Message du 429 (r47-m2) : affiché tel quel par les clients, donc en français ; `Retry-After` indique le délai. */
+export const THROTTLE_MESSAGE = 'Trop de requêtes. Réessayez dans quelques instants.';
 
 /**
  * Identifiant de suivi du garde global (S11-b) : toujours l'adresse IP cliente.
@@ -27,6 +29,11 @@ export class AppThrottlerGuard extends ThrottlerGuard {
   protected async getTracker(req: Record<string, any>): Promise<string> {
     return resolveThrottlerTracker(req);
   }
+
+  /** Message du 429 en français (r47-m2) ; l'en-tête `Retry-After` est posé par `ThrottlerGuard`. */
+  protected async getErrorMessage(): Promise<string> {
+    return THROTTLE_MESSAGE;
+  }
 }
 
 /**
@@ -42,13 +49,13 @@ export class ScimKeyThrottlerGuard extends ThrottlerGuard {
     const res = http.getResponse<{ header: (name: string, value: unknown) => void }>();
     if (!req.scimApiKeyId) {
       // Sans authentification préalable, aucun compteur par clé : la requête est refusée.
-      throw new ThrottlerException();
+      throw new ThrottlerException(THROTTLE_MESSAGE);
     }
     const key = createHash('sha256').update(`scim-key:${req.scimApiKeyId}`).digest('hex');
     const { totalHits, timeToExpire } = await this.storageService.increment(key, SCIM_WINDOW_MS);
     if (totalHits > SCIM_KEY_LIMIT) {
       res.header('Retry-After', timeToExpire);
-      throw new ThrottlerException();
+      throw new ThrottlerException(THROTTLE_MESSAGE);
     }
     return true;
   }
