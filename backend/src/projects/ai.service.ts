@@ -10,6 +10,7 @@ import { PolicyService } from '../authz/policy.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiProvider, ParsedAiAction } from '../projects/interfaces/ai-provider.interface';
 import { CreateTaskDto } from './dto/create-task.dto';
+import { RESOLVED_ACTION_MAX_LENGTH } from './dto/execute-ai-actions.dto';
 import { ProjectsService } from './projects.service';
 import { TaskPriority, TaskStatus, DependencyType } from '@prisma/client';
 
@@ -54,19 +55,67 @@ const RESOLVED_ACTION_ENUM_FIELDS: Record<string, readonly string[]> = {
   dependencyType: ['FINISH_TO_START', 'START_TO_START', 'FINISH_TO_FINISH'],
 };
 
+/** Libellés d'affichage : tronqués sans avertissement (le texte complet n'a aucun effet à l'exécution). */
+const DISPLAY_ONLY_FIELDS = new Set<string>(['description', 'warning']);
+
+/** Identifiants et dates : une valeur tronquée serait fausse, donc retirée (jamais coupée). */
+const EXACT_VALUE_FIELDS = new Set<string>([
+  'id',
+  'taskId',
+  'assigneeId',
+  'dependsOnTaskId',
+  'resolvedProjectId',
+  'dueDate',
+  'timeBlockStart',
+  'timeBlockEnd',
+]);
+
+/** Coupe à `max` unités UTF-16 sans laisser une moitié de paire de substitution (rejetée par MySQL). */
+function truncate(value: string, max: number): string {
+  const cut = value.slice(0, max);
+  const last = cut.charCodeAt(cut.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
+}
+
 /**
  * Normalise une action avant de la renvoyer au client, qui la renverra telle quelle à
  * `POST /projects/ai/execute` (DTO strict, décision 4) : seuls les champs connus, les valeurs
  * `null` retirées, `estimatedMinutes` arrondi à un entier borné. Un champ ou un type inattendu
  * renvoyé par le fournisseur d'IA ne peut ainsi jamais faire échouer l'exécution.
+ *
+ * N5 : les longueurs sont celles du DTO (`RESOLVED_ACTION_MAX_LENGTH`). Un titre, un nom ou une
+ * description trop longs sont tronqués, un identifiant ou une date trop longs sont retirés, et
+ * l'action passe à `resolved: false` avec un avertissement explicite : l'utilisateur voit la
+ * modification dans l'aperçu au lieu de recevoir un 400 générique à l'exécution.
  */
 export function normalizeResolvedAction(action: ResolvedAiAction): ResolvedAiAction {
   const source = action as unknown as Record<string, unknown>;
   const out: Record<string, unknown> = { type: action.type, resolved: action.resolved === true };
+  const notes: string[] = [];
   for (const key of RESOLVED_ACTION_TEXT_FIELDS) {
-    if (typeof source[key] !== 'string') continue;
+    const value = source[key];
+    if (typeof value !== 'string') continue;
     const allowed = RESOLVED_ACTION_ENUM_FIELDS[key];
-    if (!allowed || allowed.includes(source[key] as string)) out[key] = source[key];
+    if (allowed) {
+      if (allowed.includes(value)) out[key] = value;
+      continue;
+    }
+    const max = RESOLVED_ACTION_MAX_LENGTH[key as keyof typeof RESOLVED_ACTION_MAX_LENGTH];
+    if (value.length <= max) {
+      out[key] = value;
+    } else if (DISPLAY_ONLY_FIELDS.has(key)) {
+      out[key] = truncate(value, max);
+    } else if (EXACT_VALUE_FIELDS.has(key)) {
+      notes.push(`Le champ « ${key} » dépasse ${max} caractères et a été ignoré.`);
+    } else {
+      out[key] = truncate(value, max);
+      notes.push(`Le champ « ${key} » dépassait ${max} caractères et a été tronqué.`);
+    }
+  }
+  if (notes.length > 0) {
+    out.resolved = false;
+    const warning = [...notes, out.warning].filter(Boolean).join(' ');
+    out.warning = truncate(warning, RESOLVED_ACTION_MAX_LENGTH.warning);
   }
   const minutes = source.estimatedMinutes;
   if (typeof minutes === 'number' && Number.isFinite(minutes)) {

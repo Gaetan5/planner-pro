@@ -4,8 +4,11 @@ import { Test } from '@nestjs/testing';
 import { AppValidationPipe } from '../../../src/common/app-validation.pipe';
 import { PolicyService } from '../../../src/authz/policy.service';
 import { PrismaService } from '../../../src/prisma/prisma.service';
-import { AiService } from '../../../src/projects/ai.service';
-import { ExecuteAiActionsDto } from '../../../src/projects/dto/execute-ai-actions.dto';
+import { AiService, normalizeResolvedAction } from '../../../src/projects/ai.service';
+import {
+  ExecuteAiActionsDto,
+  RESOLVED_ACTION_MAX_LENGTH,
+} from '../../../src/projects/dto/execute-ai-actions.dto';
 import { ProjectsService } from '../../../src/projects/projects.service';
 import { USERS, W, buildRbacPrisma } from '../../support/rbac-fixture';
 
@@ -104,6 +107,55 @@ describe('AiService : aller-retour analyzeCommand -> ExecuteAiActionsDto strict'
     expect(actions[0]).not.toHaveProperty('dependencyType');
     expect(actions[1]).toMatchObject({ priority: 'LOW', status: 'DONE' });
     await expect(validate(JSON.parse(JSON.stringify(bodyOf(actions))))).resolves.toBeDefined();
+  });
+
+  it("N5 : commande à titre démesuré : l'aperçu est tronqué, signalé (resolved: false) et accepté par le DTO", async () => {
+    provider.parseCommand.mockResolvedValue([
+      {
+        type: 'CREATE_TASK',
+        taskTitle: 'T'.repeat(4000),
+        taskDescription: 'D'.repeat(20_000),
+        assigneeName: 'A'.repeat(500),
+        dueDate: '2026-01-01T00:00:00.' + '0'.repeat(300),
+      },
+    ]);
+    const [action] = await call();
+
+    expect(action.taskTitle).toHaveLength(RESOLVED_ACTION_MAX_LENGTH.taskTitle);
+    expect(action.taskDescription).toHaveLength(RESOLVED_ACTION_MAX_LENGTH.taskDescription);
+    expect(action).not.toHaveProperty('dueDate'); // une date tronquée serait fausse
+    expect(action.resolved).toBe(false);
+    expect(action.warning).toContain('taskTitle');
+    expect(action.warning).toContain('dueDate');
+    expect(action.description!.length).toBeLessThanOrEqual(RESOLVED_ACTION_MAX_LENGTH.description);
+    await expect(validate(JSON.parse(JSON.stringify(bodyOf([action]))))).resolves.toBeDefined();
+  });
+
+  it('N5 : toute sortie de normalizeResolvedAction valide ExecuteAiActionsDto, quel que soit le champ démesuré', async () => {
+    for (const field of Object.keys(RESOLVED_ACTION_MAX_LENGTH)) {
+      const raw = { type: 'CREATE_TASK', resolved: true, [field]: 'x'.repeat(100_000) };
+      const out = normalizeResolvedAction(raw as never);
+      await expect(validate(JSON.parse(JSON.stringify(bodyOf([out]))))).resolves.toBeDefined();
+    }
+  });
+
+  it("N5 : une coupure ne laisse pas la moitié d'une paire de substitution (émoji)", () => {
+    const out = normalizeResolvedAction({
+      type: 'CREATE_TASK',
+      taskTitle: 'a'.repeat(190) + '😀😀',
+    } as never);
+    expect(out.taskTitle).toBe('a'.repeat(190));
+    expect(JSON.parse(JSON.stringify(out)).taskTitle).toBe('a'.repeat(190));
+  });
+
+  it("N5 : une action aux champs dans les bornes n'est pas modifiée", () => {
+    const ok = {
+      type: 'CREATE_TASK',
+      resolved: true,
+      taskTitle: 'T'.repeat(191),
+      dueDate: '2026-01-01',
+    };
+    expect(normalizeResolvedAction(ok as never)).toEqual(ok);
   });
 
   it('le DTO reste strict : un champ inconnu envoyé par le client est refusé', async () => {
