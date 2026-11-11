@@ -1,6 +1,6 @@
 import { PolicyService } from '../../../src/authz/policy.service';
 import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { WorkspaceRole } from '@prisma/client';
 import { FinancesService } from '../../../src/projects/finances.service';
 import { PrismaService } from '../../../src/prisma/prisma.service';
@@ -14,6 +14,7 @@ describe('FinancesService', () => {
     },
     project: {
       findMany: jest.fn(),
+      findFirst: jest.fn(),
     },
   };
 
@@ -44,5 +45,13 @@ describe('FinancesService', () => {
       ForbiddenException,
     );
     expect(mockPrisma.project.findMany).not.toHaveBeenCalled();
+  });
+
+  it('un projet disparu entre deux lectures répond 404, pas une erreur interne (r51-m2)', async () => {
+    mockPrisma.project.findFirst.mockResolvedValue(null);
+
+    await expect(service.getProjectFinances('project-1', 'user-1')).rejects.toThrow(
+      NotFoundException,
+    );
   });
 });

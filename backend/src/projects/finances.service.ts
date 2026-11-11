@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PolicyService } from '../authz/policy.service';
 import { WorkspaceRole } from '@prisma/client';
@@ -18,7 +18,7 @@ export class FinancesService {
     });
 
     if (!project) {
-      throw new Error('Project not found');
+      throw new NotFoundException('Projet introuvable.');
     }
 
     const workspaceId = project.workspaceId;
