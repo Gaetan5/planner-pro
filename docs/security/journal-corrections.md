@@ -4207,3 +4207,199 @@ jest backend (`env -u DATABASE_URL`) 98 suites, 2798/2798 ; `nest build` OK ; `t
 - **r42-a1 : décision utilisateur** (a/b/c), recommandation (c). Voir `rapport-audit.md`, « Revue r43 ».
 - Mesures : jest 2798/2798, vitest 285/285, tsc, build (grep propre), lint 0 erreur, Prettier OK.
 - **Feu vert de commit** : liste des 10 fichiers dans le rapport. Constats encore ouverts pour le fixeur : aucun dans ce lot (r42-a1 en attente de l'utilisateur) ; prochain lot probable S23 à S25.
+
+## Lot r43 (fixeur) — S23, S24, S25
+
+Source : `rapport-audit.md` (S23, S24, S25 d'origine, compléments r35, r37, r40, r41). Aucun commit. Aucune migration Prisma.
+
+### État actuel avant intervention et plan
+
+| Constat | État constaté dans le code | Plan |
+| --- | --- | --- |
+| **S23** | Déjà traité en partie : les corps d'`auth`, `sso`, `scim`, `admin`, `invitations`, `comments` sont des DTO classes (S6, S11, S17, S27). Restaient : `@Body()` en type littéral (`notes.controller.ts` ×2, `projects.controller.ts` rappel OAuth du calendrier), `@Body('champ')` isolés (`ai.controller.ts` voice/vision), `@Param('status')` non validé, `?limit=`, `?start=`/`?end=` (`parseInt`/`new Date` sans borne), `?workspaceId=` sans contrôle, 104 `@Param` sans pipe (un seul `ParseUUIDPipe`, `auth.controller.ts` `sid`), aucune limite de corps explicite (défaut Express de 100 ko) et aucun test méta. | DTO classes pour les corps restants ; `UuidPipe` sur tous les identifiants d'URL ; `ParseEnumPipe` pour `:status` ; DTO de requête bornés ; limites de corps explicites (1 Mo, plafond dédié aux livraisons GitHub) ; test méta sur les métadonnées Nest ; tests HTTP 400/413. |
+| **S24** | Non traité : pas de `trust proxy` (`main.ts`), stockage mémoire (`app.module.ts`), aucune limite par compte, route publique du webhook GitHub soumise au limiteur global (60/min/IP). `mock/login` déjà retiré (S26, volet fait) ; limitation WS déjà faite (S16, `tracking.gateway.ts` : 300 messages / 10 s par socket). | `TRUST_PROXY_HOPS` ; stockage Redis avec repli ; limite par compte (login, MFA) et verrouillage progressif ; webhook hors du limiteur global avec compteur de refus ; limite plus basse sur `invitations/check`. |
+| **S25** | Non traité (`pnpm audit --prod` : 71 avis, 26 élevés avant ; `multer@2.0.2`, `ws`, `engine.io`, `socket.io-parser`, `body-parser`, `lodash`, `mysql2`, `nodemailer@8`, `@grpc/grpc-js@1.9`...). | `overrides` bornés par version majeure dans les deux fichiers ; `nodemailer` 10 ; `cookie-parser` 1.4.7 ; exceptions restantes documentées ; test de non-régression sur le lockfile. |
+
+### S23 — corps, paramètres et limites de taille
+
+**Statut** : CORRIGÉ – À REVOIR
+
+**Cause confirmée** : `ValidationPipe` ne valide que les classes décorées ; un `@Body()` typé par un littéral ou une interface est émis comme `Object` (aucune validation) et un `@Param()` est une chaîne libre (`projects.controller.ts`, `notes.controller.ts`, `ai.controller.ts` avant correctif). Aucun appel à `useBodyParser` ne fixait de `limit`.
+
+**Changement** :
+- `backend/src/common/uuid.pipe.ts` (nouveau) : `UuidPipe` (400 « Identifiant invalide. »), `OptionalUuidPipe`, `SprintOrBacklogPipe` (le frontend envoie `backlog`, `AppContext.tsx:1357`), `enumPipe`. Appliqués à tous les `@Param` des contrôleurs `admin`, `sso`, `notes`, `notifications`, `ai`, `comments`, `github-webhook`, `invitations`, `projects`, `tracking` (104 occurrences) et aux `?workspaceId=`.
+- `:status` d'un livrable : `enumPipe(DeliverableStatus)`.
+- DTO classes : `NoteDto` (`title` ≤ 191, aligné sur le VARCHAR ; `content` ≤ 16 000 caractères, tient dans un TEXT à 4 octets par caractère), `CalendarOAuthCallbackDto` (`provider` énumération, `code` ≤ 4096), `AiMediaFieldsDto` (champs multipart de `voice`/`vision` : UUID), `AuditLogQueryDto` (`limit` entier 1 à 500), `TimeRangeQueryDto` (ISO 8601 strict ; fenêtre ≤ 366 jours et fin ≥ début, sinon 400).
+- Bornes de taille ajoutées à des DTO existants sur routes publiques/coûteuses : `LoginDto` et `RegisterDto` (e-mail ≤ 254, mot de passe ≤ 256 comme `ResetPasswordDto`, nom ≤ 191), `AiCommandDto.command` ≤ 4000 (coût d'appel au modèle).
+- `backend/src/common/body-parsers.ts` (nouveau, appelé par `main.ts` et par le banc de test) : JSON limité à **1 Mo** partout ; plafond dédié de **10 Mo** pour `POST /projects/:id/webhooks/github` seulement si la requête porte déjà `X-Hub-Signature-256` de forme valide, `X-GitHub-Delivery` et `Content-Type: application/json` (sinon c'est la limite de 1 Mo : une requête anonyme ne fait pas lire 10 Mo en mémoire). Implémentation : deux appels à `app.useBodyParser`, le premier avec `type` fonction (body-parser ignore ensuite la requête déjà lue). `rawBody` conservé dans les deux cas.
+- Tests existants : identifiants logiques de la fixture RBAC (`P1`, `T2`, `ws-1`, `int-1`, `u-2`…) remplacés par des UUID (`id('P1')` dans `tests/support/rbac-fixture.ts`) : 7 suites HTTP et 8 suites unitaires adaptées (voir Écarts).
+
+**Tests** (ajoutés) :
+- `tests/unit/common/controller-inputs.spec.ts` (5) : test méta sur les métadonnées Nest de 14 contrôleurs (plus de 150 entrées, plus de 50 corps) : aucun `@Body()` de type `Object`/primitif ou `@Body('champ')` (seule exemption justifiée : le payload GitHub signé par HMAC), aucun `@Query('x')` sans pipe, aucun `@Param` sans pipe (exemption : SCIM, voir Écarts).
+- `tests/http/input-validation.spec.ts` (51) : UUID mal formés (`abc`, `../../etc/passwd`, UUID suivi de `x`…) : 400 et service non appelé ; `:status` ; `limit` (`abc`, `0`, `-5`, `501`, `1.5`, `1e3`) ; fenêtre de dates ; `workspaceId` ; notes aux bornes (191/16 000 acceptés, +1 refusé), champ inattendu ; rappel OAuth ; multipart IA ; commande IA > 4000.
+- `tests/http/github-webhook.spec.ts` (+6) : livraison signée de 300 ko (> 100 ko d'Express) acceptée et traitée, de 3 Mo acceptée, de plus de 10 Mo : 413 sans effet ; sans signature de forme valide : 413 dès 1 Mo ; autre route (`.../secret`) : 413 à 2 Mo.
+- `tests/unit/main-raw-body.spec.ts`, `tests/unit/main-hardening.spec.ts` (nouveau, 3) : câblage réel de `main.ts` (ordre trust proxy → corps → contrôle d'origine).
+- Résultat : voir Mesures.
+
+**Contre-mutations** (une à la fois, sauvegarde dans le bac à sable, `/bin/cp -f` puis `cmp` après chaque) : limite 1 Mo → 100 Mo : 3 échecs ; `type` toujours vrai (plafond dédié pour tous) : 2 ; plafond webhook 1 Mo : 2 ; plafond webhook 100 Mo : 2 ; `@Body` notes en type littéral : 7 (méta + HTTP) ; `UuidPipe` retiré de `getProject` : 7 ; `@Body('workspaceId')` isolés dans `voice` : 6 ; `enumPipe` retiré : 4 ; `@Max` de `limit` retiré : 3 ; contrôle de fenêtre retiré : 2 ; `configureTrustProxy(app)` retiré de `main.ts` : 1. Toutes détectées, tous fichiers restaurés.
+
+**Écart par rapport au rapport** :
+1. **SCIM exempté de `ParseUUIDPipe`** : un identifiant SCIM inconnu doit rester un 404 au format SCIM (Entra teste l'existence par `GET /Users/{id}`), pas un 400 générique. La requête est de toute façon bornée au workspace de la clé (S11, S17). L'exemption est explicite dans le test méta. À valider.
+2. **`ParseUUIDPipe` partout** change les réponses d'identifiants inconnus : 400 au lieu de 404 pour un identifiant non UUID (aucun client légitime n'en envoie : tous les identifiants sont `@default(uuid())`). Les 404 pour UUID inconnus sont inchangés. La route publique du webhook répond donc 400 (et non 401 « Webhook refusé. ») à un `projectId` mal formé : aucun oracle d'existence.
+3. **Règle ESLint** « `@Body()` sur un type non classe » : remplacée par le test méta (le rapport admet « règle ESLint ou test »), plus fidèle car il lit les métadonnées émises par le compilateur.
+4. **Bornes des DTO existants** : le rapport demande des bornes de taille pour tous les DTO. J'ai borné les nouveaux DTO, `LoginDto`, `RegisterDto` et `AiCommandDto.command`. **Restent sans `MaxLength` 41 champs texte de DTO existants** (titres, descriptions, noms de projets, tâches, sprints, jalons, livrables, `reason`, `labels`, `skills`, `checklist`, etc. ; liste par script dans la question 2). Le plafond de 1 Mo par corps les borne globalement ; les valeurs par champ relèvent du produit (voir question 2).
+5. **`GET /projects/timeblocks/all` sans paramètres** renvoie toujours tous les créneaux accessibles (le frontend l'appelle ainsi) ; seule la fenêtre explicite est bornée. Pagination à envisager (hors périmètre).
+6. **O10** (`state` OAuth du calendrier prévisible) : seul le volet « corps en type littéral » est traité ici ; le `state` reste ouvert (O10).
+
+### S24 — limitation de débit
+
+**Statut** : CORRIGÉ – À REVOIR
+
+**Cause confirmée** : `main.ts` sans `trust proxy` (`req.ip` = adresse du reverse proxy, `docker-compose.prod.yml` lie `127.0.0.1:3003` : tous les clients partagent les compteurs) ; `app.module.ts` `ThrottlerModule.forRoot` en mémoire ; `auth.service.ts` `login`/`verifyMfaChallenge` sans compteur par compte ; `github-webhook.controller.ts` route publique soumise à 60/min/IP.
+
+**Changement** :
+- `backend/src/common/trust-proxy.ts` (nouveau) + `main.ts` : `TRUST_PROXY_HOPS` (entier 0 à 5 ; jamais `true` ni liste d'adresses) → `app.set('trust proxy', n)` (`false` pour 0). Absent hors production : 0 ; **absent en production : le démarrage échoue** avec un message explicite (comme `CORS_ORIGINS`). `docker-compose.prod.yml` : `TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}` ; `.env.production.example` et `.env.example` documentés (sans valeur réelle).
+- `backend/src/common/redis-throttler.storage.ts` (nouveau) et `RedisService.incrementWindow` (script Lua atomique `INCR` + `PEXPIRE` à la création, fenêtre fixe) ; `app.module.ts` : `ThrottlerModule.forRootAsync` avec ce stockage. Compteurs partagés entre instances, clés `throttle:<sha256>` (le garde les hache déjà : aucune IP en clair). Redis lent (> 300 ms) ou en erreur : repli sur le compteur mémoire de l'instance, avec une alerte par minute au plus (jamais de 5xx). Pas de nouvelle dépendance (le paquet `@nest-lab/throttler-storage-redis` n'est pas nécessaire : l'interface `ThrottlerStorage` de `@nestjs/throttler` 5.1.2 tient en une méthode, et il fallait un repli).
+- `backend/src/auth/account-lockout.ts` (nouveau), branché dans `AuthService.login` et `verifyMfaChallenge` : plus de 5 échecs par minute sur un même compte (e-mail normalisé, ou identifiant utilisateur pour le MFA, tous tickets confondus) : 429 ; 10 échecs cumulés sur 24 h, puis 20, 30… : verrouillage de 15 min, 30 min, 1 h… (24 h au plus). Le compte verrouillé refuse aussi le bon mot de passe. Appliqué de la même façon aux comptes inexistants (pas d'oracle d'existence), clés `lockout:<portée>:<sha256>`, remise à zéro au succès. Même repli mémoire que ci-dessus, avec un disjoncteur (Redis ignoré 5 s après une panne : un seul délai de 300 ms par épisode, ce qui garde le test « Redis suspendu : 503 en moins de 2 s » du parcours MFA).
+- Webhook GitHub (`github-webhook.controller.ts`, `github-webhook.service.ts`) : `@SkipThrottle()` sur la route de réception ; la signature est vérifiée **avant** tout compteur, donc une livraison valide n'est jamais en 429. Les refus (401) sont comptés par adresse (`github-webhook-failures:<ip>`, 20 par minute) et deviennent des 429 au-delà. Redis indisponible : les refus restent des 401.
+- `invitations.controller.ts` : `POST invitations/check` (publique) limitée à 20 par minute et par client (défaut global : 60). `accept` (authentifiée) inchangée.
+- Limitation WS (S16) : déjà en place (`WS_RATE_MAX_MESSAGES` = 300 par 10 s et par socket) ; les passerelles restent `@SkipThrottle()` (le garde HTTP ne les concerne pas).
+
+**Tests** (ajoutés) :
+- `tests/http/throttling-proxy.spec.ts` (14, application Nest réelle, `AuthController` et `AuthService` réels, compteurs dans un faux Redis) : avec 1 saut, `req.ip` = adresse transmise ; deux clients ont des compteurs distincts ; une adresse falsifiée à gauche de celle du proxy est ignorée ; limiteur global (61e requête en 429, autre client intact) ; compteurs sous `throttle:` sans IP en clair ; **six tentatives de connexion sur le même e-mail depuis six adresses : la sixième renvoie 429** ; compte verrouillé refuse le bon mot de passe ; autre compte et minute écoulée ; compte inexistant limité de même ; succès remet à zéro ; limite par IP du contrôleur toujours active ; `invitations/check` : 21e en 429 ; avec 0 saut, `X-Forwarded-For` ignoré.
+- `tests/http/mfa-ticket.spec.ts` (+2) : cinq mauvais codes répartis sur deux tickets, puis ticket neuf : 429 même avec le bon code ; code correct remet à zéro.
+- `tests/http/github-webhook.spec.ts` (+5) : limiteur global à 5/min actif sur une autre route publique (contrôle) ; 40 livraisons signées valides depuis la même adresse : aucune en 429 ; 20 signatures invalides en 401 puis 429 ; une livraison valide passe encore après ces 429 ; Redis indisponible : 401.
+- `tests/unit/common/trust-proxy.spec.ts` (22), `tests/unit/common/redis-throttler.storage.spec.ts` (6 : partage multi-instance, secondes, expiration, repli sur erreur et sur blocage, alerte unique, arguments du script Lua), `tests/unit/auth/account-lockout.spec.ts` (11 : fenêtre, remise à zéro, portées, clés hachées, durées 15 min/30 min/plafond, paliers, repli et disjoncteur), `tests/unit/main-hardening.spec.ts` (câblage).
+- `tests/http/fake-redis.ts` : `incrementWithTtl` respecte désormais le TTL (comme `EXPIRE NX`), `incrementWindow`, `advance(ms)`.
+
+**Contre-mutations** : `trust proxy` neutre : 7 échecs ; `hops + 1` : 4 ; `true` : 4 ; `@SkipThrottle` retiré : 3 ; compteur de refus du webhook retiré : 1 ; compteur appliqué avant la vérification (livraisons valides comptées) : 3 ; `assertAllowed` du login retiré : 3 ; `recordFailure` du compte inconnu retiré : 1 ; `reset` du login retiré : 1 ; `assertAllowed` MFA retiré : 1 ; `recordFailure` MFA retiré : 1 ; repli du stockage retiré : 3 ; secondes → millisecondes : 1 ; `@Throttle` des invitations retiré : 1 ; verrou non progressif : 2 ; verrou au seuil retiré : 2 ; disjoncteur retiré : 1 ; limite de la minute 5 → 50 : 7 ; clé en clair : 1. Toutes détectées, restaurées (`cmp`).
+
+**Écart par rapport au rapport** :
+1. Stockage Redis écrit en interne plutôt qu'avec `@nest-lab/throttler-storage-redis` : « ou équivalent » ; évite une dépendance et ajoute le repli.
+2. Le verrouillage par compte est un déni de service possible sur un compte ciblé (un tiers qui échoue exprès 5 fois par minute l'empêche de se connecter, à l'adresse près). C'est le compromis habituel d'un verrouillage par compte ; il est borné (5/min = rien d'autre qu'un ralentissement ; 10 échecs en 24 h pour un verrou de 15 min). Voir question 3.
+3. Le compteur de refus du webhook est par adresse (pas par `projectId`) : une limite par projet permettrait à un tiers qui connaît un `projectId` de faire refuser en 429 les refus d'autrui, sans effet sur les livraisons valides ; par adresse, c'est équivalent en sécurité et plus simple.
+4. Corps du webhook : le rapport ne précisait pas la valeur ; **10 Mo** au lieu des 25 Mo de GitHub (question 4).
+
+### S25 — dépendances
+
+**Statut** : CORRIGÉ – À REVOIR (reste des exceptions documentées, dont NestJS 10 → 11 = A9)
+
+**Cause confirmée** : `pnpm audit --prod` du 2026-11-10 : 71 avis (7 low, 38 moderate, 26 high).
+
+**Changement** :
+- `pnpm-workspace.yaml` et `package.json#pnpm` (identiques, testé) : `overrides` bornés par version majeure : `multer >=2.5.0 <3`, `socket.io-parser >=4.2.7 <5`, `engine.io >=6.6.10 <7`, `ws >=8.21.0 <9`, `body-parser >=1.20.9 <2`, `qs >=6.16.1 <7`, `lodash >=4.18.0 <5`, `mysql2 >=3.23.1 <4`, `fast-uri >=3.1.9 <4`, `@grpc/grpc-js >=1.13.6 <2`, `deepmerge-ts >=8.0.0 <9`, `valibot >=1.4.2 <2`, `file-type >=21.3.2 <22` (plus `mariadb` existant).
+- `backend/package.json` : `nodemailer ^8.0.10` → `^10.4.0` (avis : ReDoS `addressparser` et contournement `disableFileAccess`, corrigés ≥ 10.0.13 ; 10.4.0 couvre aussi les moyens ; Node ≥ 20, CI en Node 20) ; `cookie-parser 1.4.6` → `1.4.7` (`cookie` ≥ 0.7). `@types/nodemailer ^8.0.0` conservé (dernière version publiée 8.0.2) : `nest build` et `tsc` passent.
+- `pnpm-lock.yaml` régénéré (`pnpm install`, pnpm 9.15.4 déclaré par `packageManager`), reformaté par Prettier comme le dépôt (les 6 900 suppressions du premier jet n'étaient que du reformatage, supprimées). `pnpm install --frozen-lockfile` passe. Le client Prisma a dû être régénéré (`prisma generate`, le suffixe de pair a changé), sans effet sur le schéma.
+- `docs/security/audit-exceptions.md` (nouveau) : trois exceptions (paquet, avis, raison, revue 2026-11-10) : `@nestjs/core` (GHSA-36xv-jgw5-4q75 : SSE, aucune route `@Sse()`), famille `hono`/`@hono/node-server` (outillage `prisma dev`, 12 avis modérés ou faibles), `uuid@9` (transitif).
+
+**Tests** : `tests/unit/dependency-overrides.spec.ts` (18) : version minimale de chaque paquet corrigé dans le lockfile, surcharges identiques dans les deux fichiers et dans le lockfile, chaque plage bornée par une majeure, versions déclarées de `nodemailer` et `cookie-parser`. Contre-mutation : une surcharge retirée de `pnpm-workspace.yaml` : 1 échec (restauré, `cmp`).
+**Mesures** : `pnpm audit --prod --audit-level=high` : **code 0** (avant : 26 avis élevés) ; `pnpm audit --prod` : 14 avis, 13 moderate et 1 low, tous justifiés dans `audit-exceptions.md`.
+
+**Écart par rapport au rapport** :
+1. `nodemailer` en 10.4.0 (rapport : « ≥ 10.0.13 »). Saut de deux versions majeures : les tests de `MailService` (qui mocke le module) ne l'exercent pas ; **vérification réelle d'envoi SMTP à faire en préproduction** (question 5).
+2. `firebase` frontend non monté en 13 : `@grpc/grpc-js` corrigé par surcharge `>=1.13.6 <2` (rapport : « `firebase` en version corrigée »). `firebase@11.10` reste ; `@firebase/rules-unit-testing@6` déclare déjà un pair `firebase@^13` non satisfait (avertissement préexistant, ne touche que les tests de règles Firestore).
+3. Le rapport demande `lodash>=4.18.0`, `mysql2>=3.23.1`, etc. : repris tels quels, avec borne de majeure ajoutée.
+4. Pas de CI sur `pnpm audit` (A9, Phase 6) : non fait ici.
+
+### Mesures (état final)
+- Jest backend (`env -u DATABASE_URL`) : **106 suites, 2934/2934** (avant : 98 suites, 2798). `nest build` OK ; `tsc --noEmit -p tests/tsconfig.json` OK.
+- Vitest frontend : 32 fichiers, 285/285 (inchangé). `pnpm build` frontend OK ; aucun `mock/login`, `Simuler une session`, `fonts.googleapis` dans `dist`.
+- `pnpm lint` : 0 erreur (51 avertissements `no-explicit-any` préexistants). Prettier : propre sur `backend/src`, `backend/tests`, la doc, les YAML/JSON et le lockfile modifiés.
+- Aucun serveur ni conteneur lancé ou arrêté ; essai de démarrage de `dist/main` en production sans variables réelles (arrêté par `DATABASE_SSL` avant d'écouter, processus terminé) ; les processus `nest start --watch`/vite et les conteneurs existants n'ont pas été touchés. `pnpm install` a toutefois remplacé des liens dans `node_modules` (voir déploiement).
+
+### Migrations
+Aucune migration Prisma.
+
+### Changements cassants et consignes de déploiement
+1. **`TRUST_PROXY_HOPS` est obligatoire en production** : sans elle, le backend refuse de démarrer. `docker-compose.prod.yml` fournit `1` par défaut. **Valeur à confirmer** (question 1) : `1` pour un seul Nginx d'hôte devant `127.0.0.1:3003` ; `2` si un CDN ou un répartiteur le précède. Un Nginx qui n'ajoute pas `X-Forwarded-For` (`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`) rend la valeur sans effet. Vérifier après déploiement : deux navigateurs distincts n'épuisent pas les mêmes compteurs.
+2. **Nginx de l'hôte : `client_max_body_size 10m;`** au moins sur `^/projects/[^/]+/webhooks/github$` (le défaut de 1 Mo rejette les livraisons GitHub volumineuses avant le backend). Documenté dans `docs/deployment-production.md`.
+3. **Redis devient un composant du limiteur** (clés `throttle:*`, `lockout:*`, `github-webhook-failures:*`, durée de vie ≤ 24 h) ; Redis 7 déjà requis (`EXPIRE ... NX`). Panne Redis : repli mémoire par instance, sans erreur.
+4. **Identifiants d'URL** : tout non-UUID est refusé en 400 (sauf SCIM, `backlog` pour les sprints). Le frontend du dépôt n'en envoie pas. Les corps/paramètres refusés avant : `limit` > 500 ou non entier, fenêtre de dates > 1 an, notes > 191 / 16 000 caractères, commande IA > 4000, mot de passe > 256 caractères à la connexion et à l'inscription.
+5. **Comptes verrouillés** : après 5 échecs en une minute, 429 ; après 10 échecs cumulés, verrou de 15 min (doublant). Message en français ; le frontend affiche le texte renvoyé.
+6. **Dépendances** : `pnpm install --frozen-lockfile`, reconstruire les images ; `nodemailer` 10 (voir question 5). Le `prisma generate` de `pnpm build` suffit pour le client.
+7. **Poste de développement** : `pnpm install` a recréé des liens dans `node_modules` ; les serveurs `nest start --watch`/vite déjà lancés gardent les modules chargés ; redémarrer avant de se fier à leur comportement.
+
+### Questions pour l'architecte
+1. **`TRUST_PROXY_HOPS`** : combien de reverse proxys précèdent réellement le backend en production (un Nginx d'hôte seul, ou CDN/répartiteur en plus) ? Je n'ai pu lire que `docker-compose.prod.yml` et `docs/deployment-production.md` (« reverse proxy TLS partagé » vers `127.0.0.1:3003`), pas la configuration Nginx de l'hôte. Défaut posé à 1 en attente de confirmation par l'exploitant.
+2. **Bornes des 41 champs texte restants** (titres 255, descriptions 10 000, noms 191, `labels`/`skills`/`checklist` en tableaux bornés…) : valeurs produit à valider avant de les imposer (un titre ou une description plus longs seraient refusés). Option recommandée : titres et noms 255, descriptions 20 000, tableaux 50 éléments de 100 caractères. À traiter dans un lot dédié si accepté.
+3. **Verrouillage par compte** : seuils retenus (5 échecs/minute, verrou de 15 min au 10e échec cumulé sur 24 h, doublant jusqu'à 24 h) et déni de service ciblé accepté ? Alternative : ne limiter par compte que les couples (compte, IP inconnue).
+4. **10 Mo pour les livraisons GitHub** (GitHub : jusqu'à 25 Mo) : un `push` de plusieurs milliers de commits au-delà de 10 Mo recevrait 413. Garder 10 Mo (route publique lue en mémoire avant la vérification de la signature) ou monter à 25 Mo ?
+5. **`nodemailer` 8 → 10** : vérification réelle d'envoi SMTP en préproduction (aucune adresse ni identifiant utilisés ici). Acceptable avant mise en production ?
+6. **Exemption SCIM** du pipe UUID (404 au format SCIM) : validée ?
+7. **`invitations/check` à 20/min** : décision d'exploitation (r35) à confirmer ; valeur modifiable en une ligne.
+8. **CI** : `pnpm audit --prod --audit-level=high` n'est pas branché dans `ci.yml` (A9, Phase 6).
+
+### Fichiers modifiés (aucun commit)
+Configuration et dépendances : `package.json`, `pnpm-workspace.yaml`, `pnpm-lock.yaml`, `backend/package.json`, `docker-compose.prod.yml`, `.env.example`, `.env.production.example`, `docs/deployment-production.md`, `docs/security/audit-exceptions.md` (nouveau), `docs/security/journal-corrections.md`.
+Source backend : `src/main.ts`, `src/app.module.ts`, `src/common/{body-parsers,redis-throttler.storage,trust-proxy,uuid.pipe}.ts` (nouveaux), `src/redis/redis.service.ts`, `src/auth/{account-lockout.ts (nouveau),auth.service.ts}`, `src/auth/dto/{login,register}.dto.ts`, `src/notes/dto/note.dto.ts` (nouveau), `src/projects/dto/{ai-media-fields,list-query,oauth-callback}.dto.ts` (nouveaux), `src/projects/dto/ai-command.dto.ts`, contrôleurs `admin`, `sso`, `notes`, `notifications`, `ai`, `comments`, `github-webhook`, `invitations`, `projects`, `tracking`, et `src/projects/github-webhook.service.ts`.
+Tests : `tests/http/{input-validation,throttling-proxy}.spec.ts`, `tests/unit/{auth/account-lockout,common/controller-inputs,common/redis-throttler.storage,common/trust-proxy,dependency-overrides,main-hardening}.spec.ts` (nouveaux) ; adaptés : `tests/http/{admin-platform-roles,calendar-routes,fake-redis,github-webhook,http-test-app,impersonation-flag,mfa-ticket,projects-realtime-routes,rbac-matrix}`, `tests/integration/realtime/task-room-revocation.spec.ts`, `tests/support/rbac-fixture.ts`, `tests/unit/main-raw-body.spec.ts`, `tests/unit/authz/{ai-idor,creator-role,notes-access,notifications-access,policy.service,rbac-services,realtime,sprint-associate}.spec.ts`.
+
+### Revue architecte (r44) : lot r43 (S23, S24, S25)
+
+**Verdicts** : **S25 VALIDÉ** (peut être commité seul) ; **S23 VALIDÉ** hors plafond de 10 Mo du webhook ; **S24 VALIDÉ** hors pré-contrôle du webhook. **À REPRENDRE** : r44-m1 (Majeur, nouveau constat, régression du lot), r44-m2, r44-m3. Détail, feu vert de commit (2 commits) et réponses aux 8 questions : « Revue r44 » à la fin de `rapport-audit.md`.
+
+**Vérifié par moi** : jest 106 suites, 2934/2934 ; `nest build`, `tsc -p tests`, vitest 285/285, `pnpm build` (grep `dist` vide), lint, Prettier, `pnpm audit --prod --audit-level=high` = 0, lockfile frozen, intégrité sha512 contre le registre, aucun `.skip`/`.only`, aucun `expect` affaibli.
+
+**À corriger** :
+1. **r44-m1** : une requête anonyme avec en-têtes forgés (`sha256=` + 64 zéros, `X-GitHub-Delivery`, `application/json`) fait lire et parser 10 Mo (reproduit : 9,9 Mo en 152 ms, 401 en sortie) sans limite de débit (`@SkipThrottle`, compteur après le parsing). Pré-contrôle du compteur de refus avant lecture, vérification de signature dans le hook `verify` avant `JSON.parse`, plafond réduit (2 Mo recommandé, à confirmer), `limit_req` Nginx ; tests (a) à (d) dans le rapport.
+2. **r44-m2** : verrouillage par compte non atomique (test puis incrément) : réserver par incrément d'abord.
+3. **r44-m3** : retirer `:-1` de `TRUST_PROXY_HOPS` dans `docker-compose.prod.yml` (`:?`).
+4. Souhaitables : r44-a1 (`UuidPipe` sur les 3 routes d'administration des clés SCIM), r44-a2 (disjoncteur du stockage Redis du limiteur).
+
+**Note de procédure** : en vérifiant le lockfile avec `pnpm install --frozen-lockfile --lockfile-only`, pnpm a réécrit `pnpm-lock.yaml` (reformatage) ; je l'ai reformaté avec Prettier (même ensemble de paquets et de versions, 100 ajouts et 246 suppressions par rapport à HEAD, soit les mêmes 346 lignes qu'avant, Prettier propre). Le fixeur relancera `npx prettier --check pnpm-lock.yaml` et `git diff --stat pnpm-lock.yaml` avant le commit.
+
+## Reprise r44 (fixeur) — r44-m1, r44-m2, r44-m3, r44-a1, r44-a2
+
+Source : « Revue r44 » de `rapport-audit.md`. S25 est VALIDÉ et commité (25760c9) : non touché (`git diff --stat HEAD -- pnpm-lock.yaml` vide, Prettier propre, aucun `pnpm install`). Aucun commit, aucune migration.
+
+**Décisions de l'utilisateur (2026-11-10)** : plafond du webhook GitHub **2 Mo** ; seuils de verrouillage par compte **conservés**, avec journalisation de chaque pose de verrou et procédure de déblocage documentée ; **1 reverse proxy** (Nginx de l'hôte), `TRUST_PROXY_HOPS=1` documenté comme valeur attendue mais sans défaut dans le Compose ; `invitations/check` à **20/min** confirmé.
+
+### r44-m1 — webhook : refus avant lecture, signature avant analyse, plafond 2 Mo
+**Statut** : CORRIGÉ – À REVOIR
+**Changement** :
+- `common/body-parsers.ts` : `WEBHOOK_BODY_LIMIT` = `2mb`. Nouveau pré-contrôle `webhookFailurePrecheck`, enregistré avant les analyseurs : si le compteur de refus de l'adresse pour ce projet est à 20 ou plus, 429 immédiat, `Connection: close`, sans lire le corps. Redis lent (> 300 ms) ou en panne : la requête passe.
+- Les livraisons éligibles (signature de forme valide, `X-GitHub-Delivery`, `application/json`) sont lues par l'analyseur **`raw`** (2 Mo) : plus aucun `JSON.parse` avant la signature. `GitHubWebhookController.receive` ne lit plus de `@Body()` ; `GitHubWebhookService.handle` vérifie le HMAC sur `rawBody`, puis seulement analyse le JSON (corps invalide mais signé : 400). 401 uniforme, anti-rejeu et dépôt inchangés. L'exemption du test méta (`@Body` du webhook) disparaît (`EXEMPT` vide).
+- Compteur : clé `github-webhook-failures:<ip>:<projectId>` (constantes et clé dans `github-webhook.util.ts`, partagées par le pré-contrôle et le service).
+- `docs/deployment-production.md` : `limit_req_zone`/`limit_req` (30 r/min, burst 10) et `client_max_body_size 2m` pour `^/projects/[^/]+/webhooks/github$`.
+
+**Écart par rapport à la revue** : la revue demande que le pré-contrôle ne bloque pas une livraison valide de la même adresse (test b) tout en répondant 429 avant lecture. C'est contradictoire : la validité d'une signature n'est connue qu'après lecture. Choix : clé **par couple (adresse, projet)**. Une adresse bloquée pour un projet (par un tiers qui connaît le `projectId`, ou par un client GitHub mal configuré) n'empêche plus les livraisons valides des **autres projets** depuis la même adresse (adresses de GitHub partagées), et le blocage expire en 60 s. Les livraisons valides du **même projet** depuis l'adresse bloquée reçoivent 429 pendant ces 60 s ; GitHub les rejoue (« Redeliver »). Le test (b) est adapté en conséquence. Question 1.
+
+**Tests** (`github-webhook.spec.ts`, 67 au total) : (a) 21 requêtes de 1,8 Mo à signature fausse : 20 en 401, la 21e en 429 ; la 21e est refusée **sans lire le corps** (requête HTTP brute : réponse 429 reçue alors que 1 ko sur 1,8 Mo est envoyé) ; (b adapté) après le blocage, livraison valide d'un autre projet acceptée, et acceptée de nouveau pour le projet bloqué après 61 s ; (c) JSON invalide de 1,5 Mo à signature fausse : 401 et non 400, espion sur `JSON.parse` (aucun appel sur un grand corps) ; signature valide et JSON invalide : 400 ; livraison valide de 1,5 Mo acceptée ; plafond 2 Mo (413 à 2 Mo + 1 ko ; sans signature de forme valide : 413 dès 1 Mo).
+**Contre-mutations** : seuil du pré-contrôle neutralisé : 1 échec (le test « sans lire le corps ») ; analyse JSON avant la signature : 2 ; plafond 10 Mo : 2. Le test (a) seul ne détecte pas l'absence de pré-contrôle (le service compte aussi et répond 429) : c'est le test « sans lire le corps » qui le fait. Restaurés, `cmp` OK.
+
+### r44-m2 — verrouillage par compte atomique
+**Statut** : CORRIGÉ – À REVOIR
+`AccountLockout.assertAllowed` incrémente d'abord le compteur de la minute puis compare (réservation), `recordFailure` ne compte plus que le total de 24 h et pose le verrou ; `reset` au succès. Chaque pose de verrou est journalisée (`warn`, « Verrouillage de compte posé (<portée>) », empreinte SHA-256 de 12 caractères, nombre d'échecs, durée ; jamais l'adresse ni l'identifiant). Procédure de déblocage (suppression des clés `lockout:*`) dans `docs/deployment-production.md`. `FakeRedisService.incrementWithTtl`/`incrementWindow` rendus atomiques.
+**Tests** : 30 tentatives simultanées sur le même compte depuis 30 adresses (HTTP) : exactement 5 en 401, 25 en 429, `verifyPassword` appelé 5 fois (espion) ; unitaire : 30 appels simultanés, 5 passent ; journalisation (empreinte, pas d'identité) ; tests existants adaptés (échecs avec réservation). **Contre-mutations** : lecture puis incrément non atomique : 1 échec ; journalisation en `debug` : 1.
+
+### r44-m3 — `TRUST_PROXY_HOPS` sans défaut dans le Compose
+**Statut** : CORRIGÉ – À REVOIR
+`docker-compose.prod.yml` : `${TRUST_PROXY_HOPS:?...}`. `.env.production.example` et la doc : valeur attendue `1`, vérification `X-Forwarded-For: 1.2.3.4` documentée. Test `main-hardening.spec.ts` : `:?` présent, aucun `:-`. Contre-mutation (défaut `:-1` remis) : 1 échec.
+**Déploiement** : `.env.production` doit contenir `TRUST_PROXY_HOPS=1` avant le prochain `up`, sinon le Compose refuse de démarrer.
+
+### r44-a1 — exemption SCIM réduite
+**Statut** : CORRIGÉ – À REVOIR
+`UuidPipe` sur `workspaces/:workspaceId/scim/keys[/:keyId]` (3 routes). Le test méta n'exempte plus que `getUser`, `updateUser`, `patchUser`, `deleteUser` (la revue cite `replaceUser` : la méthode s'appelle `updateUser`). Tests HTTP : `GET/POST /workspaces/abc/scim/keys` et `DELETE .../keys/def` : 400 (`scim-routes.spec.ts`, identifiants de la fixture passés en UUID). Contre-mutation (pipe de `keyId` retiré) : 2 échecs.
+
+### r44-a2 — disjoncteur du stockage Redis du limiteur
+**Statut** : CORRIGÉ – À REVOIR
+`RedisThrottlerStorage` ignore Redis 5 s après une erreur ou un délai dépassé (comme `AccountLockout`). Test : 100 appels pendant une panne (délai de 100 ms) en moins de 1,5 s (sans disjoncteur : 10 s). Contre-mutation : disjoncteur retiré : 1 échec.
+
+### Mesures
+Voir le rapport final (jest, `nest build`, `tsc`, vitest, `pnpm build` + grep, lint, Prettier) ; aucun processus ni conteneur laissé (un jest de contre-mutation bloqué par une connexion ouverte a été arrêté, fichier restauré et vérifié par `cmp`).
+
+### Questions pour l'architecte
+1. **Clé par (adresse, projet)** du blocage du webhook plutôt que par adresse seule : acceptable (voir Écart) ? Alternative : par adresse seule, avec 429 aussi pour les livraisons valides des autres projets pendant 60 s.
+2. **Nginx `limit_req`** (30 r/min, burst 10) : valeurs proposées, à ajuster à l'usage réel (les adresses de GitHub sont partagées).
+3. Un test de charge ou de l'envoi réel avec GitHub (« Redeliver ») reste à faire en préproduction.
+
+## Revue architecte (r45) — reprise r44
+
+Mesures relancées : jest backend (`env -u DATABASE_URL`) 106 suites, 2949/2949 ; `nest build`, `tsc -p tests`, vitest 285/285, `pnpm build` (grep `dist` propre), lint 0 erreur, Prettier propre, `pnpm audit --prod --audit-level=high` code 0 ; aucun `.skip`/`.only`, aucun `expect` affaibli. Contre-mutations restaurées (`cmp` OK) : pré-contrôle neutralisé (1 échec), analyse JSON avant signature (1), plafond 10 Mo (2), verrouillage non atomique (2).
+
+#### Revue architecte
+- **r44-m1 : VALIDÉ.** Écart accepté : blocage par couple (adresse, projet), test (b) adapté ; ma remédiation r44 était contradictoire sur ce point. Complément demandé en **r45-m1 (Mineur)** : le compteur est contournable en changeant l'UUID (ou sa casse) ; ajouter un compteur agrégé par adresse, normaliser la casse, rendre `WEBHOOK_PATH` insensible à la casse, corriger le `location` Nginx (`~* ...github/?$`). Non bloquant pour le commit, à traiter avant le déploiement.
+- **r44-m2 : VALIDÉ.** **r44-m3 : VALIDÉ.** **r44-a1 : VALIDÉ.** **r44-a2 : VALIDÉ.**
+- **Questions** : (1) clé (adresse, projet) acceptée, avec compteur agrégé ; (2) `limit_req` 30 r/min burst 10 acceptable au départ, relever à 120 / 30 si des 429 légitimes apparaissent ; (3) test de préproduction requis (liste dans le rapport, section r45).
+- **Feu vert de commit : OUI** (2 commits : code, tests et configuration ; documentation d'audit). Messages et listes de fichiers dans « Revue r45 » du rapport.
+- **Ouverts** : r45-m1 ; préproduction S23/S24 ; r44-a3 ; r42-a1 ; reste de l'ordre du rapport.
