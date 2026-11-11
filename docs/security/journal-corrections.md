@@ -5153,3 +5153,88 @@ Batterie rejouée sur `r54-mysql` et `r54-redis` (supprimés) : e2e 8 suites 382
 **Feu vert de commit** : 2 commits, voir le rapport (code et tests SCIM ensemble, puis docs). **Conditions de déploiement** : aucune migration ni variable, pas de changement de proxy ; ne pas activer SCIM en production avant r54-m1.
 
 **Constats encore ouverts (à relancer vers `fixeur`)** : P7-e : r54-m1 et r54-a1. Puis A9-b (NestJS 11), A8 (y inclure O-b et O-e), P2. Améliorations : r53-a1, r53-a2, O-f, O23, O-a, r48-a1, r48-a2. Environnement : conteneurs `r54-mysql` et `r54-redis` supprimés, rien commité ni poussé, aucune écriture en production.
+
+## Lot P7-e (fixeur)
+
+Revue de référence : r54 (architecte). Constats : r54-m1 (Mineur) et r54-a1 (Amélioration). Aucune migration, aucune dépendance, aucun changement de schéma, aucun changement de contrat d'API hors les nouveaux refus 400.
+
+### r54-m1 — PATCH SCIM : `active` n'est jamais déduit d'une absence ou d'une valeur invalide
+
+**Statut** : `CORRIGÉ – À REVOIR`
+
+**Cause confirmée** : `scim.service.ts`, `patchUser`, branche `active` : `activeVal === true || 'true' || 'True'` valait `false` pour `undefined`, `null`, `'yes'`, `1`, ce qui retirait la membership et révoquait les invitations en attente (reproduit avant correction : 3 tests unitaires et 2 tests e2e échouent sur le code de HEAD).
+
+**Formats des IdP (sources consultées le 2026-11-11)**
+- Microsoft Entra ID, « Known issues with SCIM 2.0 protocol compliance » (learn.microsoft.com/en-us/entra/identity/app-provisioning/application-provisioning-config-problem-scim-compatibility) : sans le drapeau `aadOptscim062020` (encore le comportement par défaut, correctif daté « TBD »), la désactivation est `{"op": "Replace", "path": "active", "value": "False"}` (casse de `op` variable, `active` en chaîne) ; avec le drapeau : `{"op": "replace", "path": "active", "value": false}`. Le même drapeau fait émettre les remplacements multiples sous forme d'objet sans `path` (`{"op": "replace", "value": {"displayName": ..., ...}}`), forme où `active` peut aussi figurer.
+- Okta, « SCIM 2.0 » (developer.okta.com/docs/api/openapi/okta-scim/guides/scim-20/) : désactivation = `{"op": "replace", "value": {"active": false}}` (booléen JSON, sans `path`).
+- Aucune de ces sources ne montre un `remove` de `active`, ni une valeur absente.
+
+**Changement** (`backend/src/auth/scim/scim.service.ts`, `patchUser` et nouvelle méthode privée `scimBoolean`) :
+- `remove` de `active` (avec chemin, casse indifférente, ou sans chemin avec `value.active`) : 400 `mutability`.
+- Valeur lue par `scimBoolean` : booléen JSON, ou chaîne `true`/`false` (casse ignorée, donc `"False"` et `"True"` d'Entra). Tout le reste (absente, `null`, `'yes'`, `1`, `0`, `''`, objet, tableau) : 400 `invalidValue`.
+- Refus global : les écritures ont toujours lieu après la boucle des opérations.
+- Formats conservés : `path: 'active'` avec booléen ou chaîne ; objet sans `path` (`{active: false}`, `{active: 'False'}`).
+
+**Tests**
+- Unitaires (`scim.service.spec.ts`, bloc « r54-m1 », 9 cas : `remove` 4 variantes ; 10 valeurs invalides ; 7 formats acceptés dont `'False'` et l'objet sans chemin ; `applyActiveState` appelé avec la bonne valeur ; `membership.delete` non appelé sur les refus).
+- e2e (`webhook-scim.e2e-spec.ts`, « r54-m1 ») : 9 opérations refusées (400, bon `scimType`, membership toujours en base) ; puis `'False'` suspend, `'True'` réactive, `{active:false}` suspend, `true` réactive (200, membership vérifiée en base).
+- Catalogue Q-2 (`abuse-no-5xx.e2e-spec.ts`) : `remove` de `active`, `active` objet imbriqué, `active` nul dans un objet, `displayName` blanc ; `ALLOWED_5XX` reste vide.
+- Résultat : voir mesures.
+
+**Contre-mutations** (fichier de référence sauvegardé, restauré par `\cp`, `cmp` identique à chaque fois)
+1. `scim.service.ts` remis à HEAD (`git show HEAD:...`) : unitaire 3 échecs/35, e2e 2 échecs/16 (m1 et a1).
+2. `scimBoolean` renvoie `false` au lieu de lever : unitaire 1 échec, e2e 1 échec.
+
+**Écart par rapport au rapport** : aucun. Un `remove` sans chemin ni `value.active` n'est pas concerné (sans effet, comme avant).
+
+**Questions pour l'architecte** : 1) Les chaînes autres que `true`/`false` (par exemple `"1"`) sont refusées : à confirmer. 2) Le drapeau Entra `aadOptscim062020` n'est pas nécessaire côté serveur : les deux formats sont acceptés.
+
+### r54-a1 — `replace` de `displayName` vide : 400 `invalidValue`
+
+**Statut** : `CORRIGÉ – À REVOIR`
+
+**Cause confirmée** : `patchUser` testait `op.value?.displayName` (vérité) : la forme objet `{displayName: ''}` sautait la branche et répondait 200 sans rien changer ; la forme avec chemin passait `''` à `nameUpdate`, falsy donc jamais écrit.
+
+**Changement** (`scim.service.ts`, `patchUser`) : le test d'objet devient `op.value?.displayName !== undefined` (donc `remove` avec `{displayName: ''}` donne bien `mutability`) ; après `scimText`, un nom vide ou ne contenant que des espaces blancs (`trim() === ''`, espaces, tabulations, retours à la ligne) lève 400 `invalidValue`. `scimText` reste inchangé (utilisé pour `userName`, `emails`).
+
+**Tests** : unitaire « r54-a1 » (`''`, `'   '`, `' \t\n '`, forme objet vide et blanche : 400, aucune écriture) ; e2e « r54-a1 » (4 variantes : 400 `invalidValue`, nom conservé en base) ; cas Q-2 `displayName` blanc. Reproduit avant correction (échec sur HEAD).
+
+**Contre-mutations** : test `trim() === ''` neutralisé (`false`) : unitaire 1 échec ; retour à HEAD : voir r54-m1 (échec unitaire et e2e) ; restauration `\cp` et `cmp` identique.
+
+**Écart par rapport au rapport** : aucun. **Question** : un nom blanc est refusé aussi sur `PUT` ? Non traité : `PUT` conserve le nom s'il est absent ou vide (`dto.displayName || ...`), accepté en r54 (question 2).
+
+### Compte des tests e2e SCIM
+Le fichier `webhook-scim.e2e-spec.ts` contient 14 `it` à HEAD (l'architecte avait raison, le « 15 » du journal P7-d était une erreur de décompte) et 16 après ce lot (+2). Total e2e : 382 + 2 + 4 cas Q-2 = 388.
+
+### Mesures du lot
+
+| Contrôle | Résultat |
+| --- | --- |
+| e2e `--runInBand --detectOpenHandles` | 8 suites, 388/388, aucun handle ouvert signalé |
+| jest unitaire (`env -u DATABASE_URL -u E2E_DATABASE_URL`) | 109 suites, 2 997/2 997 (+10) |
+| `nest build` | OK |
+| `tsc -p tests --noEmit` | OK |
+| ESLint | 0 erreur, 15 avertissements `no-explicit-any` préexistants |
+| Prettier (`src`, `tests`) | propre |
+| vitest frontend | 34 fichiers, 296/296 (non modifié ; lancé via `npx vitest run`, `pnpm` de cette machine est inopérant) |
+| Environnement | conteneurs `p7e-mysql` et `p7e-redis` supprimés (base `p7e_e2e`), rien commité ni poussé, aucune écriture en production |
+
+### Constats à passer en revue
+r54-m1 : `CORRIGÉ – À REVOIR`. r54-a1 : `CORRIGÉ – À REVOIR`.
+
+## Revue architecte (r55) : lot P7-e
+
+Batterie rejouée sur `r55-mysql` et `r55-redis` (supprimés) : e2e 8 suites 388/388 (`--runInBand --detectOpenHandles`), jest 109 suites 2 997/2 997, `nest build`, `tsc -p tests --noEmit`, ESLint (0 erreur, 15 avertissements préexistants), Prettier, vitest 296/296. Cinq contre-mutations détectées en unitaire et en e2e (refus `remove` de `active` neutralisé ; `scimBoolean` accepte toute chaîne ; `trim` neutralisé ; retour au test de vérité de `displayName` ; refus `remove` limité au chemin, contournement), restauration `\cp` et `cmp` identique. Diff relu en entier : complet et cohérent malgré l'incident du `cp` interactif. `npx` et `pnpm exec` équivalents (même binaire local).
+
+### r54-m1 : `active`
+**Verdict : VALIDÉ.** Refus global avant toute écriture, `op` normalisé en minuscules par le DTO, formats Entra (`"True"`/`"False"`) et Okta (objet sans chemin) acceptés et vérifiés en base.
+
+### r54-a1 : `displayName` vide
+**Verdict : VALIDÉ.** `!== undefined` ne casse aucun format légitime ; seul `{displayName: null}` en forme objet passe de 200 à 400 (constat ajouté **r55-a1**, Amélioration, à observer sans action).
+
+### Réponses
+(1) Chaînes autres que `true`/`false` : refus confirmé. (2) `PUT` avec `displayName` vide : le nom est conservé, accepté, pas de changement.
+
+**Feu vert de commit** : 2 commits, voir le rapport (code et tests SCIM ensemble, puis docs). **Conditions de déploiement** : aucune migration ni variable, pas de changement de proxy ; sauvegarde `mysqldump` avant la migration N6 en attente. **SCIM activable en production après ce déploiement**, après test de bout en bout avec l'IdP réel sur un espace pilote et confirmation de `TRUST_PROXY_HOPS`.
+
+**Constats encore ouverts (à relancer vers `fixeur`)** : aucun bloquant. Suite : A9-b (NestJS 11), A8 (y inclure O-b et O-e), P2. Améliorations : r55-a1 (observer), r53-a1, r53-a2, O-f, O23, O-a, r48-a1, r48-a2. Environnement : conteneurs `r55-mysql` et `r55-redis` supprimés, rien commité ni poussé, aucune écriture en production.

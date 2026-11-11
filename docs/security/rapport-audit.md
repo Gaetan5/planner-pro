@@ -8,7 +8,7 @@
 | Périmètre | `backend/` (NestJS 10, Prisma 7 / adaptateur MariaDB, MySQL 8, Socket.IO, Redis), `frontend/` (React 18 / Vite), `docker-compose*.yml`, `.github/workflows/ci.yml`, `firestore.rules` |
 | Méthode | Revue de code manuelle ligne par ligne, `pnpm audit --prod`, exécution de la suite Jest backend (32 suites, 185 tests, tous verts : **aucun ne couvre les scénarios d'attaque ci-dessous**) |
 | Statut | **Source de vérité** pour l'agent `fixeur`. Les identifiants sont stables : ne jamais renuméroter, ajouter les nouveaux constats à la suite. |
-| Révision | r54 (2026-11-11) : lot P7-d (r53-m1) VALIDÉ, feu vert de commit ; ouverts r54-m1 (SCIM `remove` de `active` suspend le compte), r54-a1, puis A9-b, A8, P2. Voir la section « Revue r54 » à la fin. |
+| Révision | r55 (2026-11-11) : lot P7-e (r54-m1, r54-a1) VALIDÉ, feu vert de commit ; ouvert r55-a1 (Amélioration), puis A9-b, A8, P2. SCIM activable en production après déploiement de ce lot (conditions dans « Revue r55 »). Voir la section « Revue r55 » à la fin. |
 
 > Note de reconstruction : le plan de référence S1–S21 / A1–A9 / P1–P8 n'avait jamais été enregistré. La numérotation ci-dessous a été reconstruite en respectant le découpage par phase. Chaque constat a été **revérifié dans le code actuel** ; les anciens documents (`docs/audit_roadmap_phases.md`, `docs/etat_des_lieux.md`, `docs/manifeste_actions_restantes.md`) contiennent des affirmations fausses, signalées en section 1.3.
 
@@ -5913,3 +5913,55 @@ Aucune mention d'outil d'assistance ni `Co-Authored-By`.
 4. Reliquats antérieurs : r44-a3, r42-a1, parcours manuel avant `CSP_MODE=enforce`, S30, recensement S19/S20, S26, A5 à A7, P5, P8, O10 à O15, O17.
 5. Actions d'exploitation : sauvegarde avant migration, comparaison complète du schéma de production, vérifications GitHub requises, confirmation de `TRUST_PROXY_HOPS` de production (O-c).
 6. Clos par cette revue : r53-m1.
+
+## Revue r55 (architecte) : lot P7-e (r54-m1, r54-a1) : VALIDÉ, une Amélioration (non bloquante)
+
+**Verdict global : VALIDÉ, feu vert de commit.** `active` n'est plus jamais déduit d'une absence ou d'une valeur invalide, `remove` de `active` répond 400 `mutability`, un `displayName` vide ou blanc répond 400 `invalidValue`. Le refus est global (les écritures ont lieu après la boucle). Les formats réellement émis par Entra ID (`"True"`/`"False"`) et Okta (`{active:false}` sans chemin) restent acceptés et sont testés en e2e avec la membership vérifiée en base. Aucun écart avec le rapport.
+
+| Point | Verdict |
+| --- | --- |
+| r54-m1 (`active` : `remove` en 400 `mutability`, absent ou non booléen en 400 `invalidValue`) | **VALIDÉ** : 4 contre-mutations détectées (unitaire et e2e), plus une tentative de contournement |
+| r54-a1 (`displayName` vide ou blanc : 400 `invalidValue`) | **VALIDÉ** : contre-mutations `trim` et test de vérité détectées |
+
+### Vérifications indépendantes (MySQL 8.0 et Redis 7 jetables `r55-mysql` et `r55-redis`, supprimés)
+- e2e `--runInBand --detectOpenHandles` : 8 suites, **388/388**, aucun handle ouvert. Jest unitaire (`env -u DATABASE_URL -u E2E_DATABASE_URL`) : 109 suites, **2 997/2 997**. `nest build` OK ; `tsc -p tests --noEmit` OK ; ESLint 0 erreur, 15 avertissements préexistants ; Prettier propre ; vitest 34 fichiers, 296/296.
+- **Diff complet et cohérent** (point du `cp` interactif) : `scimBoolean`, la branche `remove` de `active`, le test `!== undefined` et le refus `trim() === ''` sont tous présents ; `scim.service.ts` +38/-3, spec +95, e2e SCIM +94, Q-2 +20. Les chiffres du journal correspondent (16 `it` e2e SCIM, 4 cas Q-2, +10 unitaires, 388 e2e).
+- **`pnpm` / `npx`** : équivalents. `pnpm exec X` et `npx X` résolvent le même binaire du `node_modules` du dépôt (j'ai utilisé `npx jest`, `npx nest build`, `npx tsc`, `npx eslint`, `npx prettier`, `npx vitest`, `npx prisma`) ; mêmes configurations (`jest-e2e.json`, `tsconfig.test.json`), mêmes résultats que ceux du fixeur. La CI utilise `pnpm` et doit rester la référence.
+- **Contre-mutations** (fichier de référence, restauration `\cp`, `cmp` identique à chaque fois ; chaque ligne : unitaire 1 échec/35, e2e SCIM 1 échec/16) :
+  1. Refus `remove` de `active` neutralisé (`if (false)`) : détecté (le `scimType` devient `invalidValue`).
+  2. `scimBoolean` renvoyant `true` pour toute autre chaîne : détecté.
+  3. Refus `trim() === ''` neutralisé : détecté.
+  4. Retour de `op.value?.displayName !== undefined` au test de vérité : détecté.
+  5. Contournement : refus `remove` limité à `path === 'active'` (le `remove` sans chemin avec `{active:false}` repasse) : détecté.
+
+### Relecture ciblée : `!== undefined` et formats d'IdP
+- `{active:false}` / `{displayName:'X'}` / objet multi-attributs sans chemin (forme Entra avec le drapeau `aadOptscim062020`) : inchangés, chaque clé est évaluée indépendamment, les valeurs valides passent.
+- `op` est mis en minuscules par le DTO (`scim.dto.ts:145`) : `Replace`, `Remove` d'Entra sont bien couverts.
+- Seul changement de comportement pour un objet : `{displayName: null}` (auparavant ignoré, 200) répond maintenant 400 `invalidValue`, ce qui aligne la forme objet sur la forme avec chemin (déjà 400 depuis N3). Voir r55-a1.
+
+### Constats
+**r55-a1 (Amélioration) : `{displayName: null}` en forme objet sans chemin répond 400 `invalidValue`, alors qu'il passait en 200 auparavant.** Cohérent et défendable (`User.name` obligatoire), mais un IdP qui enverrait `null` pour un nom vide dans un remplacement multiple verrait toute l'opération refusée (y compris un `active` valide dans la même requête). Aucune source consultée n'indique qu'Entra ou Okta le fasse ; ne rien changer maintenant. Si un IdP réel le fait (journaux de synchronisation après activation), traiter `null` comme `mutability` et envisager de n'ignorer que cette clé. Pas de test requis tant que non observé.
+
+### Réponses aux questions du fixeur
+1. **Chaînes autres que `true`/`false` (`"1"`, `"yes"`) : refus confirmé** (400 `invalidValue`). Ni Entra ni Okta n'émettent autre chose que le booléen ou `"True"`/`"False"` ; une tolérance élargie ferait revenir une valeur ambiguë vers une décision destructive. Le drapeau `aadOptscim062020` n'est pas nécessaire côté serveur (les deux formats passent).
+2. **`PUT` avec `displayName` vide : conservation du nom, accepté, pas de changement.** Le `PUT` ne crée ni n'écrit de valeur vide ; la sémantique stricte de remplacement complet n'est pas poursuivie (même position que r54).
+
+### Feu vert de commit (chemins explicites, jamais `git add -A`, ni `.claude/`, ni `.env*`) : 2 commits, dans cet ordre
+1. `fix(security): PATCH SCIM, active jamais déduit d'une absence ou d'une valeur invalide, displayName vide refusé (r54-m1, r54-a1)` : `backend/src/auth/scim/scim.service.ts`, `backend/src/auth/scim/scim.service.spec.ts`, `backend/tests/e2e/security/webhook-scim.e2e-spec.ts`, `backend/tests/e2e/security/abuse-no-5xx.e2e-spec.ts` (code et tests ensemble : chaque commit passe isolément).
+2. `docs(security): revue r55, lot P7-e (r54-m1, r54-a1)` : `docs/security/rapport-audit.md`, `docs/security/journal-corrections.md`, en dernier.
+Aucune mention d'outil d'assistance ni `Co-Authored-By`.
+
+### Conditions de déploiement (production actuelle : 93711a8 ; l'ensemble couvre aussi P7-b, P7-c et P7-d, voir r53 et r54)
+1. **Prérequis** : CI verte sur tous les jobs ; conditions de r53 inchangées, dont la **sauvegarde `mysqldump` complet** avant la migration `20261117000000_n6_sso_client_secret_text` (en attente de déploiement).
+2. **Migration** : aucune dans ce lot. Aucune dépendance, aucune variable, **aucun changement de proxy** (`ekose-nginx-1` inchangé, `docker restart` et non `reload` si le proxy est touché par ailleurs).
+3. **Vérifications après déploiement** (SCIM, sur un espace de test) : `PATCH` `remove` de `active` : 400 `mutability`, membership conservée ; `replace` `active` `"False"` puis `"True"` : 200, suspension puis réactivation ; `replace` `displayName` `"  "` : 400, nom inchangé. Surveiller les journaux de l'IdP réel (échecs de synchronisation sur `active` ou `displayName`, cf. r55-a1).
+4. **Rollback** : image précédente, sans effet de données.
+5. **Connu et accepté** : r55-a1, r53-a1, r53-a2. r54-m1 et r54-a1 ne sont plus des risques une fois ce lot déployé.
+6. **SCIM en production : activable une fois ce lot déployé**, aux conditions suivantes : les commits ci-dessus déployés avec la migration N6 (sauvegarde préalable) ; un domaine SSO vérifié (`verifiedDomain`) et une clé SCIM dédiée par espace ; test de bout en bout avec l'IdP réel sur un espace pilote (création, `active` false/true, changement de nom, suppression) avant généralisation ; `TRUST_PROXY_HOPS` de production confirmé (O-c, limite de 300 requêtes par minute et par clé) ; aucun autre constat bloquant ouvert sur SCIM (r53-m1, r54-m1, r54-a1 clos).
+
+### Ordre des constats ouverts (fin de r55)
+1. **Suite de la Phase 6** : **A9-b** (NestJS 11, avec `jose` 4 vers 6), puis **A8** (y inclure O-b et **O-e**), puis **P2**.
+2. Améliorations : **r55-a1** (à observer, aucune action), **r53-a1**, **r53-a2**, O-f, O23, O-a, r48-a1, r48-a2.
+3. Reliquats antérieurs : r44-a3, r42-a1, parcours manuel avant `CSP_MODE=enforce`, S30, recensement S19/S20, S26, A5 à A7, P5, P8, O10 à O15, O17.
+4. Actions d'exploitation : sauvegarde avant migration, comparaison complète du schéma de production, vérifications GitHub requises, confirmation de `TRUST_PROXY_HOPS` de production (O-c).
+5. Clos par cette revue : r54-m1, r54-a1.
