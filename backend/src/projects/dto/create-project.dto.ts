@@ -1,14 +1,25 @@
-import { IsString, IsNotEmpty, IsOptional, IsEnum, IsISO8601, IsInt, Min } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsEnum,
+  IsISO8601,
+  IsInt,
+  Min,
+  MaxLength,
+} from 'class-validator';
 import { ProjectStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
 
 export class CreateProjectDto {
   @IsString()
   @IsNotEmpty()
+  @MaxLength(191)
   name!: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(16_000)
   description?: string;
 
   @IsString()

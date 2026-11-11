@@ -8,6 +8,7 @@ import {
   Min,
   Max,
   IsArray,
+  MaxLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { TaskPriority } from '@prisma/client';
@@ -15,10 +16,12 @@ import { TaskPriority } from '@prisma/client';
 export class CreateTaskDto {
   @IsString()
   @IsNotEmpty()
+  @MaxLength(191)
   title!: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(16_000)
   description?: string;
 
   @IsEnum(TaskPriority)
@@ -48,6 +51,7 @@ export class CreateTaskDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(16_000)
   labels?: string;
 
   @IsArray()

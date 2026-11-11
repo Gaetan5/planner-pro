@@ -1,14 +1,26 @@
-import { IsString, IsOptional, IsEnum, IsISO8601, IsInt, Min, Max, IsArray } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsEnum,
+  IsISO8601,
+  IsInt,
+  Min,
+  Max,
+  IsArray,
+  MaxLength,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { TaskStatus, TaskPriority } from '@prisma/client';
 
 export class UpdateTaskDto {
   @IsString()
   @IsOptional()
+  @MaxLength(191)
   title?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(16_000)
   description?: string;
 
   @IsEnum(TaskStatus)
@@ -42,6 +54,7 @@ export class UpdateTaskDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(16_000)
   labels?: string;
 
   @IsArray()
