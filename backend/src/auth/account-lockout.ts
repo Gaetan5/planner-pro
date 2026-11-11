@@ -17,6 +17,19 @@ export const LOCKOUT_DEGRADED_MS = 5_000;
 /** Taille maximale du compteur local de repli (une adresse aléatoire par requête ne le fait pas grossir sans fin). */
 const MEMORY_MAX_ENTRIES = 10_000;
 
+/**
+ * 429 d'un verrouillage ou d'une limite par compte (P7) : porte le délai d'attente, que
+ * `RetryAfterFilter` publie dans l'en-tête `Retry-After` (comme les 429 du limiteur global).
+ */
+export class TooManyAttemptsException extends HttpException {
+  constructor(
+    message: string,
+    readonly retryAfterSeconds: number,
+  ) {
+    super(message, HttpStatus.TOO_MANY_REQUESTS);
+  }
+}
+
 /** Sous-ensemble de `RedisService` utilisé (les clés sont à durée de vie bornée). */
 export interface LockoutStore {
   get(key: string): Promise<string | null>;
@@ -68,16 +81,20 @@ export class AccountLockout {
   async assertAllowed(subject: string): Promise<void> {
     const locked = await this.read(this.key(subject, 'lock'));
     if (locked !== null) {
-      throw new HttpException(
+      // La valeur du verrou est l'instant de fin (ms) ; l'ancien format (« 1 ») retombe sur la durée de base
+      const until = Number(locked);
+      const remaining =
+        until > Date.now() ? Math.ceil((until - Date.now()) / 1000) : LOCKOUT_BASE_SECONDS;
+      throw new TooManyAttemptsException(
         'Trop de tentatives échouées : compte temporairement verrouillé, réessayez plus tard.',
-        HttpStatus.TOO_MANY_REQUESTS,
+        remaining,
       );
     }
     const attempts = await this.increment(this.key(subject, 'minute'), MINUTE_SECONDS);
     if (attempts > ACCOUNT_FAILURES_PER_MINUTE) {
-      throw new HttpException(
+      throw new TooManyAttemptsException(
         'Trop de tentatives échouées : réessayez dans une minute.',
-        HttpStatus.TOO_MANY_REQUESTS,
+        MINUTE_SECONDS,
       );
     }
   }
@@ -87,7 +104,7 @@ export class AccountLockout {
     const total = await this.increment(this.key(subject, 'total'), DAY_SECONDS);
     if (total >= LOCKOUT_THRESHOLD && total % LOCKOUT_THRESHOLD === 0) {
       const seconds = lockoutSeconds(total);
-      await this.write(this.key(subject, 'lock'), '1', seconds);
+      await this.write(this.key(subject, 'lock'), String(Date.now() + seconds * 1000), seconds);
       // Seule l'empreinte de l'identité est journalisée, jamais l'adresse ni l'identifiant
       const fingerprint = createHash('sha256').update(subject).digest('hex').slice(0, 12);
       this.logger.warn(

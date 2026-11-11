@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -22,6 +22,7 @@ import { RealtimeModule } from './realtime/realtime.module';
 import { AppThrottlerGuard } from './common/app-throttler.guard';
 import { FeatureFlagGuard } from './config/feature-flag.guard';
 import { JwtAuthGuard } from './auth/jwt.guard';
+import { RetryAfterFilter } from './common/retry-after.filter';
 
 @Module({
   imports: [
@@ -51,6 +52,8 @@ import { JwtAuthGuard } from './auth/jwt.guard';
   controllers: [AppController],
   providers: [
     AppService,
+    // 429 par compte (verrouillage) : ajoute `Retry-After` (P7)
+    { provide: APP_FILTER, useClass: RetryAfterFilter },
     {
       provide: APP_GUARD,
       useClass: AppThrottlerGuard,
