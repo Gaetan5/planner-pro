@@ -1,5 +1,6 @@
-import { IsString, IsOptional, IsInt, Min, MaxLength } from 'class-validator';
+import { IsIn, IsInt, IsOptional, Min } from 'class-validator';
 import { Type } from 'class-transformer';
+import { BILLING_TYPES } from './billing-types';
 
 export class UpdateProjectFinancesDto {
   @Type(() => Number)
@@ -8,8 +9,7 @@ export class UpdateProjectFinancesDto {
   @IsOptional()
   budgetCents?: number;
 
-  @IsString()
+  @IsIn(BILLING_TYPES)
   @IsOptional()
-  @MaxLength(50)
-  billingType?: string;
+  billingType?: (typeof BILLING_TYPES)[number];
 }

@@ -55,9 +55,10 @@ export class ConfigureSsoDto {
 
   @IsString()
   @IsOptional()
-  // Colonne VARCHAR(191) qui stocke le secret chiffré (`iv:tag:contenu` en hexadécimal, 58 + 2 n
-  // caractères pour n octets) : 66 octets au plus, sinon la base refuse l'écriture (500)
-  @MaxLength(66)
+  // Colonne TEXT (N6) qui stocke le secret chiffré (`iv:tag:contenu` en hexadécimal, 58 + 2 n
+  // caractères pour n octets) : 1 024 caractères au plus, soit 6 202 caractères chiffrés au pire
+  // (3 octets par unité UTF-16), très en dessous des 65 535 octets de la colonne
+  @MaxLength(1024)
   clientSecret?: string;
 
   @IsString()

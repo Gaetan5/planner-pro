@@ -8,10 +8,12 @@ export class CreateSprintDto {
   name!: string;
 
   @IsISO8601()
+  @MaxLength(64)
   @IsNotEmpty()
   startDate!: string;
 
   @IsISO8601()
+  @MaxLength(64)
   @IsNotEmpty()
   endDate!: string;
 

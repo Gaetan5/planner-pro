@@ -8,10 +8,12 @@ export class UpdateSprintDto {
   name?: string;
 
   @IsISO8601()
+  @MaxLength(64)
   @IsOptional()
   startDate?: string;
 
   @IsISO8601()
+  @MaxLength(64)
   @IsOptional()
   endDate?: string;
 

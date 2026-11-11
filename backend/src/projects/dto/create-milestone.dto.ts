@@ -12,6 +12,7 @@ export class CreateMilestoneDto {
   description?: string;
 
   @IsISO8601()
+  @MaxLength(64)
   @IsOptional()
   dueDate?: string;
 }

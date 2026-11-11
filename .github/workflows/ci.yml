@@ -205,6 +205,15 @@ jobs:
         run: >-
           pnpm --filter backend exec prisma migrate diff
           --from-config-datasource --to-schema prisma/schema --exit-code
+      # N6 : même contrôle pour l'élargissement de `SSOConfiguration.clientSecret` en TEXT
+      - name: Rejeu idempotent de la migration N6
+        run: >-
+          pnpm --filter backend exec prisma db execute
+          --file prisma/migrations/20261117000000_n6_sso_client_secret_text/migration.sql
+      - name: Dérive après rejeu N6
+        run: >-
+          pnpm --filter backend exec prisma migrate diff
+          --from-config-datasource --to-schema prisma/schema --exit-code
 
   # A9 (r42) : en-têtes de sécurité de l'image frontend de production, mesurés sur le conteneur
   # réel (image construite avec pnpm 10 et Node 20), sur la page d'entrée et sur un asset .js.

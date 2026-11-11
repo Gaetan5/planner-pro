@@ -17,6 +17,7 @@ export class CreateDeliverableDto {
   status?: DeliverableStatus;
 
   @IsISO8601()
+  @MaxLength(64)
   @IsOptional()
   dueDate?: string;
 }

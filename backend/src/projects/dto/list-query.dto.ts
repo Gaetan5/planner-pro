@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsInt, IsISO8601, IsOptional, Max, Min } from 'class-validator';
+import { IsInt, IsISO8601, IsOptional, Max, Min, MaxLength } from 'class-validator';
 
 /** Plafond du nombre d'entrées d'un journal d'audit renvoyées en une requête (S23). */
 export const MAX_AUDIT_LOG_LIMIT = 500;
@@ -18,10 +18,12 @@ export class AuditLogQueryDto {
 export class TimeRangeQueryDto {
   @IsOptional()
   @IsISO8601({ strict: true })
+  @MaxLength(64)
   start?: string;
 
   @IsOptional()
   @IsISO8601({ strict: true })
+  @MaxLength(64)
   end?: string;
 }
 

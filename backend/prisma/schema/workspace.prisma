@@ -100,7 +100,7 @@ model SSOConfiguration {
   domainVerificationToken String?
   domainVerifiedAt        DateTime?
   clientId       String?
-  clientSecret   String?
+  clientSecret   String?       @db.Text // Secret chiffré (AES-256-GCM), N6
   discoveryUrl   String?
   entryPoint     String?       // SAML IdP URL
   cert           String?       @db.Text // SAML X.509 cert

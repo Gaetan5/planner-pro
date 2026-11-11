@@ -2,10 +2,12 @@ import { IsISO8601, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-va
 
 export class CreateResourceLeaveDto {
   @IsISO8601()
+  @MaxLength(64)
   @IsNotEmpty()
   startDate!: string;
 
   @IsISO8601()
+  @MaxLength(64)
   @IsNotEmpty()
   endDate!: string;
 

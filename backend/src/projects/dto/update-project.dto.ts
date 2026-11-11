@@ -1,6 +1,16 @@
-import { IsString, IsOptional, IsEnum, IsISO8601, IsInt, Min, MaxLength } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsEnum,
+  IsISO8601,
+  IsInt,
+  Min,
+  MaxLength,
+  IsIn,
+} from 'class-validator';
 import { ProjectStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
+import { BILLING_TYPES } from './billing-types';
 
 export class UpdateProjectDto {
   @IsString()
@@ -18,10 +28,12 @@ export class UpdateProjectDto {
   status?: ProjectStatus;
 
   @IsISO8601()
+  @MaxLength(64)
   @IsOptional()
   startDate?: string;
 
   @IsISO8601()
+  @MaxLength(64)
   @IsOptional()
   dueDate?: string;
 
@@ -31,8 +43,7 @@ export class UpdateProjectDto {
   @IsOptional()
   budgetCents?: number;
 
-  @IsString()
+  @IsIn(BILLING_TYPES)
   @IsOptional()
-  @MaxLength(191)
-  billingType?: string;
+  billingType?: (typeof BILLING_TYPES)[number];
 }
