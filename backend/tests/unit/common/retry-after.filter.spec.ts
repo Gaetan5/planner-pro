@@ -63,4 +63,42 @@ describe('P7 : RetryAfterFilter', () => {
     const legacyError = await old.assertAllowed('b@e2e.example').catch((e) => e);
     expect(legacyError.retryAfterSeconds).toBe(LOCKOUT_BASE_SECONDS);
   });
+
+  describe('délai restant du verrou (r51-m1), horloge simulée', () => {
+    const T0 = Date.UTC(2026, 0, 1, 12, 0, 0);
+    let now: jest.SpyInstance<number, []>;
+    beforeEach(() => {
+      now = jest.spyOn(Date, 'now').mockReturnValue(T0);
+    });
+    afterEach(() => now.mockRestore());
+
+    const lockedError = async (lockout: AccountLockout, subject: string) => {
+      const error = await lockout.assertAllowed(subject).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(error).toBeInstanceOf(TooManyAttemptsException);
+      return error as TooManyAttemptsException;
+    };
+
+    it('décroît avec le temps écoulé : 900 s au départ, 600 s après 5 minutes, 1 s avant la fin', async () => {
+      const lockout = new AccountLockout(new FakeRedisService() as never, 'login');
+      for (let i = 0; i < LOCKOUT_THRESHOLD; i++) await lockout.recordFailure('c@e2e.example');
+
+      expect((await lockedError(lockout, 'c@e2e.example')).retryAfterSeconds).toBe(900);
+      now.mockReturnValue(T0 + 5 * 60_000);
+      expect((await lockedError(lockout, 'c@e2e.example')).retryAfterSeconds).toBe(600);
+      now.mockReturnValue(T0 + 900_000 - 1_000);
+      expect((await lockedError(lockout, 'c@e2e.example')).retryAfterSeconds).toBe(1);
+    });
+
+    it('palier 2 (20 échecs) : 1 800 s, puis le reste exact', async () => {
+      const lockout = new AccountLockout(new FakeRedisService() as never, 'login');
+      for (let i = 0; i < 2 * LOCKOUT_THRESHOLD; i++) await lockout.recordFailure('d@e2e.example');
+
+      expect((await lockedError(lockout, 'd@e2e.example')).retryAfterSeconds).toBe(1800);
+      now.mockReturnValue(T0 + 10 * 60_000);
+      expect((await lockedError(lockout, 'd@e2e.example')).retryAfterSeconds).toBe(1200);
+    });
+  });
 });
