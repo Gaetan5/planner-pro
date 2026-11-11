@@ -219,6 +219,72 @@ describe('P7 e2e : webhook GitHub et SCIM', () => {
       expect(res.status).toBe(400);
     });
 
+    it('N3 : PATCH et PUT SCIM avec une valeur démesurée : 400 au format SCIM (invalidValue), jamais 5xx, nom inchangé', async () => {
+      const owner = await world.createUser({ label: 'scimN3' });
+      const ws = await world.createWorkspace(owner, 'Espace SCIM N3');
+      const key = `scim_live_${randomUUID().replace(/-/g, '')}`;
+      await world.prisma.sCIMApiKey.create({
+        data: { workspaceId: ws, name: 'clé N3', tokenHash: hash(key) },
+      });
+      // Domaine vérifié : seul moyen de provisionner un compte par SCIM (S10/S11)
+      const domain = `n3-${randomUUID().slice(0, 8)}.example`;
+      await world.prisma.sSOConfiguration.create({
+        data: { workspaceId: ws, domain, verifiedDomain: domain },
+      });
+      const created = await scim('POST', '/scim/v2/Users', key, {
+        schemas: ['urn:ietf:params:scim:schemas:core:2.0:User'],
+        userName: `n3@${domain}`,
+        displayName: 'Nom initial',
+        active: true,
+      });
+      expect(created.status).toBe(201);
+      const id = created.body.id as string;
+      const patch = (operation: Record<string, unknown>) =>
+        scim('PATCH', `/scim/v2/Users/${id}`, key, {
+          schemas: ['urn:ietf:params:scim:api:messages:2.0:PatchOp'],
+          Operations: [operation],
+        });
+      const expectInvalid = (res: { status: number; body: Record<string, unknown> }) => {
+        expect(res.status).toBe(400);
+        expect(res.body.schemas).toEqual(['urn:ietf:params:scim:api:messages:2.0:Error']);
+        expect(res.body.scimType).toBe('invalidValue');
+      };
+
+      const big = 'x'.repeat(300_000);
+      expectInvalid(await patch({ op: 'replace', path: 'displayName', value: big }));
+      expectInvalid(await patch({ op: 'replace', value: { displayName: big } }));
+      expectInvalid(await patch({ op: 'replace', path: 'displayName', value: 'y'.repeat(192) }));
+      expectInvalid(
+        await patch({
+          op: 'replace',
+          path: 'displayName',
+          value: ['y'.repeat(100), 'z'.repeat(100)],
+        }),
+      );
+      expectInvalid(await patch({ op: 'replace', path: 'userName', value: big }));
+      expectInvalid(await patch({ op: 'replace', path: 'emails', value: [{ value: big }] }));
+      // Création et remplacement : 192 caractères dépassent la colonne VARCHAR(191)
+      const long = 'n'.repeat(192);
+      expectInvalid(
+        await scim('POST', '/scim/v2/Users', key, { userName: `n3b@${domain}`, displayName: long }),
+      );
+      expectInvalid(
+        await scim('PUT', `/scim/v2/Users/${id}`, key, {
+          userName: `n3@${domain}`,
+          displayName: long,
+        }),
+      );
+      expect((await world.prisma.user.findUniqueOrThrow({ where: { id } })).name).toBe(
+        'Nom initial',
+      );
+
+      // Limite exacte : 191 caractères, y compris non ASCII, acceptés
+      const exact = 'é'.repeat(191);
+      const ok = await patch({ op: 'replace', path: 'displayName', value: exact });
+      expect(ok.status).toBe(200);
+      expect((await world.prisma.user.findUniqueOrThrow({ where: { id } })).name).toBe(exact);
+    });
+
     it('300 requêtes par minute et par clé, la suivante reçoit un 429 SCIM en français avec Retry-After', async () => {
       const key = `scim_live_${randomUUID().replace(/-/g, '')}`;
       await world.prisma.sCIMApiKey.create({

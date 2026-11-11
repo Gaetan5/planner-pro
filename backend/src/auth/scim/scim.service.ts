@@ -19,6 +19,7 @@ import { InvitationStatus, WorkspaceRole } from '@prisma/client';
 import { FirestoreSyncService } from '../../firestore-sync/firestore-sync.service';
 import { invitationSyncPayload } from '../../projects/invitation-sync-payload';
 import * as crypto from 'crypto';
+import { SCIM_TEXT_MAX } from './scim.dto';
 
 @Injectable()
 export class ScimService {
@@ -68,6 +69,35 @@ export class ScimService {
         location: `/api/scim/v2/Users/${user.id}`,
       },
     };
+  }
+
+  /**
+   * N3 : valeur textuelle d'un attribut SCIM destinée à une colonne VARCHAR(191) (`User.name`,
+   * `User.email`). Refus 400 `invalidValue` (RFC 7644 §3.12) au lieu d'une erreur de base (500).
+   * `undefined` (opération `remove` sans valeur) n'est pas refusé : il passe par `String()` comme
+   * avant ce correctif (comportement historique conservé, hors périmètre de N3).
+   */
+  private scimText(attribute: string, raw: unknown): string {
+    if (raw !== undefined && typeof raw !== 'string') {
+      throw new BadRequestException(
+        this.scimError(
+          400,
+          `L'attribut ${attribute} doit être une chaîne de caractères.`,
+          'invalidValue',
+        ),
+      );
+    }
+    const text = String(raw);
+    if (text.length > SCIM_TEXT_MAX) {
+      throw new BadRequestException(
+        this.scimError(
+          400,
+          `L'attribut ${attribute} ne peut pas dépasser ${SCIM_TEXT_MAX} caractères.`,
+          'invalidValue',
+        ),
+      );
+    }
+    return text;
   }
 
   private scimError(status: number, detail: string, scimType?: string) {
@@ -364,19 +394,23 @@ export class ScimService {
         activeUpdate = activeVal === true || activeVal === 'true' || activeVal === 'True';
       }
       if (path === 'displayname' || op.value?.displayName) {
-        nameUpdate = path === 'displayname' ? String(op.value) : String(op.value?.displayName);
+        nameUpdate = this.scimText(
+          'displayName',
+          path === 'displayname' ? op.value : op.value?.displayName,
+        );
       }
       if (path === 'username' || op.value?.userName) {
+        const requested = path === 'username' ? op.value : op.value?.userName;
         this.assertEmailUnchanged(
           user.email,
-          path === 'username' ? String(op.value) : op.value?.userName,
+          typeof requested === 'string' ? this.scimText('userName', requested) : String(requested),
         );
       }
       // emails[...] : chaîne, objet ou tableau ; toute adresse différente est refusée (S11)
       if (path.startsWith('emails') || op.value?.emails !== undefined) {
         const candidates = path.startsWith('emails') ? op.value : op.value?.emails;
         for (const requested of this.emailValues(candidates)) {
-          this.assertEmailUnchanged(user.email, requested);
+          this.assertEmailUnchanged(user.email, this.scimText('emails', requested));
         }
       }
     }

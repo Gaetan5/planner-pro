@@ -18,6 +18,12 @@ import {
 import { Transform, Type } from 'class-transformer';
 import { lenient } from '../../common/app-validation.pipe';
 
+/**
+ * N3 : longueur maximale d'un nom ou d'une adresse reçus par SCIM, celle des colonnes
+ * VARCHAR(191) `User.name` et `User.email`. Au-delà, la base refuse l'écriture (500).
+ */
+export const SCIM_TEXT_MAX = 191;
+
 export interface ScimName {
   formatted?: string;
   familyName?: string;
@@ -61,7 +67,7 @@ export interface ScimListResponse<T> {
 export class ScimNameDto {
   @IsOptional()
   @IsString()
-  @MaxLength(200)
+  @MaxLength(SCIM_TEXT_MAX)
   formatted?: string;
 
   @IsOptional()
@@ -78,7 +84,7 @@ export class ScimNameDto {
 @lenient()
 export class ScimEmailDto {
   @IsEmail()
-  @MaxLength(254)
+  @MaxLength(SCIM_TEXT_MAX)
   value!: string;
 
   @IsOptional()
@@ -102,7 +108,7 @@ export class CreateScimUserDto {
 
   @IsString()
   @IsNotEmpty()
-  @MaxLength(254)
+  @MaxLength(SCIM_TEXT_MAX)
   userName!: string;
 
   @IsOptional()
@@ -113,7 +119,7 @@ export class CreateScimUserDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(200)
+  @MaxLength(SCIM_TEXT_MAX)
   displayName?: string;
 
   @IsOptional()

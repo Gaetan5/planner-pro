@@ -389,6 +389,51 @@ describe('ScimService', () => {
       expect(res.active).toBe(true);
     });
 
+    it('N3 : PATCH displayName de plus de 191 caractères ou non textuel : 400 invalidValue, aucune écriture', async () => {
+      prisma.user.findUnique.mockResolvedValue(
+        victim({ id: 'u-own', provisionedByWorkspaceId: 'ws-1' }),
+      );
+      const patch = (operation: Record<string, unknown>) =>
+        service.patchUser('ws-1', 'u-own', {
+          schemas: [],
+          Operations: [operation as never],
+        });
+
+      for (const value of ['x'.repeat(192), ['a', 'b'], 42, { a: 1 }]) {
+        await expect(patch({ op: 'replace', path: 'displayName', value })).rejects.toMatchObject({
+          response: { scimType: 'invalidValue', status: '400' },
+        });
+      }
+      await expect(
+        patch({ op: 'replace', value: { displayName: 'x'.repeat(192) } }),
+      ).rejects.toThrow(BadRequestException);
+      await expect(
+        patch({ op: 'replace', path: 'userName', value: 'u'.repeat(192) }),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('N3 : PATCH displayName de 191 caractères accepté ; un remove sans valeur n’est pas refusé (comportement historique)', async () => {
+      prisma.user.findUnique.mockResolvedValue(
+        victim({ id: 'u-own', provisionedByWorkspaceId: 'ws-1' }),
+      );
+      prisma.user.update.mockImplementation(async ({ data }) => ({ ...victim(), ...data }));
+
+      await service.patchUser('ws-1', 'u-own', {
+        schemas: [],
+        Operations: [{ op: 'replace', path: 'displayName', value: 'é'.repeat(191) }],
+      });
+      expect(prisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { name: 'é'.repeat(191) } }),
+      );
+      await expect(
+        service.patchUser('ws-1', 'u-own', {
+          schemas: [],
+          Operations: [{ op: 'remove', path: 'displayName' }],
+        }),
+      ).resolves.toBeDefined();
+    });
+
     it('un utilisateur ni membre ni provisionné par ce workspace est introuvable (404)', async () => {
       prisma.user.findUnique.mockResolvedValue(victim({ memberships: [] }));
 
