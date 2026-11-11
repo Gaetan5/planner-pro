@@ -1,3 +1,4 @@
+import { apiErrorMessage } from './http-errors';
 import { SecurityApiError } from './security-api';
 
 const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
@@ -24,8 +25,7 @@ async function call<T>(path: string, method: 'GET' | 'POST', body?: Record<strin
   if (!res.ok) {
     const message = (data as { message?: string | string[] }).message;
     throw new SecurityApiError(
-      (Array.isArray(message) ? message.join(' ') : message) ||
-        'La demande a échoué. Réessayez plus tard.',
+      apiErrorMessage(res.status, message, 'La demande a échoué. Réessayez plus tard.'),
       res.status,
     );
   }

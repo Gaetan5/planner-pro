@@ -22,6 +22,7 @@ import {
   Building2,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { readApiError } from '../http-errors';
 import './AdminConsole.css';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
@@ -293,8 +294,7 @@ export function AdminConsole() {
         body: JSON.stringify({ role: rolePayload }),
       });
       if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.message || 'Impossible de mettre à jour le rôle.');
+        throw new Error(await readApiError(res, 'Impossible de mettre à jour le rôle.'));
       }
       setSuccessMessage('Rôle mis à jour avec succès.');
       void loadUsers();

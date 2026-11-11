@@ -1,3 +1,4 @@
+import { apiErrorMessage } from './http-errors';
 import { SecurityApiError, type IdentityProof } from './security-api';
 
 const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
@@ -59,8 +60,10 @@ export async function linkGitHub(
     githubUsername?: string;
   };
   if (!res.ok) {
-    const message = Array.isArray(data.message) ? data.message.join(' ') : data.message;
-    throw new SecurityApiError(message || 'La liaison du compte GitHub a échoué.', res.status);
+    throw new SecurityApiError(
+      apiErrorMessage(res.status, data.message, 'La liaison du compte GitHub a échoué.'),
+      res.status,
+    );
   }
   return { githubUsername: data.githubUsername ?? '' };
 }

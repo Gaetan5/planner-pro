@@ -4,6 +4,7 @@
  * `localStorage`, jamais dans le `state` OAuth) pour survivre aux redirections GitHub, SSO ou
  * Firebase et au défi MFA.
  */
+import { apiErrorMessage } from './http-errors';
 export const PENDING_INVITE_KEY = 'planner_pending_invite';
 export const PENDING_INVITE_TTL_MS = 30 * 60 * 1000;
 
@@ -80,7 +81,8 @@ export async function invitationErrorFrom(res: Response, fallback: string) {
     const data = JSON.parse(text) as { message?: string | string[] };
     message = Array.isArray(data.message) ? data.message.join(' ') : (data.message ?? '');
   } catch {
-    // texte brut
+    // texte brut ; sauf pour un 429, où il vient de Nginx (HTML) : on laisse le repli générique
+    if (res.status === 429) message = '';
   }
-  return new InvitationApiError(message || fallback, res.status);
+  return new InvitationApiError(apiErrorMessage(res.status, message, fallback), res.status);
 }

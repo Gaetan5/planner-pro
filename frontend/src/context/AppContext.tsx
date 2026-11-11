@@ -11,6 +11,7 @@ import React, {
 import { io, Socket } from 'socket.io-client';
 import { SESSION_EXPIRED_EVENT, refreshSession } from '../api-session';
 import { invitationErrorFrom, isInviteToken } from '../invitation-store';
+import { apiErrorMessage, readApiError, serverMessageOf } from '../http-errors';
 
 export interface TaskAssignee {
   id: string;
@@ -590,8 +591,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     const responseBody = await res.text();
     let detail = responseBody;
+    let parsedBody: unknown;
     try {
       const parsed: unknown = JSON.parse(responseBody);
+      parsedBody = parsed;
       if (
         typeof parsed === 'object' &&
         parsed !== null &&
@@ -605,7 +608,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch {
       detail = responseBody;
     }
-    const message = detail || `${action} (HTTP ${res.status})`;
+    // 429 : message du serveur s'il est JSON et non vide ; corps HTML (Nginx) ou vide : message générique
+    const message =
+      res.status === 429
+        ? apiErrorMessage(429, serverMessageOf(parsedBody), '')
+        : detail || `${action} (HTTP ${res.status})`;
     setApiError(message);
     throw new Error(message);
   };
@@ -913,8 +920,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         body: JSON.stringify({ email, passwordRaw }),
       });
       if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.message || 'Identifiants invalides');
+        throw new Error(await readApiError(res, 'Identifiants invalides'));
       }
       const data = await res.json();
 
@@ -933,8 +939,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         body: JSON.stringify({ mfaTicket, ...factor }),
       });
       if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.message || 'Code d’authentification TOTP invalide');
+        throw new Error(await readApiError(res, 'Code d’authentification TOTP invalide'));
       }
       const data = await res.json();
       applyLoginResponse(data);
@@ -968,8 +973,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         body: JSON.stringify({ code, state }),
       });
       if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.message || 'Échec de l’authentification SSO');
+        throw new Error(await readApiError(res, 'Échec de l’authentification SSO'));
       }
       const data = await res.json();
       return applyLoginResponse(data);
@@ -987,8 +991,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         body: JSON.stringify({ email, passwordRaw, name }),
       });
       if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.message || "Échec de l'inscription");
+        throw new Error(await readApiError(res, "Échec de l'inscription"));
       }
       // 202 générique : aucune session avant la vérification de l'adresse e-mail (P6, S27)
       const data = (await res.json().catch(() => ({}))) as { message?: string };
@@ -1006,8 +1009,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       body: JSON.stringify({ idToken, name }),
     });
     if (!res.ok) {
-      const errData = await res.json();
-      throw new Error(errData.message || 'Connexion Firebase refusée.');
+      throw new Error(await readApiError(res, 'Connexion Firebase refusée.'));
     }
     const data = await res.json();
     return applyLoginResponse(data);

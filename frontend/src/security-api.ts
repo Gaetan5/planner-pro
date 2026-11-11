@@ -2,6 +2,7 @@
  * Appels de l'écran « Sécurité du compte » (P9, volet MFA). L'authentification passe par les
  * cookies de session (fetch de session installé au démarrage). Aucun secret n'est conservé ici.
  */
+import { apiErrorMessage } from './http-errors';
 const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 export interface MfaStatus {
@@ -38,8 +39,10 @@ async function call<T>(
   });
   const data = (await res.json().catch(() => ({}))) as { message?: string | string[] };
   if (!res.ok) {
-    const message = Array.isArray(data.message) ? data.message.join(' ') : data.message;
-    throw new SecurityApiError(message || 'La demande a échoué. Réessayez plus tard.', res.status);
+    throw new SecurityApiError(
+      apiErrorMessage(res.status, data.message, 'La demande a échoué. Réessayez plus tard.'),
+      res.status,
+    );
   }
   return data as T;
 }
