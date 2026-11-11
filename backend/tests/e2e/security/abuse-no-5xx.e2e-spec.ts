@@ -417,6 +417,220 @@ const cases = (): AbuseCase[] => [
     body: { name: 'x', description: 'x'.repeat(900_000) },
   },
 
+  // Champs texte des autres DTO (r51-m3) : chaque borne protège une colonne VARCHAR(191) ou TEXT,
+  // sans elle la base refuse l'écriture et la réponse est un 500
+  {
+    name: 'sprint : mise à jour avec un nom gigantesque',
+    method: 'PUT',
+    path: '/projects/sprints/:sprint',
+    auth: 'user',
+    body: { name: BIG },
+  },
+  {
+    name: 'commentaire : création avec un contenu gigantesque',
+    method: 'POST',
+    path: '/projects/tasks/:task/comments',
+    auth: 'user',
+    body: { content: 'x'.repeat(900_000) },
+  },
+  {
+    name: 'commentaire : réponse à un parent d’identifiant gigantesque',
+    method: 'POST',
+    path: '/projects/tasks/:task/comments',
+    auth: 'user',
+    body: { content: 'c', parentId: BIG },
+  },
+  {
+    name: 'commentaire : mise à jour avec un contenu gigantesque',
+    method: 'PUT',
+    path: '/projects/comments/:comment',
+    auth: 'user',
+    body: { content: 'x'.repeat(900_000) },
+  },
+  {
+    name: 'pièce jointe : URL data: de 70 000 caractères (colonne TEXT)',
+    method: 'POST',
+    path: '/projects/tasks/:task/attachments',
+    auth: 'user',
+    body: {
+      fileName: 'a.png',
+      fileUrl: `data:image/png;base64,${'A'.repeat(70_000)}`,
+      fileType: 'image/png',
+      fileSize: 1000,
+    },
+  },
+  {
+    name: 'jalon : nom gigantesque',
+    method: 'POST',
+    path: '/projects/:project/milestones',
+    auth: 'user',
+    body: { name: BIG },
+  },
+  {
+    name: 'jalon : description gigantesque',
+    method: 'POST',
+    path: '/projects/:project/milestones',
+    auth: 'user',
+    body: { name: 'j', description: 'x'.repeat(900_000) },
+  },
+  {
+    name: 'livrable : titre gigantesque',
+    method: 'POST',
+    path: '/projects/:project/deliverables',
+    auth: 'user',
+    body: { title: BIG },
+  },
+  {
+    name: 'livrable : description gigantesque',
+    method: 'POST',
+    path: '/projects/:project/deliverables',
+    auth: 'user',
+    body: { title: 'l', description: 'x'.repeat(900_000) },
+  },
+  {
+    name: 'livraison : résumé gigantesque',
+    method: 'POST',
+    path: '/projects/:project/deliveries',
+    auth: 'user',
+    body: { summary: 'x'.repeat(900_000) },
+  },
+  {
+    name: 'livraison : élément de liste de contrôle gigantesque',
+    method: 'POST',
+    path: '/projects/:project/deliveries',
+    auth: 'user',
+    body: { summary: 's', checklist: [BIG] },
+  },
+  {
+    name: 'livraison : 5 000 éléments de liste de contrôle',
+    method: 'POST',
+    path: '/projects/:project/deliveries',
+    auth: 'user',
+    body: { summary: 's', checklist: Array.from({ length: 5000 }, (_, i) => `élément ${i}`) },
+  },
+  {
+    name: 'allocation : libellé de rôle gigantesque',
+    method: 'POST',
+    path: '/projects/:project/allocations',
+    auth: 'user',
+    body: { userId: ':user', allocationPercent: 10, roleLabel: BIG },
+  },
+  {
+    name: 'congé : motif gigantesque',
+    method: 'POST',
+    path: '/projects/resources/:user/leaves',
+    auth: 'user',
+    body: { startDate: '2026-01-01', endDate: '2026-01-02', reason: BIG },
+  },
+  {
+    name: 'profil de ressource : compétences gigantesques',
+    method: 'PUT',
+    path: '/projects/resources/:user/profile',
+    auth: 'user',
+    body: { skills: 'x'.repeat(900_000) },
+  },
+  {
+    name: 'dépendance de tâche : identifiant gigantesque',
+    method: 'POST',
+    path: '/projects/tasks/:task/dependencies',
+    auth: 'user',
+    body: { dependsOnTaskId: BIG },
+  },
+  {
+    name: 'projet : type de facturation gigantesque',
+    method: 'POST',
+    path: '/projects',
+    auth: 'user',
+    body: { name: 'x', billingType: BIG },
+  },
+  {
+    name: 'tâche : sprint d’identifiant gigantesque',
+    method: 'POST',
+    path: '/projects/:project/tasks',
+    auth: 'user',
+    body: { title: 't', sprintId: BIG },
+  },
+  {
+    name: 'tâche : 5 000 assignés',
+    method: 'PUT',
+    path: '/projects/tasks/:task',
+    auth: 'user',
+    body: { assigneeIds: Array.from({ length: 5000 }, () => ':user') },
+  },
+  {
+    name: 'IA : exécution d’une action au titre gigantesque',
+    method: 'POST',
+    path: '/projects/ai/execute',
+    auth: 'user',
+    body: {
+      workspaceId: ':ws',
+      projectId: ':project',
+      actions: [{ type: 'CREATE_TASK', taskTitle: BIG, resolvedProjectId: ':project' }],
+    },
+  },
+  {
+    name: 'IA : commande avec un projet d’identifiant gigantesque',
+    method: 'POST',
+    path: '/projects/ai/command',
+    auth: 'user',
+    body: { command: 'crée une tâche', workspaceId: ':ws', projectId: BIG },
+  },
+  {
+    name: 'SSO : secret client de 100 caractères (chiffré, colonne VARCHAR(191))',
+    method: 'POST',
+    path: '/workspaces/:ws/sso',
+    auth: 'user',
+    body: {
+      provider: 'OIDC_GOOGLE',
+      domain: 'abus-q2.example',
+      clientId: 'client',
+      clientSecret: 'x'.repeat(100),
+    },
+  },
+  {
+    name: 'SSO : identifiant client de 250 caractères (colonne VARCHAR(191))',
+    method: 'POST',
+    path: '/workspaces/:ws/sso',
+    auth: 'user',
+    body: {
+      provider: 'OIDC_GOOGLE',
+      domain: 'abus-q2.example',
+      clientId: 'c'.repeat(250),
+      clientSecret: 'secret',
+    },
+  },
+  {
+    name: 'SSO : URL de découverte de 300 caractères (colonne VARCHAR(191))',
+    method: 'POST',
+    path: '/workspaces/:ws/sso',
+    auth: 'user',
+    body: {
+      provider: 'OIDC_GOOGLE',
+      domain: 'abus-q2.example',
+      clientId: 'client',
+      clientSecret: 'secret',
+      discoveryUrl: `https://idp.example/${'a'.repeat(300)}`,
+    },
+  },
+  {
+    name: 'SSO : domaine de 300 caractères',
+    method: 'POST',
+    path: '/workspaces/:ws/sso',
+    auth: 'user',
+    body: {
+      provider: 'OIDC_GOOGLE',
+      domain: `${'a'.repeat(300)}.example`,
+      clientId: 'client',
+      clientSecret: 'secret',
+    },
+  },
+  {
+    name: 'administration : recherche gigantesque',
+    method: 'GET',
+    path: `/admin/users?search=${'a'.repeat(5000)}`,
+    auth: 'user',
+  },
+
   // SCIM et webhook
   {
     name: 'SCIM : filtre hostile',
@@ -476,7 +690,7 @@ describe('Q-2 e2e : aucun cas d’abus ne produit un 5xx', () => {
   let world: E2eWorld;
   let user: E2eUser;
   let accessToken: string;
-  const refs = { project: '', task: '', ws: '' };
+  const refs = { project: '', task: '', ws: '', sprint: '', comment: '', user: '' };
 
   beforeAll(async () => {
     world = await E2eWorld.start();
@@ -484,6 +698,22 @@ describe('Q-2 e2e : aucun cas d’abus ne produit un 5xx', () => {
     refs.ws = await world.createWorkspace(user, 'Espace Q-2');
     refs.project = await world.createProject(refs.ws, user, 'Projet Q-2');
     refs.task = await world.createTask(refs.project, user, 'Tâche Q-2');
+    refs.user = user.id;
+    refs.sprint = (
+      await world.prisma.sprint.create({
+        data: {
+          name: 'Sprint Q-2',
+          workspaceId: refs.ws,
+          startDate: new Date('2026-01-01'),
+          endDate: new Date('2026-01-15'),
+        },
+      })
+    ).id;
+    refs.comment = (
+      await world.prisma.comment.create({
+        data: { content: 'Commentaire Q-2', taskId: refs.task, userId: user.id },
+      })
+    ).id;
     accessToken = (await world.login(user)).accessToken;
   });
   afterAll(async () => {
@@ -505,12 +735,18 @@ describe('Q-2 e2e : aucun cas d’abus ne produit un 5xx', () => {
     if (abuse.cookies === 'duplicate') {
       init.headers!['Cookie'] = `accessToken=${accessToken}; accessToken=${accessToken}`;
     }
+    // Les identifiants créés par la suite remplacent leurs marqueurs (chemin et corps)
+    const fill = (text: string) =>
+      text
+        .replace(/:project\b/g, refs.project)
+        .replace(/:task\b/g, refs.task)
+        .replace(/:sprint\b/g, refs.sprint)
+        .replace(/:comment\b/g, refs.comment)
+        .replace(/:user\b/g, refs.user)
+        .replace(/:ws\b/g, refs.ws);
     if (abuse.raw !== undefined) init.raw = abuse.raw;
-    else if (abuse.body !== undefined) init.body = abuse.body;
-    const path = abuse.path
-      .replace(':project', refs.project)
-      .replace(':task', refs.task)
-      .replace(':ws', refs.ws);
+    else if (abuse.body !== undefined) init.body = JSON.parse(fill(JSON.stringify(abuse.body)));
+    const path = fill(abuse.path);
     const res = await world.request(abuse.method, path, init);
 
     const exception = ALLOWED_5XX.find((e) => e.name === abuse.name);

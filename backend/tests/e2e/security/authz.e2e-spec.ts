@@ -363,6 +363,38 @@ describe('P7 e2e : autorisation', () => {
     });
   });
 
+  describe('finances : espace de travail sans projet (r51-m2)', () => {
+    // Sans projet, `getProjectFinances` (seconde barrière) n'est jamais appelé : seule la garde
+    // principale du résumé protège la route
+    const who = ['owner', 'admin', 'member', 'viewer'] as const;
+    const sessions = {} as Record<(typeof who)[number], E2eSession>;
+    let ws: string;
+
+    beforeAll(async () => {
+      const users = {} as Record<(typeof who)[number], E2eUser>;
+      for (const w of who) users[w] = await world.createUser({ label: `fin-${w}` });
+      ws = await world.createWorkspace(users.owner, 'Espace sans projet');
+      await world.addMember(ws, users.admin, 'ADMIN');
+      await world.addMember(ws, users.member, 'MEMBER');
+      await world.addMember(ws, users.viewer, 'VIEWER');
+      for (const w of who) sessions[w] = await world.login(users[w]);
+      expect(await world.prisma.project.count({ where: { workspaceId: ws } })).toBe(0);
+    });
+
+    it.each([
+      ['owner', 200],
+      ['admin', 200],
+      ['member', 403],
+      ['viewer', 403],
+    ] as const)('GET /projects/workspaces/:id/finances : %s -> %s', async (who, status) => {
+      const res = await world.request('GET', `/projects/workspaces/${ws}/finances`, {
+        accessToken: sessions[who].accessToken,
+      });
+      expect(res.status).toBe(status);
+      if (status === 200) expect(res.body).toMatchObject({ workspaceId: ws, projects: [] });
+    });
+  });
+
   describe('impersonation (S18)', () => {
     let superAdmin: E2eUser;
     let platformAdmin: E2eUser;
