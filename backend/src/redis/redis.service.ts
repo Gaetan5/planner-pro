@@ -24,11 +24,21 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  onModuleDestroy() {
-    if (this.redisClient) {
-      this.redisClient.removeAllListeners('connect');
-      this.redisClient.removeAllListeners('error');
-      this.redisClient.disconnect();
+  /**
+   * Fermeture ordonnée (O22) : `quit` attend les réponses en attente et laisse Redis clore la
+   * connexion ; `disconnect` seul coupe brutalement et laisse un délai de fermeture actif.
+   */
+  async onModuleDestroy() {
+    const client = this.redisClient;
+    if (!client) return;
+    client.removeAllListeners('connect');
+    client.removeAllListeners('error');
+    // Écouteur neutre : une erreur de fermeture ne doit pas devenir une exception non gérée
+    client.on('error', () => undefined);
+    try {
+      await client.quit();
+    } catch {
+      client.disconnect();
     }
   }
 

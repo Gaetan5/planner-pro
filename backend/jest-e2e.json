@@ -13,6 +13,5 @@
       }
     ]
   },
-  "testEnvironment": "node",
-  "forceExit": true
+  "testEnvironment": "node"
 }

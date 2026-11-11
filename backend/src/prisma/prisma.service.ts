@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { PrismaMariaDb } from '@prisma/adapter-mariadb';
 import { readFileSync } from 'fs';
@@ -81,7 +81,7 @@ export function buildMariaDbOptions(
 export const PRISMA_OMIT = { project: { githubWebhookSecret: true } } as const;
 
 @Injectable()
-export class PrismaService extends PrismaClient implements OnModuleInit {
+export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   constructor() {
     const adapter = new PrismaMariaDb(buildMariaDbOptions());
     super({ adapter, omit: PRISMA_OMIT });
@@ -91,6 +91,11 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
     await this.$connect();
 
     await this.seedDefaultUser();
+  }
+
+  /** Libère le pool MariaDB à l'arrêt (O22) : sans cela, `app.close()` laisse des sockets ouvertes. */
+  async onModuleDestroy() {
+    await this.$disconnect();
   }
 
   private async seedDefaultUser() {

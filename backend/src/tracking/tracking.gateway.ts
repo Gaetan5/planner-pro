@@ -1,4 +1,4 @@
-import { ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Logger, NotFoundException, OnModuleDestroy } from '@nestjs/common';
 import {
   WebSocketGateway,
   WebSocketServer,
@@ -34,8 +34,12 @@ export const WS_RATE_MAX_MESSAGES = 300;
     credentials: true,
   },
 })
-export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit {
+export class TrackingGateway
+  implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit, OnModuleDestroy
+{
   private readonly logger = new Logger(TrackingGateway.name);
+  /** Clients Redis de l'adaptateur Socket.IO, conservés pour être fermés à l'arrêt (O22). */
+  private adapterClients: Array<ReturnType<typeof createClient>> = [];
 
   @WebSocketServer()
   server!: Server;
@@ -77,12 +81,31 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
         url: `redis://${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || 6379}`,
       });
       const subClient = pubClient.duplicate();
+      this.adapterClients = [pubClient, subClient];
       await Promise.all([pubClient.connect(), subClient.connect()]);
       server.adapter(createAdapter(pubClient, subClient));
       console.log('Socket.io Redis adapter configuré avec succès.');
     } catch (err: unknown) {
       console.error("Erreur lors de la configuration de l'adaptateur Redis pour le tracking:", err);
     }
+  }
+
+  /** Ferme les connexions Redis de l'adaptateur (O22) : `app.close()` ne laisse aucun handle ouvert. */
+  async onModuleDestroy() {
+    const clients = this.adapterClients;
+    this.adapterClients = [];
+    await Promise.all(
+      clients.map(async (client) => {
+        // Un client jamais connecté, déjà fermé ou en échec n'a rien à libérer : l'arrêt ne doit pas échouer
+        try {
+          if (client.isOpen) await client.quit();
+        } catch {
+          await Promise.resolve()
+            .then(() => client.disconnect())
+            .catch(() => undefined);
+        }
+      }),
+    );
   }
 
   async handleConnection(client: Socket) {
