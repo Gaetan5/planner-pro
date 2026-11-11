@@ -4403,3 +4403,37 @@ Mesures relancées : jest backend (`env -u DATABASE_URL`) 106 suites, 2949/2949 
 - **Questions** : (1) clé (adresse, projet) acceptée, avec compteur agrégé ; (2) `limit_req` 30 r/min burst 10 acceptable au départ, relever à 120 / 30 si des 429 légitimes apparaissent ; (3) test de préproduction requis (liste dans le rapport, section r45).
 - **Feu vert de commit : OUI** (2 commits : code, tests et configuration ; documentation d'audit). Messages et listes de fichiers dans « Revue r45 » du rapport.
 - **Ouverts** : r45-m1 ; préproduction S23/S24 ; r44-a3 ; r42-a1 ; reste de l'ordre du rapport.
+
+## Reprise r45 (fixeur) — r45-m1
+
+### r45-m1 — compteur de refus du webhook contournable (UUID, casse, URL)
+**Statut** : CORRIGÉ – À REVOIR
+
+**Changements**
+- `backend/src/projects/github-webhook.util.ts` : `webhookFailureKey` met l'identifiant en minuscules ; nouvelle clé agrégée `webhookAddressFailureKey(ip)` = `github-webhook-failures:<ip>` ; objet `webhookLimits = { failuresPerAddressPerMinute: 100 }` (mutable, pour abaisser le seuil dans les tests).
+- `backend/src/projects/github-webhook.service.ts` (`registerFailure`) : chaque refus incrémente les deux compteurs (par projet, agrégé), même fenêtre de 60 s ; 429 si le seuil par projet (20) ou le seuil agrégé (100) est dépassé. Redis indisponible : comportement inchangé (401, au mieux).
+- `backend/src/common/body-parsers.ts` : `WEBHOOK_PATH` avec le drapeau `i` (`isWebhookDelivery` l'utilise, donc aligné) ; le pré-contrôle lit les deux compteurs en parallèle sous le même délai de 300 ms, 429 si l'un atteint son seuil.
+- `docs/deployment-production.md` : `location ~* ^/projects/[^/]+/webhooks/github/?$` ; `limit_req` et `client_max_body_size 2m` déclarés OBLIGATOIRES avant la mise en production ; compteur agrégé documenté.
+
+**Tests** (`backend/tests/http/github-webhook.spec.ts`, bloc « r45-m1 », seuil agrégé abaissé à 10) : (a) 21 UUID différents : 10 en 401 puis 429 ; (a) le 429 agrégé est rendu avant lecture du corps (1 ko sur 1,8 Mo envoyé) ; expiration du compteur agrégé après 61 s ; seuil par défaut = 100 ; (b) UUID en majuscules et minuscules (identifiant à lettres hexadécimales : les `id()` de la fixture sont tous numériques, donc insensibles à la casse) : même compteur, une seule clé par projet ; (c) `/webhooks/GITHUB` et `/webhooks/github/` : pré-contrôle (429 après 20 refus) ; `/webhooks/GITHUB`, `/webhooks/github/`, `/WEBHOOKS/Github/` : 1,5 Mo signé accepté (201), plus de 2 Mo en 413. Résultat : 77/77 dans le fichier.
+
+**Contre-mutations** (fichiers restaurés, `cmp` identique) :
+1. compteur agrégé neutralisé (service et pré-contrôle) : 2 échecs, les deux tests (a) ;
+2. `toLowerCase()` retiré de `webhookFailureKey` : 1 échec, (b). Un premier essai avec un UUID entièrement numérique ne détectait pas la mutation : test corrigé (identifiant à lettres) ;
+3. drapeau `i` retiré de `WEBHOOK_PATH` : 2 échecs (plafond 2 Mo sur `/webhooks/GITHUB` et `/WEBHOOKS/Github/`). Les tests de pré-contrôle (c) ne l'attrapent pas seuls : le service compte aussi le refus et répond 429 après lecture du corps ; c'est le plafond de 2 Mo qui discrimine.
+Incident : un premier script de contre-mutation, mal écrit (liste de fichiers non découpée par zsh), n'avait pas fait de sauvegarde ; les trois fichiers ont été remis à la main dans l'état corrigé, vérifiés par `git diff`, puis les contre-mutations ont été rejouées avec sauvegarde et `cmp`.
+
+**Mesures** : jest backend (`env -u DATABASE_URL`) 106 suites, 2959/2959 ; `nest build` OK ; `tsc -p tests` OK ; vitest 285/285 ; `pnpm build` frontend OK (le grep de `dist` sur `apis.google.com` retrouve seulement la chaîne connue du SDK Firebase, cf. entrée précédente) ; ESLint backend 0 erreur (15 avertissements `any` préexistants), pas de script lint frontend ; Prettier propre. Aucun `pnpm install`, lockfile intact, aucun processus laissé.
+
+**Écart par rapport au rapport** : aucun sur le fond. Le seuil abaissable est un objet exporté mutable (`webhookLimits`) plutôt qu'une variable d'environnement.
+
+**Questions pour l'architecte** : (1) l'incrément agrégé se fait aussi pour les refus d'un projet déjà bloqué (comme le compteur par projet) ; un client qui insiste prolonge donc sa propre fenêtre, ce qui est cohérent avec la fenêtre existante, mais à confirmer. (2) La limite de débit des requêtes valides reste uniquement côté Nginx (`@SkipThrottle`) : d'accord ?
+
+#### Revue architecte (r46)
+**Verdict r45-m1 : VALIDÉ.** Points 1 à 4 de la remédiation et tests (a) à (d) vérifiés dans le code et rejoués. Diff limité aux 6 fichiers attendus, sans résidu de mutation.
+- Mesures : jest backend 106 suites, 2959/2959 ; `nest build`, `tsc -p tests` OK ; vitest 285/285 ; `pnpm build` OK (0 occurrence de `mock/login`, `Simuler une session`, `fonts.googleapis`) ; ESLint 0 erreur ; Prettier propre ; lockfile intact.
+- Contre-mutations (restaurées, `cmp` OK) : compteur agrégé retiré = 2 échecs ; `toLowerCase()` retiré = 1 échec ; drapeau `i` retiré = 2 échecs.
+- Q1 : la fenêtre n'est pas prolongée (`EXPIRE ... NX`, fenêtre fixe de 60 s) ; un refus du pré-contrôle n'incrémente rien. Q2 : acceptable si `limit_req` Nginx est en place. Q3 : objet mutable accepté, plus sûr qu'une variable d'environnement.
+- Incident de restauration manuelle : aucun écart constaté ; pratique à retenir : sauvegarde avant toute mutation, `\cp`, `cmp`.
+- **Feu vert de commit : OUI**, commit séparé, fichiers et message dans « Revue r46 » du rapport.
+- **Ouverts** : déploiement du lot (conditions dans « Revue r46 ») ; r44-a3 ; r42-a1 ; reste de l'ordre du rapport.

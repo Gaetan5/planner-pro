@@ -5306,3 +5306,62 @@ Avant chaque commit : `git diff --cached --stat` pour vérifier l'absence de `.c
 2. Préproduction du lot S23/S24 (liste Q3), r44-a3 (bornes des 41 champs, lot dédié, à confirmer par l'utilisateur), r42-a1 (décision utilisateur), parcours manuel avant `CSP_MODE=enforce`.
 3. S30, actions d'exploitation (recensement des webhooks clients), recensement S19/S20.
 4. S26, A5 à A7, P5, P8, O10 à O15, O17, O21, Phase 6 (dont `pnpm audit` et `check-headers.sh` en CI, migration NestJS 11 = A9, avertissement `pnpm.overrides` de package.json « no longer read » selon la version locale de pnpm : à vérifier avec la version épinglée en production).
+
+## Revue r46 : reprise r45 du fixeur : r45-m1 VALIDÉ ; feu vert de commit séparé ; conditions de déploiement du lot S23/S24/r44/r45
+
+**Statut** : r45-m1 **VALIDÉ**. Les points 1 à 4 de la remédiation et les tests (a) à (d) sont couverts. Aucun nouveau constat Mineur ou supérieur. Aucun résidu de mutation.
+
+**Vérification du diff (`git diff HEAD`)** : 6 fichiers, exactement ceux annoncés (`body-parsers.ts`, `github-webhook.service.ts`, `github-webhook.util.ts`, `github-webhook.spec.ts`, `deployment-production.md`, `journal-corrections.md`). Aucune trace de mutation (`1e9`, drapeau `i` ou `toLowerCase()` retirés) ; les trois fichiers sources ont été comparés à leur état attendu, et l'incident de restauration manuelle du fixeur n'a laissé aucun écart. `pnpm-lock.yaml` intact.
+
+**Points vérifiés**
+1. Casse : `webhookFailureKey` met l'identifiant en minuscules ; le pré-contrôle et le service utilisent la même fonction.
+2. Compteur agrégé `github-webhook-failures:<ip>` : incrémenté dans `registerFailure` (même transaction de délai Redis, `Promise.all`), lu en parallèle dans le pré-contrôle sous le même délai de 300 ms, seuil 100. Redis en panne : inchangé (401, au mieux).
+3. `WEBHOOK_PATH` avec le drapeau `i` (`isWebhookDelivery` l'utilise).
+4. Nginx : `location ~* ^/projects/[^/]+/webhooks/github/?$`, `limit_req` et `client_max_body_size 2m` déclarés obligatoires.
+
+**Mesures relancées** : jest backend (`env -u DATABASE_URL`) 106 suites, **2959/2959** ; `nest build` OK ; `tsc -p tests` OK ; vitest 285/285 ; `pnpm build` OK, 0 occurrence de `mock/login`, `Simuler une session`, `fonts.googleapis` dans `frontend/dist` ; ESLint backend 0 erreur (15 avertissements `any` préexistants) ; Prettier propre (`backend/src`, `backend/tests`, `docs/deployment-production.md`).
+
+**Contre-mutations (restaurées avec `\cp`, `cmp` identique, aucun processus restant)**
+- compteur agrégé neutralisé (service et pré-contrôle) : 2 échecs, les deux tests (a) ;
+- `toLowerCase()` retiré : 1 échec, (b) ;
+- drapeau `i` retiré : 2 échecs (plafond 2 Mo sur `/webhooks/GITHUB` et `/WEBHOOKS/Github/`). Ma première tentative (sed non appliqué) n'avait rien muté : 77/77, rejouée correctement ensuite.
+
+### Réponses aux 3 questions du fixeur
+1. **Les refus d'un projet déjà bloqué prolongent-ils la fenêtre ?** Non, la prémisse est inexacte : `incrementWithTtl` fait `EXPIRE key ttl NX`, le TTL n'est posé qu'à la création de la clé. La fenêtre est fixe (60 s depuis le premier refus) ; un client qui insiste fait grossir le compteur mais ne repousse pas l'expiration. Par ailleurs, un refus rendu par le pré-contrôle n'atteint pas le service et n'incrémente rien. Comportement correct, rien à changer.
+2. **Limite de débit uniquement côté Nginx hors refus d'authentification** : acceptable, à condition que `limit_req` soit en place (déjà rendu obligatoire dans la doc) ; une livraison valide a un coût borné (2 Mo, signature vérifiée avant analyse). Condition de déploiement ci-dessous.
+3. **Seuil via objet exporté mutable plutôt que variable d'environnement** : accepté. Une variable d'environnement permettrait de désactiver la protection par erreur de configuration ; l'objet n'est modifiable que par du code. Réserve mineure (r46-a1, Amélioration, non bloquante) : la valeur par défaut est testée (`toBe(100)`), ce qui suffit ; ne pas exposer `webhookLimits` hors des tests et de ces deux modules.
+
+### Feu vert de commit : **OUI** (commit 3, séparé des deux précédents)
+Chemins explicites, jamais `git add -A`, sans `.claude/` ni `.env` réel ; vérifier avec `git diff --cached --stat`.
+- **Commit code** : `backend/src/common/body-parsers.ts`, `backend/src/projects/github-webhook.service.ts`, `backend/src/projects/github-webhook.util.ts`, `backend/tests/http/github-webhook.spec.ts`, `docs/deployment-production.md`.
+  ```
+  fix(security): compteur de refus du webhook GitHub agrégé par adresse, identifiant normalisé et route insensible à la casse (r45-m1)
+
+  Un second compteur par adresse, tous projets confondus (100 refus par minute), complète celui
+  par couple adresse/projet : changer d'identifiant de projet ne contourne plus la limite. Les
+  identifiants sont mis en minuscules, la détection de la route de réception ignore la casse.
+  Documentation Nginx corrigée (location insensible à la casse, barre finale) et limit_req
+  déclaré obligatoire avant la mise en production.
+  ```
+- **Commit documentation d'audit** (après ma mise à jour) : `docs/security/rapport-audit.md`, `docs/security/journal-corrections.md`, message `docs(security): revues r46 et reprise r45 du webhook GitHub`.
+
+### Conditions de déploiement du lot S23/S24/r44/r45 (production actuelle : 25760c9)
+Le lot est commité en local, non poussé. Avant le `up` :
+1. **Poussé et construit** : commits S23/S24, r45-m1 poussés ; images reconstruites ; `pnpm install --frozen-lockfile` inutile (lockfile inchangé).
+2. **`TRUST_PROXY_HOPS=1`** présent dans `.env.production` sur la VM (obligatoire : `docker-compose.prod.yml` refuse de démarrer sinon) ; vérifié OK en r45, à revérifier le jour du déploiement. Valeur = nombre de proxys réels devant l'API (Nginx seul = 1).
+3. **Nginx de l'hôte**, dans `http { }` : `limit_req_zone $binary_remote_addr zone=gh_webhook:10m rate=30r/m;`. Dans le serveur de l'API : `location ~* ^/projects/[^/]+/webhooks/github/?$ { limit_req zone=gh_webhook burst=10 nodelay; limit_req_status 429; client_max_body_size 2m; ... }` avec les mêmes `proxy_pass` et en-têtes que la route générale, **placé avant tout autre `location` regex** pouvant la capter (premier regex qui correspond gagne). `proxy_set_header X-Forwarded-For $remote_addr` (écrase, n'ajoute pas) pour qu'un en-tête forgé n'atteigne pas l'application. `nginx -t` puis rechargement.
+4. **Vérifications après rechargement**, depuis une adresse de test :
+   - 25 requêtes à signature fausse : 401 puis 429 (sans lire le corps) ; la même avec 120 UUID variés : 429 agrégé ;
+   - `/webhooks/GITHUB` et `/webhooks/github/` : mêmes 429 (valide r45-m1 côté Nginx) ;
+   - livraison réelle GitHub (« Redeliver ») sur un dépôt de test : 201 ; un `push` de plus de 1 Mo accepté (`client_max_body_size 2m`), plus de 2 Mo en 413 ;
+   - `curl -H 'X-Forwarded-For: 1.2.3.4'` : aucune adresse forgée dans les journaux ni dans les clés Redis ;
+   - un envoi SMTP réel (nodemailer 10) ; un déblocage de compte par la procédure documentée ; page de connexion et appel authentifié normaux (limiteur Redis).
+5. **Redis** joignable par l'API (limiteur, verrouillage, compteurs) ; en panne, le disjoncteur laisse passer (vérifier qu'il ne reste pas ouvert).
+6. **Retour arrière** prêt : image 25760c9 conservée ; le retour supprime aussi l'exigence `TRUST_PROXY_HOPS`.
+7. Surveillance post-déploiement : 429 Nginx sur le webhook (relever à 120 r/min, burst 30 si légitimes), « Recent Deliveries » GitHub, journaux de verrouillage de compte.
+
+### Ordre des constats ouverts
+1. Déploiement du lot S23/S24/r44/r45 : conditions ci-dessus (Nginx, `TRUST_PROXY_HOPS`, préproduction) ; r45-m1 **fermé**.
+2. r44-a3 (bornes des 41 champs, lot dédié, à confirmer par l'utilisateur), r42-a1 (décision utilisateur), parcours manuel avant `CSP_MODE=enforce`, avertissement jest « worker process has failed to exit gracefully » (`--detectOpenHandles`, non bloquant).
+3. S30, actions d'exploitation (recensement des webhooks clients), recensement S19/S20.
+4. S26, A5 à A7, P5, P8, O10 à O15, O17, O21, Phase 6 (dont `pnpm audit` et `check-headers.sh` en CI, migration NestJS 11 = A9, avertissement `pnpm.overrides`).
