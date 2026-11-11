@@ -37,14 +37,16 @@ export function prepareE2eEnvironment(): void {
  * contrôles testés) avec un proxy de confiance : chaque exécution choisit son adresse
  * `X-Forwarded-For`, donc son propre compteur de limitation de débit (S24).
  */
-export async function startE2eApp(): Promise<{ app: INestApplication; baseUrl: string }> {
+export async function startE2eApp(
+  options: { trustProxyHops?: string } = {},
+): Promise<{ app: INestApplication; baseUrl: string }> {
   prepareE2eEnvironment();
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
   const app = moduleRef.createNestApplication<NestExpressApplication>({
     logger: false,
     rawBody: true,
   });
-  configureTrustProxy(app, { TRUST_PROXY_HOPS: '1' });
+  configureTrustProxy(app, { TRUST_PROXY_HOPS: options.trustProxyHops ?? '1' });
   registerBodyParsers(app);
   app.use(noStoreMiddleware());
   app.useGlobalPipes(new AppValidationPipe());
