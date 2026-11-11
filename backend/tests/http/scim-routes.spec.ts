@@ -68,11 +68,15 @@ describe('S11 : SCIM (HTTP)', () => {
     prisma.sCIMApiKey.rows = [];
     await prisma.user.create({ data: { id: 'admin-1', email: 'admin@acme.com', name: 'Admin' } });
     await prisma.membership.create({
-      data: { workspaceId: 'ws-1', userId: 'admin-1', role: 'OWNER' },
+      data: {
+        workspaceId: '00000000-0000-4000-8000-0000000000a1',
+        userId: 'admin-1',
+        role: 'OWNER',
+      },
     });
     await prisma.sSOConfiguration.create({
       data: {
-        workspaceId: 'ws-1',
+        workspaceId: '00000000-0000-4000-8000-0000000000a1',
         domain: 'acme.com',
         verifiedDomain: 'acme.com',
         domainVerifiedAt: new Date(),
@@ -81,9 +85,9 @@ describe('S11 : SCIM (HTTP)', () => {
     await prisma.sCIMApiKey.create({
       data: {
         id: 'key-1',
-        workspaceId: 'ws-1',
+        workspaceId: '00000000-0000-4000-8000-0000000000a1',
         tokenHash: createHash('sha256').update(SCIM_KEY).digest('hex'),
-        workspace: { id: 'ws-1', name: 'ACME' },
+        workspace: { id: '00000000-0000-4000-8000-0000000000a1', name: 'ACME' },
       },
     });
   });
@@ -145,7 +149,7 @@ describe('S11 : SCIM (HTTP)', () => {
     ])('PATCH %s : 400', async (_label, body) => {
       await prisma.user.create({ data: { id: 'u1', email: 'ada@acme.com', name: 'Ada' } });
       await prisma.membership.create({
-        data: { workspaceId: 'ws-1', userId: 'u1', role: 'MEMBER' },
+        data: { workspaceId: '00000000-0000-4000-8000-0000000000a1', userId: 'u1', role: 'MEMBER' },
       });
       const res = await scim('PATCH', '/scim/v2/Users/u1', body);
       expect(res.status).toBe(400);
@@ -155,7 +159,7 @@ describe('S11 : SCIM (HTTP)', () => {
     it('PATCH : op en casse Entra (Replace) acceptée', async () => {
       await prisma.user.create({ data: { id: 'u1', email: 'ada@acme.com', name: 'Ada' } });
       await prisma.membership.create({
-        data: { workspaceId: 'ws-1', userId: 'u1', role: 'MEMBER' },
+        data: { workspaceId: '00000000-0000-4000-8000-0000000000a1', userId: 'u1', role: 'MEMBER' },
       });
       const res = await scim('PATCH', '/scim/v2/Users/u1', {
         schemas: ['urn:ietf:params:scim:api:messages:2.0:PatchOp'],
@@ -201,7 +205,7 @@ describe('S11 : SCIM (HTTP)', () => {
     const seed = async () => {
       await prisma.user.create({ data: { id: 'u1', email: 'ada@acme.com', name: 'Ada' } });
       await prisma.membership.create({
-        data: { workspaceId: 'ws-1', userId: 'u1', role: 'MEMBER' },
+        data: { workspaceId: '00000000-0000-4000-8000-0000000000a1', userId: 'u1', role: 'MEMBER' },
       });
     };
     const patch = (value: unknown, path = 'emails[type eq "work"].value') =>
@@ -229,6 +233,17 @@ describe('S11 : SCIM (HTTP)', () => {
   });
 
   describe('clés API SCIM', () => {
+    // r44-a1 : routes JWT d'administration : identifiants validés (contrairement aux routes SCIM)
+    it.each([
+      ['GET', '/workspaces/abc/scim/keys'],
+      ['POST', '/workspaces/abc/scim/keys'],
+      ['DELETE', '/workspaces/abc/scim/keys/def'],
+      ['DELETE', '/workspaces/00000000-0000-4000-8000-0000000000a1/scim/keys/def'],
+    ])('%s %s : identifiant non UUID, 400', async (method, path) => {
+      const res = await admin(method, path, method === 'POST' ? { name: 'k' } : undefined);
+      expect(res.status).toBe(400);
+    });
+
     it.each([
       ['sans nom', {}],
       ['nom vide', { name: '   ' }],
@@ -237,13 +252,21 @@ describe('S11 : SCIM (HTTP)', () => {
       ['expiresInDays démesuré', { name: 'k', expiresInDays: 9999 }],
       ['propriété inconnue', { name: 'k', admin: true }],
     ])('création %s : 400 (et non 500)', async (_label, body) => {
-      const res = await admin('POST', '/workspaces/ws-1/scim/keys', body);
+      const res = await admin(
+        'POST',
+        '/workspaces/00000000-0000-4000-8000-0000000000a1/scim/keys',
+        body,
+      );
       expect(res.status).toBe(400);
       expect(prisma.sCIMApiKey.rows).toHaveLength(1);
     });
 
     it('expiration par défaut de 365 jours', async () => {
-      const res = await admin('POST', '/workspaces/ws-1/scim/keys', { name: 'Entra' });
+      const res = await admin(
+        'POST',
+        '/workspaces/00000000-0000-4000-8000-0000000000a1/scim/keys',
+        { name: 'Entra' },
+      );
       expect(res.status).toBe(201);
       const row = prisma.sCIMApiKey.rows.find((r) => r.id !== 'key-1') as { expiresAt: Date };
       const days = (row.expiresAt.getTime() - Date.now()) / 86_400_000;
@@ -252,7 +275,10 @@ describe('S11 : SCIM (HTTP)', () => {
     });
 
     it('expiresInDays borné respecté', async () => {
-      await admin('POST', '/workspaces/ws-1/scim/keys', { name: 'court', expiresInDays: 30 });
+      await admin('POST', '/workspaces/00000000-0000-4000-8000-0000000000a1/scim/keys', {
+        name: 'court',
+        expiresInDays: 30,
+      });
       const row = prisma.sCIMApiKey.rows.find((r) => r.name === 'court') as { expiresAt: Date };
       expect((row.expiresAt.getTime() - Date.now()) / 86_400_000).toBeLessThanOrEqual(30);
     });
@@ -263,7 +289,11 @@ describe('S11 : SCIM (HTTP)', () => {
       for (const [i, email] of ['ada@acme.com', 'bob@acme.com', 'cy@acme.com'].entries()) {
         await prisma.user.create({ data: { id: `u${i}`, email, name: email.split('@')[0] } });
         await prisma.membership.create({
-          data: { workspaceId: 'ws-1', userId: `u${i}`, role: 'MEMBER' },
+          data: {
+            workspaceId: '00000000-0000-4000-8000-0000000000a1',
+            userId: `u${i}`,
+            role: 'MEMBER',
+          },
         });
       }
     });

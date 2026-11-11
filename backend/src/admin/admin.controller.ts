@@ -12,6 +12,7 @@ import {
   ValidationPipe,
 } from '@nestjs/common';
 import { Response } from 'express';
+import { UuidPipe } from '../common/uuid.pipe';
 import { ForbiddenInImpersonation } from '../auth/forbidden-in-impersonation.decorator';
 import { setSessionCookies } from '../auth/session-cookies';
 import { User, AuthenticatedUser } from '../auth/user.decorator';
@@ -54,14 +55,17 @@ export class AdminController {
   @PlatformRoles('SUPER_ADMIN')
   updateUserRole(
     @User() actor: AuthenticatedUser,
-    @Param('id') targetUserId: string,
+    @Param('id', UuidPipe) targetUserId: string,
     @Body() dto: UpdateUserRoleDto,
   ) {
     return this.adminService.updateUserRole(actor.id, targetUserId, dto.role ?? null);
   }
 
   @Post('users/:id/revoke-sessions')
-  revokeUserSessions(@User() actor: AuthenticatedUser, @Param('id') targetUserId: string) {
+  revokeUserSessions(
+    @User() actor: AuthenticatedUser,
+    @Param('id', UuidPipe) targetUserId: string,
+  ) {
     return this.adminService.revokeUserSessions(actor.id, targetUserId);
   }
 
@@ -70,7 +74,7 @@ export class AdminController {
   @PlatformRoles('SUPER_ADMIN')
   async impersonateUser(
     @User() actor: AuthenticatedUser,
-    @Param('id') targetUserId: string,
+    @Param('id', UuidPipe) targetUserId: string,
     @Body() dto: ImpersonateUserDto,
     @Res({ passthrough: true }) res: Response,
   ) {

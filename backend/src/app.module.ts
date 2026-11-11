@@ -9,6 +9,8 @@ import { TrackingModule } from './tracking/tracking.module';
 import { NotesModule } from './notes/notes.module';
 import { AuthModule } from './auth/auth.module';
 import { RedisModule } from './redis/redis.module';
+import { RedisService } from './redis/redis.service';
+import { RedisThrottlerStorage } from './common/redis-throttler.storage';
 import { NotificationsModule } from './notifications/notifications.module';
 import { MailModule } from './mail/mail.module';
 import { ScheduleModule } from '@nestjs/schedule';
@@ -24,12 +26,15 @@ import { JwtAuthGuard } from './auth/jwt.guard';
 @Module({
   imports: [
     ScheduleModule.forRoot(),
-    ThrottlerModule.forRoot([
-      {
-        ttl: 60000,
-        limit: 60,
-      },
-    ]),
+    // Compteurs dans Redis, partagés entre instances (S24) ; repli mémoire si Redis est indisponible
+    ThrottlerModule.forRootAsync({
+      imports: [RedisModule],
+      inject: [RedisService],
+      useFactory: (redis: RedisService) => ({
+        throttlers: [{ ttl: 60000, limit: 60 }],
+        storage: new RedisThrottlerStorage(redis),
+      }),
+    }),
     PrismaModule,
     AuthzModule,
     RealtimeModule,

@@ -7,7 +7,7 @@ import { NotesService } from '../../../src/notes/notes.service';
 import { PrismaService } from '../../../src/prisma/prisma.service';
 import { RealtimeService } from '../../../src/realtime/realtime.service';
 import { RedisService } from '../../../src/redis/redis.service';
-import { OTHER_W, USERS, W, buildRbacPrisma } from '../../support/rbac-fixture';
+import { OTHER_W, USERS, W, buildRbacPrisma, id } from '../../support/rbac-fixture';
 
 /**
  * S12-f / S16-c : le module des notes passe par `PolicyService` pour le projet cible, les tâches
@@ -143,7 +143,7 @@ describe('S12-f / S16-c : notes et politique d’autorisation', () => {
     it('membre autorisé (OWNER) : la tâche est créée dans le projet du workspace', async () => {
       prisma.data.projects[0].name = 'Alpha';
       await service.createNote(USERS.owner, 'N', '- [ ] Faire #Alpha');
-      expect(prisma.task.create.mock.calls[0][0].data.projectId).toBe('P1');
+      expect(prisma.task.create.mock.calls[0][0].data.projectId).toBe(id('P1'));
     });
   });
 
@@ -170,20 +170,20 @@ describe('S12-f / S16-c : notes et politique d’autorisation', () => {
     it('S16-c : tâche déplacée vers un autre projet : le salon task:<id> est évincé', async () => {
       prisma.data.projects[1].name = 'Beta';
       prisma.data.tasks[0].noteId = 'N1';
-      await service.createNote(USERS.owner, 'N', '- [ ] Tâche 1 #Beta <!-- task:T1 -->');
+      await service.createNote(USERS.owner, 'N', `- [ ] Tâche 1 #Beta <!-- task:${id('T1')} -->`);
       expect(prisma.task.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 'T1' },
-          data: expect.objectContaining({ projectId: 'P2' }),
+          where: { id: id('T1') },
+          data: expect.objectContaining({ projectId: id('P2') }),
         }),
       );
-      expect(evictTaskRoom).toHaveBeenCalledWith('T1');
+      expect(evictTaskRoom).toHaveBeenCalledWith(id('T1'));
     });
 
     it('S16-c : tâche mise à jour sans changement de projet : aucune éviction', async () => {
       prisma.data.projects[0].name = 'Alpha';
       prisma.data.tasks[0].noteId = 'N1';
-      await service.createNote(USERS.owner, 'N', '- [x] Tâche 1 #Alpha <!-- task:T1 -->');
+      await service.createNote(USERS.owner, 'N', `- [x] Tâche 1 #Alpha <!-- task:${id('T1')} -->`);
       expect(prisma.task.update).toHaveBeenCalled();
       expect(evictTaskRoom).not.toHaveBeenCalled();
     });
@@ -207,14 +207,14 @@ describe('S12-f / S16-c : notes et politique d’autorisation', () => {
     });
 
     it('critère 1 : CONTRIBUTOR de P1, tâche de P1, #Perso : projectId inchangé, titre appliqué', async () => {
-      prisma.data.tasks.push(taskOf('TC', 'P1', USERS.contributor));
+      prisma.data.tasks.push(taskOf('TC', id('P1'), USERS.contributor));
       await service.createNote(
         USERS.contributor,
         'N',
-        '- [ ] Titre modifié #Perso <!-- task:TC -->',
+        `- [ ] Titre modifié #Perso <!-- task:TC -->`,
       );
       const updates = prisma.task.update.mock.calls.map((c: any) => c[0].data);
-      expect(updates.some((d: any) => d.projectId && d.projectId !== 'P1')).toBe(false);
+      expect(updates.some((d: any) => d.projectId && d.projectId !== id('P1'))).toBe(false);
       expect(updates).toHaveLength(1);
       expect(updates[0].title).toBe('Titre modifié');
       expect(evictTaskRoom).not.toHaveBeenCalled();
@@ -227,17 +227,17 @@ describe('S12-f / S16-c : notes et politique d’autorisation', () => {
         userId: USERS.contributor,
         role: 'MEMBER',
       });
-      prisma.data.projects.find((p: any) => p.id === 'PX').userId = USERS.contributor;
-      prisma.data.projects.find((p: any) => p.id === 'PX').name = 'Externe';
+      prisma.data.projects.find((p: any) => p.id === id('PX')).userId = USERS.contributor;
+      prisma.data.projects.find((p: any) => p.id === id('PX')).name = 'Externe';
       prisma.data.projectMemberships.push({
         id: 'pm9',
-        projectId: 'PX',
+        projectId: id('PX'),
         userId: USERS.contributor,
         role: 'CONTRIBUTOR',
       });
-      prisma.data.tasks.push(taskOf('TC', 'P1', USERS.contributor));
-      await service.createNote(USERS.contributor, 'N', '- [x] Tâche C #Externe <!-- task:TC -->');
-      expect(moved().filter((d: any) => d.projectId !== 'P1')).toEqual([]);
+      prisma.data.tasks.push(taskOf('TC', id('P1'), USERS.contributor));
+      await service.createNote(USERS.contributor, 'N', `- [x] Tâche C #Externe <!-- task:TC -->`);
+      expect(moved().filter((d: any) => d.projectId !== id('P1'))).toEqual([]);
       expect(prisma.task.update.mock.calls[0][0].data.status).toBe('DONE');
       expect(evictTaskRoom).not.toHaveBeenCalled();
     });
@@ -245,9 +245,9 @@ describe('S12-f / S16-c : notes et politique d’autorisation', () => {
     it('critère 3 : déplacement P1 vers P2 (même workspace) permis, suivi de l’éviction', async () => {
       prisma.data.projects[1].name = 'Beta';
       prisma.data.tasks[0].noteId = 'N1';
-      await service.createNote(USERS.owner, 'N', '- [ ] Tâche 1 #Beta <!-- task:T1 -->');
-      expect(moved()).toEqual([expect.objectContaining({ projectId: 'P2' })]);
-      expect(evictTaskRoom).toHaveBeenCalledWith('T1');
+      await service.createNote(USERS.owner, 'N', `- [ ] Tâche 1 #Beta <!-- task:${id('T1')} -->`);
+      expect(moved()).toEqual([expect.objectContaining({ projectId: id('P2') })]);
+      expect(evictTaskRoom).toHaveBeenCalledWith(id('T1'));
     });
 
     it('critère 4 : d’un projet personnel à un autre projet personnel : permis', async () => {
@@ -256,7 +256,7 @@ describe('S12-f / S16-c : notes et politique d’autorisation', () => {
         { id: 'PP2', name: 'Perso2', userId: USERS.owner, workspaceId: null, deletedAt: null },
       );
       prisma.data.tasks.push(taskOf('TP', 'PP1', USERS.owner));
-      await service.createNote(USERS.owner, 'N', '- [ ] Tâche C #Perso2 <!-- task:TP -->');
+      await service.createNote(USERS.owner, 'N', `- [ ] Tâche C #Perso2 <!-- task:TP -->`);
       expect(moved()).toEqual([expect.objectContaining({ projectId: 'PP2' })]);
       expect(evictTaskRoom).toHaveBeenCalledWith('TP');
     });
@@ -271,7 +271,7 @@ describe('S12-f / S16-c : notes et politique d’autorisation', () => {
         deletedAt: null,
       });
       prisma.data.tasks.push(taskOf('TP', 'PP1', USERS.owner));
-      await service.createNote(USERS.owner, 'N', '- [ ] Tâche C #Alpha <!-- task:TP -->');
+      await service.createNote(USERS.owner, 'N', `- [ ] Tâche C #Alpha <!-- task:TP -->`);
       expect(moved().filter((d: any) => d.projectId !== 'PP1')).toEqual([]);
       expect(evictTaskRoom).not.toHaveBeenCalled();
     });
@@ -289,14 +289,14 @@ describe('S12-f / S16-c : notes et politique d’autorisation', () => {
     });
 
     it('tâche d’un projet de workspace, tag inconnu : déplacement refusé, aucun projet créé', async () => {
-      prisma.data.tasks.push(taskOf('TC', 'P1', USERS.contributor));
-      await service.createNote(USERS.contributor, 'N', '- [ ] Tâche C #Inconnu <!-- task:TC -->');
+      prisma.data.tasks.push(taskOf('TC', id('P1'), USERS.contributor));
+      await service.createNote(USERS.contributor, 'N', `- [ ] Tâche C #Inconnu <!-- task:TC -->`);
       expect(prisma.project.create).not.toHaveBeenCalled();
     });
 
     it('auteur qui ne peut plus écrire dans le projet de la tâche : aucun projet créé', async () => {
-      prisma.data.tasks.push(taskOf('TC', 'P1', USERS.commenter));
-      await service.createNote(USERS.commenter, 'N', '- [ ] Tâche C #Inconnu <!-- task:TC -->');
+      prisma.data.tasks.push(taskOf('TC', id('P1'), USERS.commenter));
+      await service.createNote(USERS.commenter, 'N', `- [ ] Tâche C #Inconnu <!-- task:TC -->`);
       expect(prisma.project.create).not.toHaveBeenCalled();
       expect(prisma.task.update).not.toHaveBeenCalled();
     });
@@ -310,7 +310,7 @@ describe('S12-f / S16-c : notes et politique d’autorisation', () => {
         deletedAt: null,
       });
       prisma.data.tasks.push(taskOf('TP', 'PP1', USERS.owner));
-      await service.createNote(USERS.owner, 'N', '- [ ] Tâche C #Nouveau <!-- task:TP -->');
+      await service.createNote(USERS.owner, 'N', `- [ ] Tâche C #Nouveau <!-- task:TP -->`);
       expect(prisma.project.create).toHaveBeenCalledTimes(1);
       expect(
         prisma.task.update.mock.calls.map((c: any) => c[0].data).some((d: any) => d.projectId),
@@ -341,12 +341,12 @@ describe('S12-f / S16-c : notes et politique d’autorisation', () => {
         userId: USERS.contributor,
         role: 'MEMBER',
       });
-      const px = prisma.data.projects.find((p: any) => p.id === 'PX');
+      const px = prisma.data.projects.find((p: any) => p.id === id('PX'));
       px.userId = USERS.contributor;
       px.name = 'Externe';
       prisma.data.projectMemberships.push({
         id: 'pm9',
-        projectId: 'PX',
+        projectId: id('PX'),
         userId: USERS.contributor,
         role: 'CONTRIBUTOR',
       });
@@ -354,7 +354,7 @@ describe('S12-f / S16-c : notes et politique d’autorisation', () => {
         id: 'TC',
         title: 'Tâche C',
         status: 'TODO',
-        projectId: 'P1',
+        projectId: id('P1'),
         userId: USERS.contributor,
         noteId: 'N1',
         deletedAt: null,
@@ -364,7 +364,7 @@ describe('S12-f / S16-c : notes et politique d’autorisation', () => {
     it('critère 1 : déplacement refusé vers un autre tenant, assigné de ce tenant : ni création ni suppression', async () => {
       setupExterne();
       askFor('Tâche C', 'outsider');
-      await service.createNote(USERS.contributor, 'N', '- [ ] Tâche C #Externe <!-- task:TC -->');
+      await service.createNote(USERS.contributor, 'N', `- [ ] Tâche C #Externe <!-- task:TC -->`);
       expect(assignees()).toEqual([]);
       expect(prisma.taskAssignee.deleteMany).not.toHaveBeenCalled();
     });
@@ -372,7 +372,7 @@ describe('S12-f / S16-c : notes et politique d’autorisation', () => {
     it('critère 2 : déplacement refusé, assigné COMMENTER de P1 : assigné (résolu contre P1)', async () => {
       setupExterne();
       askFor('Tâche C', 'commenter');
-      await service.createNote(USERS.contributor, 'N', '- [ ] Tâche C #Externe <!-- task:TC -->');
+      await service.createNote(USERS.contributor, 'N', `- [ ] Tâche C #Externe <!-- task:TC -->`);
       expect(assignees()).toEqual([{ taskId: 'TC', userId: USERS.commenter }]);
     });
 
@@ -380,8 +380,8 @@ describe('S12-f / S16-c : notes et politique d’autorisation', () => {
       prisma.data.projects[1].name = 'Beta';
       prisma.data.tasks[0].noteId = 'N1';
       askFor('Tâche 1', 'commenter');
-      await service.createNote(USERS.owner, 'N', '- [ ] Tâche 1 #Beta <!-- task:T1 -->');
-      expect(moved()).toEqual([expect.objectContaining({ projectId: 'P2' })]);
+      await service.createNote(USERS.owner, 'N', `- [ ] Tâche 1 #Beta <!-- task:${id('T1')} -->`);
+      expect(moved()).toEqual([expect.objectContaining({ projectId: id('P2') })]);
       expect(assignees()).toEqual([]);
       expect(prisma.taskAssignee.deleteMany).not.toHaveBeenCalled();
     });
@@ -414,13 +414,13 @@ describe('S12-f / S16-c : notes et politique d’autorisation', () => {
     });
 
     it('auteur retiré du projet (membre sans rôle) : aucune écriture', async () => {
-      pushTask('P1', USERS.member);
+      pushTask(id('P1'), USERS.member);
       await service.syncTaskStatusToNote('T9', 'DONE');
       expect(prisma.note.update).not.toHaveBeenCalled();
     });
 
     it('critère 2 : auteur avec task.read : la ligne est mise à jour', async () => {
-      pushTask('P1', USERS.contributor);
+      pushTask(id('P1'), USERS.contributor);
       await service.syncTaskStatusToNote('T9', 'DONE');
       expect(prisma.note.update).toHaveBeenCalledTimes(1);
       expect(prisma.note.update.mock.calls[0][0].data.content).toContain(
@@ -470,7 +470,7 @@ describe('S12-f / S16-c : notes et politique d’autorisation', () => {
         workspaceId: null,
         deletedAt: null,
       });
-      setupNote(USERS.commenter, 'P1', [
+      setupNote(USERS.commenter, id('P1'), [
         {
           id: 'T10',
           title: 'T10',
@@ -489,14 +489,14 @@ describe('S12-f / S16-c : notes et politique d’autorisation', () => {
     });
 
     it('critère 2 : auteur désactivé par SCIM (plus de Membership) : sa tâche de P1 est conservée', async () => {
-      setupNote(USERS.deprovisioned, 'P1');
+      setupNote(USERS.deprovisioned, id('P1'));
       await service.deleteNote(USERS.deprovisioned, 'N9');
       expect(deletedAtOf('T9')).toBeNull();
       expect(prisma.note.update).toHaveBeenCalled();
     });
 
     it('critère 3 : contrôle positif, CONTRIBUTOR de P1 : sa tâche de P1 est supprimée', async () => {
-      setupNote(USERS.contributor, 'P1');
+      setupNote(USERS.contributor, id('P1'));
       await service.deleteNote(USERS.contributor, 'N9');
       expect(deletedAtOf('T9')).toBeInstanceOf(Date);
     });
@@ -557,7 +557,7 @@ describe('S12-f / S16-c : notes et politique d’autorisation', () => {
         deletedAt: null,
       });
       prisma.data.tasks.push(
-        baseTask('T9', 'P1', USERS.commenter),
+        baseTask('T9', id('P1'), USERS.commenter),
         baseTask('T10', 'PP-c', USERS.commenter),
       );
 
@@ -578,7 +578,7 @@ describe('S12-f / S16-c : notes et politique d’autorisation', () => {
     });
 
     it('CONTRIBUTOR de P1 : la tâche de P1 est supprimée et notifiée avec le workspace du projet', async () => {
-      prisma.data.tasks.push(baseTask('T9', 'P1', USERS.contributor));
+      prisma.data.tasks.push(baseTask('T9', id('P1'), USERS.contributor));
       await service.deleteNote(USERS.contributor, 'N9');
       const sent = events();
       expect(sent).toHaveLength(1);
@@ -586,7 +586,7 @@ describe('S12-f / S16-c : notes et politique d’autorisation', () => {
     });
 
     it('aucune tâche supprimée : aucun événement de tâche', async () => {
-      prisma.data.tasks.push(baseTask('T9', 'P1', USERS.deprovisioned));
+      prisma.data.tasks.push(baseTask('T9', id('P1'), USERS.deprovisioned));
       await service.deleteNote(USERS.deprovisioned, 'N9');
       expect(events()).toEqual([]);
     });

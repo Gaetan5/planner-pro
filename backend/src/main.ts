@@ -6,13 +6,18 @@ import helmet from 'helmet';
 import { AppValidationPipe } from './common/app-validation.pipe';
 import { originCheckMiddleware } from './auth/origin-guard';
 import { noStoreMiddleware } from './common/no-store.middleware';
+import { registerBodyParsers } from './common/body-parsers';
+import { configureTrustProxy } from './common/trust-proxy';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     rawBody: true, // HMAC du webhook GitHub calculé sur le corps exact reçu (S21)
   });
-  // Les IdP SCIM envoient application/scim+json (RFC 7644 §3.1) : corps JSON à analyser aussi
-  app.useBodyParser('json', { type: ['application/json', 'application/scim+json'] });
+  // IP réelle du client derrière le reverse proxy (limitation de débit, journaux) : S24
+  configureTrustProxy(app);
+  // Limites de corps explicites (1 Mo, plafond dédié aux livraisons GitHub) et application/scim+json
+  // pour les IdP SCIM (RFC 7644 §3.1) : voir common/body-parsers.ts (S23)
+  registerBodyParsers(app);
   app.use(helmet());
   // Réponses sensibles jamais mises en cache (O16)
   app.use(noStoreMiddleware());

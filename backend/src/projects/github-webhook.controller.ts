@@ -1,6 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import {
-  Body,
   Controller,
   Headers,
   Param,
@@ -10,7 +9,10 @@ import {
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
+import { resolveThrottlerTracker } from '../common/app-throttler.guard';
 import { Public } from '../auth/public.decorator';
+import { UuidPipe } from '../common/uuid.pipe';
 import { ForbiddenInImpersonation } from '../auth/forbidden-in-impersonation.decorator';
 import { RealtimeService } from '../realtime/realtime.service';
 import { GitHubWebhookService } from './github-webhook.service';
@@ -29,12 +31,15 @@ export class GitHubWebhookController {
     private readonly realtime: RealtimeService,
   ) {}
 
+  // Hors du limiteur global (S24) : GitHub envoie depuis un petit nombre d'adresses partagées par
+  // tous ses clients, un 429 ferait perdre des livraisons légitimes. Le contrôle est la signature
+  // HMAC ; les refus, eux, sont comptés par adresse (GitHubWebhookService.registerFailure).
+  @SkipThrottle()
   @Public()
   @Post(':projectId/webhooks/github')
   async receive(
-    @Param('projectId') projectId: string,
+    @Param('projectId', UuidPipe) projectId: string,
     @Req() req: RawBodyRequest<any>,
-    @Body() payload: any,
     @Headers('x-hub-signature-256') signature?: string,
     @Headers('x-github-delivery') deliveryId?: string,
   ) {
@@ -43,7 +48,7 @@ export class GitHubWebhookController {
       req.rawBody,
       signature,
       deliveryId,
-      payload,
+      resolveThrottlerTracker(req),
     );
     if (this.realtime.isReady && closedTaskIds.length > 0) {
       const tasks = await this.tasksService.getTasksForBroadcast(closedTaskIds);
@@ -60,7 +65,7 @@ export class GitHubWebhookController {
   /** Régénère le secret (l'ancien cesse de valoir) ; renvoyé en clair cette seule fois. */
   @ForbiddenInImpersonation()
   @Post(':projectId/webhooks/github/secret')
-  regenerateSecret(@Param('projectId') projectId: string, @Req() req: any) {
+  regenerateSecret(@Param('projectId', UuidPipe) projectId: string, @Req() req: any) {
     return this.webhooks.regenerateSecret(projectId, req.user.id);
   }
 

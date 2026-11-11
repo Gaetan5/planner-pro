@@ -31,3 +31,15 @@ export function extractTaskIdsFromText(text: string): string[] {
   if (!text) return [];
   return Array.from(text.matchAll(CLOSING_KEYWORDS), (m) => m[1]);
 }
+
+/**
+ * Refus d'authentification tolérés par adresse, par projet et par minute avant de répondre 429
+ * aux requêtes refusées (S24, r44-m1). Partagé par le pré-contrôle (avant lecture du corps) et par
+ * le service. La clé porte l'identifiant du projet : un client mal configuré, ou un tiers qui
+ * connaît un `projectId`, n'affecte pas les livraisons des autres projets depuis la même adresse
+ * (adresses de GitHub partagées entre tous ses clients).
+ */
+export const WEBHOOK_FAILURES_PER_MINUTE = 20;
+export const WEBHOOK_FAILURE_WINDOW_SECONDS = 60;
+export const webhookFailureKey = (ip: string, projectId: string): string =>
+  `github-webhook-failures:${ip}:${projectId}`;

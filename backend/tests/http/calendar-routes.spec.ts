@@ -82,26 +82,36 @@ describe('S5 : routes calendrier (HTTP)', () => {
   const post = (path: string) =>
     fetch(`${baseUrl}${path}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
 
-  it('GET /projects/mock-calendar n’est plus public : 401 sans jeton, aucun calendrier renvoyé', async () => {
-    const res = await fetch(`${baseUrl}/projects/mock-calendar?email=%3Cscript%3E`);
+  it('GET /projects/00000000-0000-4000-8000-0000000000d1 n’est plus public : 401 sans jeton, aucun calendrier renvoyé', async () => {
+    const res = await fetch(
+      `${baseUrl}/projects/00000000-0000-4000-8000-0000000000d1?email=%3Cscript%3E`,
+    );
     expect(res.status).toBe(401);
     expect(await res.text()).not.toContain('VCALENDAR');
   });
 
-  it('GET /projects/mock-calendar authentifié : traité comme un identifiant de projet (404)', async () => {
+  it('GET /projects/00000000-0000-4000-8000-0000000000d1 authentifié : traité comme un identifiant de projet (404)', async () => {
     projectsService.getProject.mockRejectedValue(new NotFoundException('Projet introuvable'));
-    const res = await fetch(`${baseUrl}/projects/mock-calendar?format=json`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const res = await fetch(
+      `${baseUrl}/projects/00000000-0000-4000-8000-0000000000d1?format=json`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
     expect(res.status).toBe(404);
-    expect(projectsService.getProject).toHaveBeenCalledWith('mock-calendar', 'user-1');
+    expect(projectsService.getProject).toHaveBeenCalledWith(
+      '00000000-0000-4000-8000-0000000000d1',
+      'user-1',
+    );
   });
 
   it.each(['VIEWER', 'MEMBER'] as const)(
     '%s sur POST .../calendar/sync : 403 et aucune synchronisation',
     async (r) => {
       role = r;
-      const res = await post('/projects/workspaces/ws-1/calendar/sync');
+      const res = await post(
+        '/projects/workspaces/00000000-0000-4000-8000-0000000000a1/calendar/sync',
+      );
       expect(res.status).toBe(403);
       expect(calendarSync.syncCalendarEvents).not.toHaveBeenCalled();
     },
@@ -111,7 +121,9 @@ describe('S5 : routes calendrier (HTTP)', () => {
     '%s sur POST .../integrations/:id/export : 403 et aucun export',
     async (r) => {
       role = r;
-      const res = await post('/projects/workspaces/ws-1/integrations/int-1/export');
+      const res = await post(
+        '/projects/workspaces/00000000-0000-4000-8000-0000000000a1/integrations/00000000-0000-4000-8000-0000000000b1/export',
+      );
       expect(res.status).toBe(403);
       expect(calendarSync.exportToCalendar).not.toHaveBeenCalled();
     },
@@ -119,15 +131,25 @@ describe('S5 : routes calendrier (HTTP)', () => {
 
   it('ADMIN sur sync : autorisé, et l’appelant est transmis au service', async () => {
     role = 'ADMIN';
-    const res = await post('/projects/workspaces/ws-1/calendar/sync');
+    const res = await post(
+      '/projects/workspaces/00000000-0000-4000-8000-0000000000a1/calendar/sync',
+    );
     expect(res.status).toBe(201);
-    expect(calendarSync.syncCalendarEvents).toHaveBeenCalledWith('ws-1', 'user-1');
+    expect(calendarSync.syncCalendarEvents).toHaveBeenCalledWith(
+      '00000000-0000-4000-8000-0000000000a1',
+      'user-1',
+    );
   });
 
   it('OWNER sur export : autorisé', async () => {
     role = 'OWNER';
-    const res = await post('/projects/workspaces/ws-1/integrations/int-1/export');
+    const res = await post(
+      '/projects/workspaces/00000000-0000-4000-8000-0000000000a1/integrations/00000000-0000-4000-8000-0000000000b1/export',
+    );
     expect(res.status).toBe(201);
-    expect(calendarSync.exportToCalendar).toHaveBeenCalledWith('ws-1', 'int-1');
+    expect(calendarSync.exportToCalendar).toHaveBeenCalledWith(
+      '00000000-0000-4000-8000-0000000000a1',
+      '00000000-0000-4000-8000-0000000000b1',
+    );
   });
 });

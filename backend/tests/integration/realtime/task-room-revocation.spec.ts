@@ -29,7 +29,7 @@ import { ProjectPermissionsService } from '../../../src/projects/project-permiss
 import { RealtimeService } from '../../../src/realtime/realtime.service';
 import { TrackingGateway } from '../../../src/tracking/tracking.gateway';
 import { TrackingService } from '../../../src/tracking/tracking.service';
-import { USERS, buildRbacPrisma } from '../../support/rbac-fixture';
+import { USERS, W, buildRbacPrisma, id } from '../../support/rbac-fixture';
 import { STUB_SID, sessionServiceStub } from '../../support/session.test-support';
 
 // La gateway réelle tente de se brancher à Redis : on simule un Redis injoignable (échec capté
@@ -199,23 +199,25 @@ describe('S16-a : un accès retiré coupe aussi le salon task:<id> (Socket.IO r�
   it('retrait du rôle de projet : le client ne reçoit plus new-comment, un client autorisé le reçoit', async () => {
     const revoked = await connect(USERS.client); // CLIENT de P1
     const stays = await connect(USERS.contributor); // CONTRIBUTOR de P1
-    await joinTask(revoked.socket, 'T1');
-    await joinTask(stays.socket, 'T1');
-    expect(await roomsOf(USERS.client)).toEqual(expect.arrayContaining(['task:T1', 'project:P1']));
+    await joinTask(revoked.socket, id('T1'));
+    await joinTask(stays.socket, id('T1'));
+    expect(await roomsOf(USERS.client)).toEqual(
+      expect.arrayContaining([`task:${id('T1')}`, `project:${id('P1')}`]),
+    );
 
     // Contrôle positif avant révocation : les deux reçoivent le commentaire
-    expect((await postComment('T1', USERS.owner, 'avant')).status).toBe(201);
+    expect((await postComment(id('T1'), USERS.owner, 'avant')).status).toBe(201);
     await pause(200);
     expect(revoked.received.map((r) => r.comment.content)).toEqual(['avant']);
     expect(stays.received.map((r) => r.comment.content)).toEqual(['avant']);
 
-    await permissions.removeProjectRole('P1', USERS.client, USERS.owner);
+    await permissions.removeProjectRole(id('P1'), USERS.client, USERS.owner);
 
     const rooms = await roomsOf(USERS.client);
-    expect(rooms).not.toContain('project:P1');
-    expect(rooms).not.toContain('task:T1');
+    expect(rooms).not.toContain(`project:${id('P1')}`);
+    expect(rooms).not.toContain(`task:${id('T1')}`);
 
-    expect((await postComment('T1', USERS.owner, 'secret après révocation')).status).toBe(201);
+    expect((await postComment(id('T1'), USERS.owner, 'secret après révocation')).status).toBe(201);
     await pause(300);
     expect(stays.received.map((r) => r.comment.content)).toEqual([
       'avant',
@@ -226,9 +228,9 @@ describe('S16-a : un accès retiré coupe aussi le salon task:<id> (Socket.IO r�
 
   it('désactivation SCIM (Membership supprimée) : plus de project:<id> ni de task:<id>, plus de new-comment', async () => {
     const deprovisioned = await connect(USERS.commenter); // MEMBER + COMMENTER de P1
-    await joinTask(deprovisioned.socket, 'T1');
+    await joinTask(deprovisioned.socket, id('T1'));
     expect(await roomsOf(USERS.commenter)).toEqual(
-      expect.arrayContaining(['task:T1', 'project:P1']),
+      expect.arrayContaining([`task:${id('T1')}`, `project:${id('P1')}`]),
     );
 
     // Ce que fait la désactivation SCIM : la Membership disparaît, puis les salons sont recalculés
@@ -241,7 +243,7 @@ describe('S16-a : un accès retiré coupe aussi le salon task:<id> (Socket.IO r�
     const rooms = await roomsOf(USERS.commenter);
     expect(rooms.filter((r) => r.startsWith('project:') || r.startsWith('task:'))).toEqual([]);
 
-    expect((await postComment('T1', USERS.owner, 'après désactivation')).status).toBe(201);
+    expect((await postComment(id('T1'), USERS.owner, 'après désactivation')).status).toBe(201);
     await pause(300);
     expect(deprovisioned.received).toEqual([]);
   });
@@ -256,7 +258,7 @@ describe('S16-a : un accès retiré coupe aussi le salon task:<id> (Socket.IO r�
 
     const project = await app
       .get(ProjectsService)
-      .createProject(USERS.contributor, 'Nouveau projet', undefined, 'ws-1');
+      .createProject(USERS.contributor, 'Nouveau projet', undefined, W);
     realtime.emitToProject(project.id, 'task-status-changed', { taskId: 'T-new' });
     await pause(300);
 
@@ -267,8 +269,8 @@ describe('S16-a : un accès retiré coupe aussi le salon task:<id> (Socket.IO r�
 
   it('un salon de tâche reste conservé tant que le projet est accessible', async () => {
     const stays = await connect(USERS.commenter);
-    await joinTask(stays.socket, 'T1');
+    await joinTask(stays.socket, id('T1'));
     await realtime.refreshUserRooms(USERS.commenter);
-    expect(await roomsOf(USERS.commenter)).toEqual(expect.arrayContaining(['task:T1']));
+    expect(await roomsOf(USERS.commenter)).toEqual(expect.arrayContaining([`task:${id('T1')}`]));
   });
 });

@@ -11,6 +11,7 @@ import {
   Res,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { UuidPipe } from '../../common/uuid.pipe';
 import { Throttle } from '@nestjs/throttler';
 import { SsoService, SSO_FLOW_TTL_SECONDS } from './sso.service';
 import { DiscoverSsoDto, SsoAuthorizeQueryDto, SsoCallbackDto, ConfigureSsoDto } from './sso.dto';
@@ -96,7 +97,7 @@ export class SsoController {
    */
   @Get('workspaces/:workspaceId/sso')
   async getWorkspaceSSO(
-    @Param('workspaceId') workspaceId: string,
+    @Param('workspaceId', UuidPipe) workspaceId: string,
     @Req() req: AuthenticatedUserRequest,
   ) {
     return this.ssoService.getWorkspaceSSO(workspaceId, req.user.id);
@@ -108,7 +109,7 @@ export class SsoController {
   @Post('workspaces/:workspaceId/sso')
   @ForbiddenInImpersonation()
   async configureWorkspaceSSO(
-    @Param('workspaceId') workspaceId: string,
+    @Param('workspaceId', UuidPipe) workspaceId: string,
     @Body() dto: ConfigureSsoDto,
     @Req() req: AuthenticatedUserRequest,
   ) {
@@ -122,7 +123,7 @@ export class SsoController {
   @ForbiddenInImpersonation()
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async verifyDomain(
-    @Param('workspaceId') workspaceId: string,
+    @Param('workspaceId', UuidPipe) workspaceId: string,
     @Req() req: AuthenticatedUserRequest,
   ) {
     return this.ssoService.verifyDomain(workspaceId, req.user.id);
@@ -134,7 +135,7 @@ export class SsoController {
   @Delete('workspaces/:workspaceId/sso')
   @ForbiddenInImpersonation()
   async deleteWorkspaceSSO(
-    @Param('workspaceId') workspaceId: string,
+    @Param('workspaceId', UuidPipe) workspaceId: string,
     @Req() req: AuthenticatedUserRequest,
   ) {
     return this.ssoService.deleteWorkspaceSSO(workspaceId, req.user.id);

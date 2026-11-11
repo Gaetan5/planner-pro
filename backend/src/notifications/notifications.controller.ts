@@ -1,4 +1,5 @@
 import { Controller, Get, Patch, Post, Param, Req } from '@nestjs/common';
+import { UuidPipe } from '../common/uuid.pipe';
 import { NotificationsService } from './notifications.service';
 
 @Controller('notifications')
@@ -11,7 +12,7 @@ export class NotificationsController {
   }
 
   @Patch(':id/read')
-  markAsRead(@Req() req: { user: { id: string } }, @Param('id') id: string) {
+  markAsRead(@Req() req: { user: { id: string } }, @Param('id', UuidPipe) id: string) {
     return this.notificationsService.markAsRead(id, req.user.id);
   }
 

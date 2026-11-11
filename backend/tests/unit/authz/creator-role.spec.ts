@@ -3,7 +3,7 @@ import { ForbiddenException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { PolicyService } from '../../../src/authz/policy.service';
 import { PrismaService } from '../../../src/prisma/prisma.service';
-import { USERS, W, buildRbacPrisma } from '../../support/rbac-fixture';
+import { USERS, W, buildRbacPrisma, id } from '../../support/rbac-fixture';
 
 /**
  * P10 : le créateur d'un projet de workspace n'en est MANAGER que s'il est au moins MEMBER. Un
@@ -100,6 +100,8 @@ describe('P10 : créateur de projet et rôle de workspace', () => {
 
   it('un créateur OWNER (fixture) reste MANAGER', async () => {
     await setup('MEMBER');
-    await expect(policy.assertProject('P1', USERS.owner, 'project.manage')).resolves.toBeDefined();
+    await expect(
+      policy.assertProject(id('P1'), USERS.owner, 'project.manage'),
+    ).resolves.toBeDefined();
   });
 });

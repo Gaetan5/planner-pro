@@ -9,7 +9,9 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { InvitationsService } from './invitations.service';
+import { UuidPipe } from '../common/uuid.pipe';
 import { Public } from '../auth/public.decorator';
 import { ForbiddenInImpersonation } from '../auth/forbidden-in-impersonation.decorator';
 import { CreateInvitationDto } from './dto/create-invitation.dto';
@@ -34,7 +36,7 @@ export class InvitationsController {
   @ForbiddenInImpersonation()
   createInvitation(
     @Req() req: AuthenticatedRequest,
-    @Param('workspaceId') workspaceId: string,
+    @Param('workspaceId', UuidPipe) workspaceId: string,
     @Body() body: CreateInvitationDto,
   ) {
     return this.invitationsService.createInvitation(
@@ -52,7 +54,10 @@ export class InvitationsController {
    * Liste les invitations actives pour un workspace.
    */
   @Get('workspaces/:workspaceId/invitations')
-  listInvitations(@Req() req: AuthenticatedRequest, @Param('workspaceId') workspaceId: string) {
+  listInvitations(
+    @Req() req: AuthenticatedRequest,
+    @Param('workspaceId', UuidPipe) workspaceId: string,
+  ) {
     return this.invitationsService.listInvitations(workspaceId, req.user.id);
   }
 
@@ -60,7 +65,10 @@ export class InvitationsController {
    * Révoque une invitation active.
    */
   @Delete('invitations/:invitationId')
-  revokeInvitation(@Req() req: AuthenticatedRequest, @Param('invitationId') invitationId: string) {
+  revokeInvitation(
+    @Req() req: AuthenticatedRequest,
+    @Param('invitationId', UuidPipe) invitationId: string,
+  ) {
     return this.invitationsService.revokeInvitation(invitationId, req.user.id);
   }
 
@@ -70,6 +78,9 @@ export class InvitationsController {
    */
   @Public()
   @Post('invitations/check')
+  // Route anonyme : plus basse que le défaut global (60/min), le jeton (256 bits) n'étant de toute
+  // façon pas énumérable (S24, r35)
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   checkInvitation(@Body() body: InvitationTokenDto) {
     return this.invitationsService.checkInvitation(body.token);

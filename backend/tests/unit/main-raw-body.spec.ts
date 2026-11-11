@@ -12,7 +12,9 @@ describe('S21 : main.ts conserve le corps brut', () => {
     expect(main).toMatch(/NestFactory\.create<[^>]+>\(AppModule,\s*\{[^}]*rawBody:\s*true/s);
   });
 
-  it('le parseur JSON est enregistré par app.useBodyParser (qui pose le rawBody)', () => {
-    expect(main).toContain("app.useBodyParser('json'");
+  it('les parseurs JSON sont enregistrés par app.useBodyParser (qui pose le rawBody)', () => {
+    expect(main).toContain('registerBodyParsers(app)');
+    const parsers = readFileSync(join(__dirname, '../../src/common/body-parsers.ts'), 'utf8');
+    expect(parsers).toContain("app.useBodyParser('json'");
   });
 });

@@ -242,4 +242,36 @@ describe('S3 : séparation ticket MFA / jeton d’accès (HTTP)', () => {
       expect(res.status).toBe(400);
     });
   });
+  // S24 : limite par compte, tous tickets confondus
+  describe('limite des échecs MFA par compte', () => {
+    const challenge = (ticket: string, code: string) =>
+      postJson('/auth/mfa/challenge', { mfaTicket: ticket, code });
+
+    it('cinq mauvais codes répartis sur plusieurs tickets : le suivant est refusé (429), même avec le bon code', async () => {
+      // Deux tickets (un attaquant qui connaît le mot de passe en obtient autant qu'il veut)
+      const t1 = await login();
+      const t2 = await login();
+      const statuses: number[] = [];
+      for (const ticket of [t1, t1, t1, t2, t2]) {
+        statuses.push((await challenge(ticket, wrongCode())).status);
+      }
+      expect(statuses).toEqual([401, 401, 401, 401, 401]);
+      const t3 = await login();
+      // Ticket neuf (aucun essai consommé) : refusé quand même, y compris avec le bon code
+      expect((await challenge(t3, wrongCode())).status).toBe(429);
+      expect((await challenge(t3, generateTotpCode(mfaSecret))).status).toBe(429);
+    });
+
+    it('un code correct remet le compteur du compte à zéro', async () => {
+      const t1 = await login();
+      for (let i = 0; i < 3; i++) await challenge(t1, wrongCode());
+      // Pas de temps suivant : les tests précédents ont déjà consommé celui de l'instant (anti-rejeu)
+      const ok = await challenge(t1, generateTotpCode(mfaSecret, Date.now() + 30000));
+      expect(ok.status).toBe(201);
+      const t2 = await login();
+      const statuses: number[] = [];
+      for (let i = 0; i < 4; i++) statuses.push((await challenge(t2, wrongCode())).status);
+      expect(statuses).toEqual([401, 401, 401, 401]);
+    });
+  });
 });

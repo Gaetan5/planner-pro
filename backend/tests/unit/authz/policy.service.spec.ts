@@ -7,7 +7,7 @@ import {
 } from '../../../src/authz/permissions';
 import { PolicyService } from '../../../src/authz/policy.service';
 import { PrismaService } from '../../../src/prisma/prisma.service';
-import { OTHER_W, Persona, USERS, W, buildRbacPrisma } from '../../support/rbac-fixture';
+import { OTHER_W, Persona, USERS, W, buildRbacPrisma, id } from '../../support/rbac-fixture';
 
 /** A2 / S12 : matrice RBAC table-driven sur la politique centrale (utilisateur x projet x action). */
 describe('PolicyService : matrice RBAC', () => {
@@ -43,9 +43,10 @@ describe('PolicyService : matrice RBAC', () => {
   const RANK: Record<string, number> = { MANAGER: 4, CONTRIBUTOR: 3, COMMENTER: 2, CLIENT: 1 };
 
   const projectCases = (Object.keys(EXPECTED_ROLE) as Persona[]).flatMap((persona) =>
-    (['P1', 'P2'] as const).flatMap((projectId) =>
+    (['P1', 'P2'] as const).flatMap((name) =>
       (Object.keys(PROJECT_PERMISSIONS) as ProjectAction[]).map((action) => {
-        const role = EXPECTED_ROLE[persona][projectId];
+        const projectId = id(name);
+        const role = EXPECTED_ROLE[persona][name];
         const min = Math.min(...PROJECT_PERMISSIONS[action].map((r: string) => RANK[r]));
         return [persona, projectId, action, role !== null && RANK[role] >= min] as const;
       }),
@@ -61,7 +62,7 @@ describe('PolicyService : matrice RBAC', () => {
   it.each(projectCases.filter(([, , action]) => action === 'task.read'))(
     '%s sur %s : une tâche du projet suit la même règle (%s)',
     async (persona, projectId, _action, expected) => {
-      const taskId = projectId === 'P1' ? 'T1' : 'T2';
+      const taskId = projectId === id('P1') ? id('T1') : id('T2');
       expect(await allowed(() => policy.assertTask(taskId, USERS[persona], 'task.read'))).toBe(
         expected,
       );
@@ -103,9 +104,9 @@ describe('PolicyService : matrice RBAC', () => {
     expect(await allowed(() => policy.assertWorkspace(W, USERS.outsider, 'workspace.read'))).toBe(
       false,
     );
-    expect(await allowed(() => policy.assertProject('P1', USERS.outsider, 'project.read'))).toBe(
-      false,
-    );
+    expect(
+      await allowed(() => policy.assertProject(id('P1'), USERS.outsider, 'project.read')),
+    ).toBe(false);
     expect(await policy.listAccessibleProjectIds(USERS.outsider, { workspaceId: W })).toEqual([]);
   });
 
@@ -131,7 +132,7 @@ describe('PolicyService : matrice RBAC', () => {
       );
       prisma.data.projectMemberships.push({
         id: 'pm-bob',
-        projectId: 'P2',
+        projectId: id('P2'),
         userId: 'bob',
         role: 'CONTRIBUTOR',
       });
@@ -145,19 +146,17 @@ describe('PolicyService : matrice RBAC', () => {
     it('membre : le créateur et le détenteur d’une ProjectMembership ont accès', async () => {
       const { policy } = setup();
       expect(await allowed(() => policy.assertProject('P-bob', 'bob', 'task.write'))).toBe(true);
-      expect(await allowed(() => policy.assertProject('P2', 'bob', 'task.write'))).toBe(true);
-      expect((await policy.listAccessibleProjectIds('bob')).sort()).toEqual([
-        'P-bob',
-        'P-perso',
-        'P2',
-      ]);
+      expect(await allowed(() => policy.assertProject(id('P2'), 'bob', 'task.write'))).toBe(true);
+      expect((await policy.listAccessibleProjectIds('bob')).sort()).toEqual(
+        ['P-bob', 'P-perso', id('P2')].sort(),
+      );
     });
 
     it('après suppression de la Membership : 403 pour le créateur et pour la ProjectMembership', async () => {
       const { policy, removeMembership } = setup();
       removeMembership();
       expect(await allowed(() => policy.assertProject('P-bob', 'bob', 'project.read'))).toBe(false);
-      expect(await allowed(() => policy.assertProject('P2', 'bob', 'task.write'))).toBe(false);
+      expect(await allowed(() => policy.assertProject(id('P2'), 'bob', 'task.write'))).toBe(false);
       await expect(policy.assertProject('P-bob', 'bob', 'project.read')).rejects.toThrow(
         ForbiddenException,
       );
@@ -184,13 +183,13 @@ describe('PolicyService : matrice RBAC', () => {
 
   describe('listAccessibleProjectIds', () => {
     it.each([
-      ['owner', ['P1', 'P2']],
-      ['admin', ['P1', 'P2']],
+      ['owner', [id('P1'), id('P2')]],
+      ['admin', [id('P1'), id('P2')]],
       ['member', []],
-      ['contributor', ['P1']],
-      ['commenter', ['P1']],
+      ['contributor', [id('P1')]],
+      ['commenter', [id('P1')]],
       ['viewer', []],
-      ['client', ['P1']],
+      ['client', [id('P1')]],
       ['deprovisioned', []],
     ] as const)('%s : %j', async (persona, expected) => {
       expect((await policy.listAccessibleProjectIds(USERS[persona])).sort()).toEqual(expected);
@@ -200,7 +199,7 @@ describe('PolicyService : matrice RBAC', () => {
     });
 
     it('un membre d’un autre workspace ne voit que son propre projet (PX), jamais ceux de W', async () => {
-      expect(await policy.listAccessibleProjectIds(USERS.outsider)).toEqual(['PX']);
+      expect(await policy.listAccessibleProjectIds(USERS.outsider)).toEqual([id('PX')]);
       expect(await policy.listAccessibleProjectIds(USERS.outsider, { workspaceId: W })).toEqual([]);
     });
 
@@ -216,7 +215,7 @@ describe('PolicyService : matrice RBAC', () => {
       ).toEqual([]);
       expect(
         await policy.listAccessibleProjectIds(USERS.commenter, { action: 'comment.write' }),
-      ).toEqual(['P1']);
+      ).toEqual([id('P1')]);
     });
   });
 });

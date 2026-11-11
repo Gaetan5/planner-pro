@@ -33,7 +33,9 @@ describe('Routes projets : intégrations, sprints, planification, diffusion', ()
 
   const integrationService = {
     getWorkspaceIdOf: jest.fn(),
-    toggleIntegration: jest.fn().mockResolvedValue({ id: 'int-1', active: false }),
+    toggleIntegration: jest
+      .fn()
+      .mockResolvedValue({ id: '00000000-0000-4000-8000-0000000000b1', active: false }),
     deleteIntegration: jest.fn().mockResolvedValue({ success: true }),
   };
   const sprintService = { associateTasksToSprint: jest.fn() };
@@ -98,8 +100,12 @@ describe('Routes projets : intégrations, sprints, planification, diffusion', ()
     });
 
   describe.each([
-    ['POST', '/projects/integrations/int-1/toggle', 'toggleIntegration'],
-    ['DELETE', '/projects/integrations/int-1', 'deleteIntegration'],
+    [
+      'POST',
+      '/projects/integrations/00000000-0000-4000-8000-0000000000b1/toggle',
+      'toggleIntegration',
+    ],
+    ['DELETE', '/projects/integrations/00000000-0000-4000-8000-0000000000b1', 'deleteIntegration'],
   ] as const)('%s %s (S14)', (method, path, serviceMethod) => {
     it('intégration inexistante : 404 et aucun appel au service', async () => {
       integrationService.getWorkspaceIdOf.mockResolvedValue(null);
@@ -115,15 +121,18 @@ describe('Routes projets : intégrations, sprints, planification, diffusion', ()
     });
 
     it('OWNER/ADMIN du workspace propriétaire : le service reçoit (workspaceId, id)', async () => {
-      integrationService.getWorkspaceIdOf.mockResolvedValue('ws-1');
+      integrationService.getWorkspaceIdOf.mockResolvedValue('00000000-0000-4000-8000-0000000000a1');
       const res = await call(method, path);
       expect(res.status).toBeLessThan(300);
       expect(policy.assertWorkspace).toHaveBeenCalledWith(
-        'ws-1',
+        '00000000-0000-4000-8000-0000000000a1',
         'user-1',
         'workspace.integrations.manage',
       );
-      expect(integrationService[serviceMethod]).toHaveBeenCalledWith('ws-1', 'int-1');
+      expect(integrationService[serviceMethod]).toHaveBeenCalledWith(
+        '00000000-0000-4000-8000-0000000000a1',
+        '00000000-0000-4000-8000-0000000000b1',
+      );
     });
   });
 
@@ -136,7 +145,7 @@ describe('Routes projets : intégrations, sprints, planification, diffusion', ()
 
     it('diffuse uniquement les tâches modifiées, vers les salons de leurs projets', async () => {
       sprintService.associateTasksToSprint.mockResolvedValue([
-        { id: T1, projectId: 'P1', workspaceId: 'ws-1' },
+        { id: T1, projectId: 'P1', workspaceId: '00000000-0000-4000-8000-0000000000a1' },
       ]);
       projectsService.getTasksForBroadcast.mockResolvedValue([
         { id: T1, projectId: 'P1', title: 't' },
@@ -155,7 +164,11 @@ describe('Routes projets : intégrations, sprints, planification, diffusion', ()
 
     it('refus du service (403) : aucune diffusion', async () => {
       sprintService.associateTasksToSprint.mockRejectedValue(new ForbiddenException('refusé'));
-      const res = await call('POST', '/projects/sprints/s1/tasks', { taskIds: [T1] });
+      const res = await call(
+        'POST',
+        '/projects/sprints/00000000-0000-4000-8000-0000000000e1/tasks',
+        { taskIds: [T1] },
+      );
       expect(res.status).toBe(403);
       expect(realtime.emitToProject).not.toHaveBeenCalled();
     });
@@ -163,15 +176,27 @@ describe('Routes projets : intégrations, sprints, planification, diffusion', ()
 
   describe('planification et conflits (S12)', () => {
     it('auto-schedule transmet l’appelant au service', async () => {
-      const res = await call('POST', '/projects/workspaces/ws-1/auto-schedule');
+      const res = await call(
+        'POST',
+        '/projects/workspaces/00000000-0000-4000-8000-0000000000a1/auto-schedule',
+      );
       expect(res.status).toBe(201);
-      expect(scheduler.autoScheduleWorkspace).toHaveBeenCalledWith('ws-1', 'user-1');
+      expect(scheduler.autoScheduleWorkspace).toHaveBeenCalledWith(
+        '00000000-0000-4000-8000-0000000000a1',
+        'user-1',
+      );
     });
 
     it('calendar-conflicts est borné aux projets accessibles', async () => {
-      const res = await call('GET', '/projects/workspaces/ws-1/calendar-conflicts');
+      const res = await call(
+        'GET',
+        '/projects/workspaces/00000000-0000-4000-8000-0000000000a1/calendar-conflicts',
+      );
       expect(res.status).toBe(200);
-      expect(calendarSync.detectCalendarConflicts).toHaveBeenCalledWith('ws-1', ['P1']);
+      expect(calendarSync.detectCalendarConflicts).toHaveBeenCalledWith(
+        '00000000-0000-4000-8000-0000000000a1',
+        ['P1'],
+      );
     });
   });
 });

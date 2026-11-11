@@ -25,7 +25,7 @@ describe('S18 étape 0 : drapeau FEATURE_IMPERSONATION_ENABLED (HTTP)', () => {
   const adminService = {
     impersonateUser: jest.fn().mockResolvedValue({
       session: { accessToken: 'jeton', accessMaxAgeSeconds: 900, sid: 'imp-sid' },
-      user: { id: 'u-2' },
+      user: { id: '00000000-0000-4000-8000-0000000000c2' },
     }),
     getOverview: jest.fn().mockResolvedValue({ totals: {} }),
   };
@@ -69,7 +69,7 @@ describe('S18 étape 0 : drapeau FEATURE_IMPERSONATION_ENABLED (HTTP)', () => {
   });
 
   const impersonate = (token?: string) =>
-    fetch(`${baseUrl}/admin/users/u-2/impersonate`, {
+    fetch(`${baseUrl}/admin/users/00000000-0000-4000-8000-0000000000c2/impersonate`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -97,7 +97,7 @@ describe('S18 étape 0 : drapeau FEATURE_IMPERSONATION_ENABLED (HTTP)', () => {
     expect(res.status).toBe(201);
     expect(adminService.impersonateUser).toHaveBeenCalledWith(
       'admin-1',
-      'u-2',
+      '00000000-0000-4000-8000-0000000000c2',
       'Ticket support 4521, reproduction',
       STUB_SID,
     );

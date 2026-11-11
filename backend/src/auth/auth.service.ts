@@ -25,6 +25,7 @@ import { SessionService } from './session.service';
 import { LoginResult, MfaLoginResult, SessionLoginResult } from './login-result';
 import { isFeatureEnabled } from '../config/features';
 import { isDevAuthEnabled } from './dev-auth-flag';
+import { AccountLockout } from './account-lockout';
 import { RedisService } from '../redis/redis.service';
 import { MailService } from '../mail/mail.service';
 import { PolicyService } from '../authz/policy.service';
@@ -173,7 +174,14 @@ export class AuthService {
     @Optional()
     @Inject(MFA_REDIS_TIMEOUT_TOKEN)
     private readonly redisTimeoutMs: number = MFA_REDIS_TIMEOUT_MS,
-  ) {}
+  ) {
+    // Limite des échecs par compte, en plus de la limite par IP du contrôleur (S24)
+    this.loginLockout = new AccountLockout(this.redis, 'login');
+    this.mfaLockout = new AccountLockout(this.redis, 'mfa');
+  }
+
+  private readonly loginLockout: AccountLockout;
+  private readonly mfaLockout: AccountLockout;
 
   /**
    * Seul point d'émission de session de l'application (A3). Applique, dans l'ordre et pour
@@ -824,6 +832,8 @@ export class AuthService {
       throw new BadRequestException("L'email et le mot de passe sont requis.");
     }
     const emailLower = email.toLowerCase().trim();
+    // Compte verrouillé ou trop d'échecs récents : 429 avant tout calcul (S24), existant ou non
+    await this.loginLockout.assertAllowed(emailLower);
     const user = await this.prisma.user.findUnique({
       where: { email: emailLower },
     });
@@ -831,13 +841,16 @@ export class AuthService {
     if (!user || !user.passwordHash) {
       // Même coût de vérification que pour un compte existant (pas d'oracle temporel, S27)
       await verifyPassword(passwordRaw, await getDummyPasswordHash());
+      await this.loginLockout.recordFailure(emailLower);
       throw new UnauthorizedException('Identifiants invalides.');
     }
 
     const { isValid, needsMigration } = await verifyPassword(passwordRaw, user.passwordHash);
     if (!isValid) {
+      await this.loginLockout.recordFailure(emailLower);
       throw new UnauthorizedException('Identifiants invalides.');
     }
+    await this.loginLockout.reset(emailLower);
 
     // Migration différée (Lazy migration)
     if (needsMigration) {
@@ -1343,6 +1356,10 @@ export class AuthService {
       );
     }
 
+    // Limite par compte, tous tickets confondus : un attaquant qui connaît le mot de passe obtient
+    // autant de tickets qu'il veut, chacun limité à 5 essais (S24)
+    await this.mfaLockout.assertAllowed(payload.sub);
+
     // Limite d'essais par ticket : au-delà, le ticket est invalidé
     const attempts = await this.withRedisTimeout(() =>
       this.redis.incrementWithTtl(`${ticketKey}:attempts`, MFA_TICKET_TTL_SECONDS),
@@ -1368,11 +1385,13 @@ export class AuthService {
       ? await this.consumeTotp({ id: user.id, mfaSecret: user.mfaSecret }, input.code)
       : await this.consumeRecoveryCode(user.id, input.recoveryCode as string);
     if (!isValid) {
+      await this.mfaLockout.recordFailure(payload.sub);
       if (attempts >= MFA_TICKET_MAX_ATTEMPTS) {
         await this.withRedisTimeout(() => this.redis.del(ticketKey));
       }
       throw new UnauthorizedException('Code de vérification TOTP incorrect.');
     }
+    await this.mfaLockout.reset(payload.sub);
 
     // Consommation atomique : une seule requête concurrente peut utiliser le ticket
     if ((await this.withRedisTimeout(() => this.redis.del(ticketKey))) !== 1) {

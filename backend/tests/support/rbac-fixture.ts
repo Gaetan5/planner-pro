@@ -5,8 +5,16 @@
  */
 type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
-export const W = 'ws-1';
-export const OTHER_W = 'ws-2';
+/**
+ * Identifiant UUID déterministe d'une entité logique de la fixture (`id('P1')`, `id('T2')`...).
+ * Les routes exigent des UUID dans l'URL (S23) : le nom logique (6 caractères au plus) est encodé
+ * dans les derniers octets, ce qui garde les identifiants lisibles et stables d'un test à l'autre.
+ */
+export const id = (name: string): string =>
+  `00000000-0000-4000-8000-${Buffer.from(name).toString('hex').padStart(12, '0')}`;
+
+export const W = id('ws-1');
+export const OTHER_W = id('ws-2');
 
 // Identifiants au format UUID v4 : les DTO (ex. `AssignProjectRoleDto`) exigent un UUID (S17)
 export const USERS = {
@@ -35,23 +43,35 @@ export function buildRbacData() {
     { id: 'm8', workspaceId: OTHER_W, userId: USERS.outsider, role: 'OWNER' },
   ];
   const projects: Row[] = [
-    { id: 'P1', name: 'Projet 1', userId: USERS.owner, workspaceId: W, deletedAt: null },
-    { id: 'P2', name: 'Projet 2', userId: USERS.owner, workspaceId: W, deletedAt: null },
+    { id: id('P1'), name: 'Projet 1', userId: USERS.owner, workspaceId: W, deletedAt: null },
+    { id: id('P2'), name: 'Projet 2', userId: USERS.owner, workspaceId: W, deletedAt: null },
     // Projet d'un AUTRE workspace (autre locataire)
-    { id: 'PX', name: 'Projet X', userId: USERS.outsider, workspaceId: OTHER_W, deletedAt: null },
+    {
+      id: id('PX'),
+      name: 'Projet X',
+      userId: USERS.outsider,
+      workspaceId: OTHER_W,
+      deletedAt: null,
+    },
   ];
   const projectMemberships: Row[] = [
-    { id: 'pm1', projectId: 'P1', userId: USERS.owner, role: 'MANAGER' },
-    { id: 'pm2', projectId: 'P2', userId: USERS.owner, role: 'MANAGER' },
-    { id: 'pm3', projectId: 'P1', userId: USERS.contributor, role: 'CONTRIBUTOR' },
-    { id: 'pm4', projectId: 'P1', userId: USERS.commenter, role: 'COMMENTER' },
-    { id: 'pm5', projectId: 'P1', userId: USERS.client, role: 'CLIENT' },
-    { id: 'pm6', projectId: 'P1', userId: USERS.deprovisioned, role: 'CONTRIBUTOR' },
+    { id: 'pm1', projectId: id('P1'), userId: USERS.owner, role: 'MANAGER' },
+    { id: 'pm2', projectId: id('P2'), userId: USERS.owner, role: 'MANAGER' },
+    { id: 'pm3', projectId: id('P1'), userId: USERS.contributor, role: 'CONTRIBUTOR' },
+    { id: 'pm4', projectId: id('P1'), userId: USERS.commenter, role: 'COMMENTER' },
+    { id: 'pm5', projectId: id('P1'), userId: USERS.client, role: 'CLIENT' },
+    { id: 'pm6', projectId: id('P1'), userId: USERS.deprovisioned, role: 'CONTRIBUTOR' },
   ];
   const tasks: Row[] = [
-    { id: 'T1', title: 'Tâche 1', projectId: 'P1', userId: USERS.owner, deletedAt: null },
-    { id: 'T2', title: 'Tâche 2', projectId: 'P2', userId: USERS.owner, deletedAt: null },
-    { id: 'TX', title: 'Tâche X', projectId: 'PX', userId: USERS.outsider, deletedAt: null },
+    { id: id('T1'), title: 'Tâche 1', projectId: id('P1'), userId: USERS.owner, deletedAt: null },
+    { id: id('T2'), title: 'Tâche 2', projectId: id('P2'), userId: USERS.owner, deletedAt: null },
+    {
+      id: id('TX'),
+      title: 'Tâche X',
+      projectId: id('PX'),
+      userId: USERS.outsider,
+      deletedAt: null,
+    },
   ];
   return { memberships, projects, projectMemberships, tasks };
 }

@@ -1,4 +1,4 @@
-import { IsEmail, IsString, MinLength, Matches } from 'class-validator';
+import { IsEmail, IsString, MaxLength, MinLength, Matches } from 'class-validator';
 
 /** Politique de mot de passe commune à l'inscription et à la réinitialisation. */
 export const PASSWORD_POLICY = /((?=.*\d)|(?=.*\W+))(?![.\n])(?=.*[A-Z])(?=.*[a-z]).*$/;
@@ -8,13 +8,16 @@ export const PASSWORD_POLICY_MESSAGE =
 
 export class RegisterDto {
   @IsEmail({}, { message: "L'email doit être une adresse valide." })
+  @MaxLength(254)
   email!: string;
 
   @MinLength(10, { message: PASSWORD_MIN_LENGTH_MESSAGE })
   @Matches(PASSWORD_POLICY, { message: PASSWORD_POLICY_MESSAGE })
+  @MaxLength(256)
   passwordRaw!: string;
 
   @IsString()
   @MinLength(2, { message: 'Le nom doit contenir au moins 2 caractères.' })
+  @MaxLength(191)
   name!: string;
 }

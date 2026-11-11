@@ -96,6 +96,55 @@ Planner-Pro ne crée jamais de compte Firebase Authentication à la place de l�
    En-têtes de sécurité du frontend (CSP, HSTS) : la CSP est servie en `Report-Only` par
    défaut (`CSP_MODE`) ; procédure de bascule en blocage dans
    `docs/security/en-tetes-frontend.md`. Le reverse proxy ne doit pas supprimer ces en-têtes.
+   Adresse IP des clients et limites de débit (S24, S23) : le backend lit l'adresse réelle du
+   client dans `X-Forwarded-For` en faisant confiance à `TRUST_PROXY_HOPS` reverse proxys.
+   La variable est **obligatoire** dans `.env.production` (le Compose refuse de démarrer sans
+   elle, aucune valeur par défaut). Valeur attendue : `1`, soit un seul Nginx d'hôte devant
+   `127.0.0.1:3003` (décision d'exploitation du 2026-11-10) ; 2 si un CDN ou un répartiteur de
+   charge venait à le précéder. Trop bas, tous les clients partagent un compteur ; trop haut, un
+   client peut falsifier son adresse. Vérification après déploiement : une requête portant
+   `X-Forwarded-For: 1.2.3.4` ne doit jamais faire apparaître `1.2.3.4` comme adresse du client.
+   Le Nginx de l'API doit transmettre l'adresse en l'ajoutant à la chaîne existante :
+   `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`.
+
+   Webhook GitHub (S23, S24) : le backend lit au plus **2 Mo** sur cette route (413 au-delà),
+   sans analyser le corps tant que la signature n'est pas vérifiée, et répond 429 sans lire le
+   corps après 20 refus par minute pour un couple adresse/projet. Côté Nginx, limiter le débit de
+   cette route et aligner la taille de corps (dans `http { }` puis dans le serveur de l'API) :
+
+   ```nginx
+   limit_req_zone $binary_remote_addr zone=gh_webhook:10m rate=30r/m;
+
+   location ~ ^/projects/[^/]+/webhooks/github$ {
+       limit_req zone=gh_webhook burst=10 nodelay;
+       limit_req_status 429;
+       client_max_body_size 2m;
+       proxy_pass http://127.0.0.1:3003;
+       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+       # mêmes en-têtes Host / Upgrade que les autres routes de l'API
+   }
+   ```
+
+   Les adresses de GitHub sont partagées entre tous ses clients : si des livraisons légitimes
+   reçoivent des 429 de Nginx, relever `rate` et `burst`. Le défaut de 1 Mo de
+   `client_max_body_size` rejetterait sinon les livraisons de plus de 1 Mo avant le backend.
+
+   Comptes verrouillés (S24) : après 5 tentatives en une minute sur un compte, le backend répond
+   429 ; au 10e échec cumulé sur 24 h, le compte est verrouillé 15 min (30 min au 20e, doublant
+   jusqu'à 24 h). Chaque pose de verrou est journalisée au niveau `warn` (« Verrouillage de compte
+   posé », avec une empreinte de 12 caractères, jamais l'adresse). **Déblocage** : les clés Redis
+   sont `lockout:login:<sha256 de l'e-mail en minuscules>:{lock,minute,total}` (et
+   `lockout:mfa:<sha256 de l'identifiant utilisateur>:...` pour le MFA). Pour débloquer un compte :
+
+   ```sh
+   H=$(printf %s 'utilisateur@exemple.com' | sha256sum | cut -d' ' -f1)
+   docker compose --env-file .env.production -f docker-compose.prod.yml exec cache \
+     redis-cli DEL "lockout:login:$H:lock" "lockout:login:$H:minute" "lockout:login:$H:total"
+   ```
+
+   Pour tout débloquer : `redis-cli --scan --pattern 'lockout:*'` puis `DEL` des clés listées
+   (ne jamais utiliser `FLUSHALL`, Redis porte aussi les tickets MFA et les clés anti-rejeu).
+
 5. Pour activer Firebase Auth, créer une application Web Firebase, activer le
    fournisseur e-mail/mot de passe et ajouter le domaine de l’application aux
    domaines autorisés. Renseigner les variables `VITE_FIREBASE_*` pour le build

@@ -4,7 +4,7 @@ import { PolicyService } from '../../../src/authz/policy.service';
 import { PrismaService } from '../../../src/prisma/prisma.service';
 import { ProjectPermissionsService } from '../../../src/projects/project-permissions.service';
 import { RealtimeService } from '../../../src/realtime/realtime.service';
-import { USERS, W, buildRbacPrisma } from '../../support/rbac-fixture';
+import { USERS, W, buildRbacPrisma, id } from '../../support/rbac-fixture';
 
 /** S16 / A4 : salons de projet selon les droits, et révocation immédiate au changement de rôle. */
 describe('S16 : RealtimeService', () => {
@@ -58,7 +58,7 @@ describe('S16 : RealtimeService', () => {
 
   it('un CLIENT de P1 rejoint project:P1 et pas project:P2', async () => {
     const rooms = await realtime.roomsForUser(USERS.client);
-    expect(rooms.projects).toEqual(['project:P1']);
+    expect(rooms.projects).toEqual([`project:${id('P1')}`]);
     expect(rooms.workspaces).toEqual([`workspace:${W}`]);
   });
 
@@ -67,41 +67,46 @@ describe('S16 : RealtimeService', () => {
   });
 
   it('les tâches sont diffusées vers project:<id> uniquement', () => {
-    realtime.emitToProject('P2', 'task-status-changed', { taskId: 'T2' });
-    expect(emitted).toEqual([{ room: 'project:P2', event: 'task-status-changed' }]);
+    realtime.emitToProject(id('P2'), 'task-status-changed', { taskId: id('T2') });
+    expect(emitted).toEqual([{ room: `project:${id('P2')}`, event: 'task-status-changed' }]);
   });
 
   it('removeProjectRole : la socket du retiré quitte project:P1 immédiatement', async () => {
-    const socket = makeSocket(['user:' + USERS.client, 'project:P1', `workspace:${W}`]);
+    const socket = makeSocket(['user:' + USERS.client, `project:${id('P1')}`, `workspace:${W}`]);
     remoteSockets = [socket];
 
-    await permissions.removeProjectRole('P1', USERS.client, USERS.owner);
+    await permissions.removeProjectRole(id('P1'), USERS.client, USERS.owner);
 
-    expect(socket.leave).toHaveBeenCalledWith('project:P1');
-    expect(socket.rooms.has('project:P1')).toBe(false);
+    expect(socket.leave).toHaveBeenCalledWith(`project:${id('P1')}`);
+    expect(socket.rooms.has(`project:${id('P1')}`)).toBe(false);
     expect(socket.rooms.has(`workspace:${W}`)).toBe(true);
   });
 
   it('removeProjectRole : la socket quitte aussi task:<id> de la tâche du projet (S16-a)', async () => {
     // T1 appartient à P1 (rôle retiré) ; T2 à P2, où le client n'a jamais eu de rôle
-    const socket = makeSocket(['user:' + USERS.client, 'project:P1', 'task:T1', 'task:T2']);
+    const socket = makeSocket([
+      'user:' + USERS.client,
+      `project:${id('P1')}`,
+      `task:${id('T1')}`,
+      `task:${id('T2')}`,
+    ]);
     remoteSockets = [socket];
 
-    await permissions.removeProjectRole('P1', USERS.client, USERS.owner);
+    await permissions.removeProjectRole(id('P1'), USERS.client, USERS.owner);
 
-    expect(socket.rooms.has('project:P1')).toBe(false);
-    expect(socket.rooms.has('task:T1')).toBe(false);
-    expect(socket.rooms.has('task:T2')).toBe(false);
+    expect(socket.rooms.has(`project:${id('P1')}`)).toBe(false);
+    expect(socket.rooms.has(`task:${id('T1')}`)).toBe(false);
+    expect(socket.rooms.has(`task:${id('T2')}`)).toBe(false);
   });
 
   it('refreshUserRooms conserve task:<id> d’un projet encore accessible, une seule requête', async () => {
-    const socket = makeSocket(['user:' + USERS.client, 'project:P1', 'task:T1']);
+    const socket = makeSocket(['user:' + USERS.client, `project:${id('P1')}`, `task:${id('T1')}`]);
     remoteSockets = [socket];
     (prisma.task.findMany as jest.Mock).mockClear();
 
     await realtime.refreshUserRooms(USERS.client);
 
-    expect(socket.rooms.has('task:T1')).toBe(true);
+    expect(socket.rooms.has(`task:${id('T1')}`)).toBe(true);
     expect(prisma.task.findMany).toHaveBeenCalledTimes(1);
   });
 
@@ -109,9 +114,9 @@ describe('S16 : RealtimeService', () => {
     const socket = makeSocket(['user:' + USERS.member, `workspace:${W}`]);
     remoteSockets = [socket];
 
-    await permissions.assignProjectRole('P2', USERS.member, 'CONTRIBUTOR', USERS.owner);
+    await permissions.assignProjectRole(id('P2'), USERS.member, 'CONTRIBUTOR', USERS.owner);
 
-    expect(socket.join).toHaveBeenCalledWith('project:P2');
+    expect(socket.join).toHaveBeenCalledWith(`project:${id('P2')}`);
   });
 
   it('échec du recalcul : les sockets de l’utilisateur sont coupées (échec fermé)', async () => {
@@ -132,14 +137,14 @@ describe('S16 : RealtimeService', () => {
       const socketsLeave = jest.fn();
       const inRoom = jest.fn(() => ({ socketsLeave }));
       realtime.attach({ in: inRoom } as any);
-      realtime.evictTaskRoom('T1');
-      expect(inRoom).toHaveBeenCalledWith('task:T1');
-      expect(socketsLeave).toHaveBeenCalledWith('task:T1');
+      realtime.evictTaskRoom(id('T1'));
+      expect(inRoom).toHaveBeenCalledWith(`task:${id('T1')}`);
+      expect(socketsLeave).toHaveBeenCalledWith(`task:${id('T1')}`);
     });
 
     it('sans serveur attaché : aucune exception', () => {
       const detached = new RealtimeService({} as any);
-      expect(() => detached.evictTaskRoom('T1')).not.toThrow();
+      expect(() => detached.evictTaskRoom(id('T1'))).not.toThrow();
     });
   });
 });

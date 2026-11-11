@@ -11,6 +11,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { CommentsService } from './comments.service';
+import { UuidPipe } from '../common/uuid.pipe';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { AttachmentDto } from './dto/attachment.dto';
 import { RealtimeService } from '../realtime/realtime.service';
@@ -28,7 +29,7 @@ export class CommentsController {
   @Post('tasks/:taskId/comments')
   async createComment(
     @Req() req: any,
-    @Param('taskId') taskId: string,
+    @Param('taskId', UuidPipe) taskId: string,
     @Body() body: CreateCommentDto,
   ) {
     const result = await this.commentsService.createComment(
@@ -63,7 +64,7 @@ export class CommentsController {
    * Liste les commentaires d'une tâche.
    */
   @Get('tasks/:taskId/comments')
-  async listComments(@Req() req: any, @Param('taskId') taskId: string) {
+  async listComments(@Req() req: any, @Param('taskId', UuidPipe) taskId: string) {
     return this.commentsService.listComments(taskId, req.user.id);
   }
 
@@ -72,7 +73,7 @@ export class CommentsController {
    */
   @Delete('comments/:commentId')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async deleteComment(@Req() req: any, @Param('commentId') commentId: string) {
+  async deleteComment(@Req() req: any, @Param('commentId', UuidPipe) commentId: string) {
     const deletedComment = await this.commentsService.deleteComment(commentId, req.user.id);
 
     // Diffuser la suppression en temps réel
@@ -88,7 +89,7 @@ export class CommentsController {
   @Put('comments/:commentId')
   async updateComment(
     @Req() req: any,
-    @Param('commentId') commentId: string,
+    @Param('commentId', UuidPipe) commentId: string,
     @Body() body: CreateCommentDto,
   ) {
     const result = await this.commentsService.updateComment(commentId, req.user.id, body.content);
@@ -118,7 +119,7 @@ export class CommentsController {
   @Post('tasks/:taskId/attachments')
   async createAttachment(
     @Req() req: any,
-    @Param('taskId') taskId: string,
+    @Param('taskId', UuidPipe) taskId: string,
     @Body() body: AttachmentDto,
   ) {
     return this.commentsService.createAttachmentForTask(
@@ -132,13 +133,13 @@ export class CommentsController {
   }
 
   @Get('tasks/:taskId/attachments')
-  async getAttachments(@Req() req: any, @Param('taskId') taskId: string) {
+  async getAttachments(@Req() req: any, @Param('taskId', UuidPipe) taskId: string) {
     return this.commentsService.getAttachmentsForTask(taskId, req.user.id);
   }
 
   @Delete('attachments/:attachmentId')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async deleteAttachment(@Req() req: any, @Param('attachmentId') attachmentId: string) {
+  async deleteAttachment(@Req() req: any, @Param('attachmentId', UuidPipe) attachmentId: string) {
     await this.commentsService.deleteAttachment(attachmentId, req.user.id);
   }
 }

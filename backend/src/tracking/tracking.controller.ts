@@ -1,4 +1,5 @@
 import { Controller, Get, Post, Param, Req } from '@nestjs/common';
+import { UuidPipe } from '../common/uuid.pipe';
 import { TrackingService } from './tracking.service';
 
 @Controller('tracking')
@@ -11,7 +12,7 @@ export class TrackingController {
   }
 
   @Post('start/:taskId')
-  startTracking(@Req() req: any, @Param('taskId') taskId: string) {
+  startTracking(@Req() req: any, @Param('taskId', UuidPipe) taskId: string) {
     return this.trackingService.startTracking(req.user.id, taskId);
   }
 
@@ -26,7 +27,7 @@ export class TrackingController {
   }
 
   @Get('logs/:taskId')
-  getTimeLogsForTask(@Req() req: any, @Param('taskId') taskId: string) {
+  getTimeLogsForTask(@Req() req: any, @Param('taskId', UuidPipe) taskId: string) {
     return this.trackingService.getTimeLogsForTask(req.user.id, taskId);
   }
 }

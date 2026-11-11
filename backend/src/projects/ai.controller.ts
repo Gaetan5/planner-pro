@@ -16,6 +16,8 @@ import { Request } from 'express';
 import { AiService, ResolvedAiAction } from './ai.service';
 import { CopilotService } from './copilot.service';
 import { AiCommandDto } from './dto/ai-command.dto';
+import { AiMediaFieldsDto } from './dto/ai-media-fields.dto';
+import { UuidPipe } from '../common/uuid.pipe';
 import { RealtimeService } from '../realtime/realtime.service';
 import { ProjectsService } from './projects.service';
 import { ExecuteAiActionsDto } from './dto/execute-ai-actions.dto';
@@ -59,10 +61,9 @@ export class AiController {
     @Req() req: AuthenticatedRequest,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     @UploadedFile() file: any,
-    @Body('workspaceId') workspaceId: string,
-    @Body('projectId') projectId?: string,
-    @Body('isMock') isMock?: string,
+    @Body() fields: AiMediaFieldsDto,
   ) {
+    const { workspaceId, projectId, isMock } = fields;
     if (!file) {
       throw new Error('Fichier audio manquant.');
     }
@@ -121,10 +122,9 @@ export class AiController {
     @Req() req: AuthenticatedRequest,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     @UploadedFile() file: any,
-    @Body('workspaceId') workspaceId: string,
-    @Body('projectId') projectId?: string,
-    @Body('isMock') isMock?: string,
+    @Body() fields: AiMediaFieldsDto,
   ) {
+    const { workspaceId, projectId, isMock } = fields;
     if (!file) {
       throw new Error('Fichier image manquant.');
     }
@@ -145,7 +145,7 @@ export class AiController {
   @Get('copilot/alerts')
   async getCopilotAlerts(
     @Req() req: AuthenticatedRequest,
-    @Query('workspaceId') workspaceId: string,
+    @Query('workspaceId', UuidPipe) workspaceId: string,
   ) {
     if (!workspaceId) {
       throw new BadRequestException('workspaceId requis.');
@@ -159,7 +159,7 @@ export class AiController {
   @Get('copilot/briefing')
   async getCopilotBriefing(
     @Req() req: AuthenticatedRequest,
-    @Query('workspaceId') workspaceId: string,
+    @Query('workspaceId', UuidPipe) workspaceId: string,
   ) {
     if (!workspaceId) {
       throw new BadRequestException('workspaceId requis.');

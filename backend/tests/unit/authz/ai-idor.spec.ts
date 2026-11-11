@@ -8,7 +8,7 @@ import { PrismaService } from '../../../src/prisma/prisma.service';
 import { AiService } from '../../../src/projects/ai.service';
 import { ExecuteAiActionsDto } from '../../../src/projects/dto/execute-ai-actions.dto';
 import { ProjectsService } from '../../../src/projects/projects.service';
-import { USERS, W, buildRbacPrisma } from '../../support/rbac-fixture';
+import { USERS, W, buildRbacPrisma, id } from '../../support/rbac-fixture';
 
 /** S15 : l'IA n'opère que sur un workspace dont l'appelant est membre habilité, et sur ses projets. */
 describe('S15 : AiService, contrôle d’accès', () => {
@@ -91,14 +91,14 @@ describe('S15 : AiService, contrôle d’accès', () => {
   });
 
   it('projectId d’un autre workspace : 403', async () => {
-    await expect(service.analyzeCommand(USERS.admin, W, 'PX', 'créer tâche x')).rejects.toThrow(
+    await expect(service.analyzeCommand(USERS.admin, W, id('PX'), 'créer tâche x')).rejects.toThrow(
       ForbiddenException,
     );
     expectNothingRead();
   });
 
   it('projectId sans droit task.write (MEMBER sans rôle projet, CLIENT) : 403', async () => {
-    await expect(service.analyzeCommand(USERS.member, W, 'P1', 'créer')).rejects.toThrow(
+    await expect(service.analyzeCommand(USERS.member, W, id('P1'), 'créer')).rejects.toThrow(
       ForbiddenException,
     );
     expectNothingRead();
@@ -108,7 +108,7 @@ describe('S15 : AiService, contrôle d’accès', () => {
     prisma.task.findMany = jest.fn().mockResolvedValue([]);
     await service.analyzeCommand(USERS.contributor, W, null, 'créer tâche x');
     const where = (prisma.task.findMany as jest.Mock).mock.calls[0][0].where;
-    expect(where.projectId).toEqual({ in: ['P1'] });
+    expect(where.projectId).toEqual({ in: [id('P1')] });
   });
 
   it('executeActions sans projet : la tâche est créée dans un projet accessible, jamais dans P2', async () => {
@@ -117,7 +117,7 @@ describe('S15 : AiService, contrôle d’accès', () => {
       { type: 'CREATE_TASK', taskTitle: 'x' } as any,
     ]);
     expect(projectsService.createTask).toHaveBeenCalledWith(
-      'P1',
+      id('P1'),
       USERS.contributor,
       'x',
       undefined,

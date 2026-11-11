@@ -38,7 +38,7 @@ import { RealtimeService } from '../../src/realtime/realtime.service';
 import { TrackingController } from '../../src/tracking/tracking.controller';
 import { TrackingService } from '../../src/tracking/tracking.service';
 import { STUB_SID, sessionServiceStub } from '../support/session.test-support';
-import { Persona, USERS, W, buildRbacPrisma } from '../support/rbac-fixture';
+import { Persona, USERS, W, buildRbacPrisma, id } from '../support/rbac-fixture';
 import { startHttpTestApp } from './http-test-app';
 
 jest.setTimeout(120_000);
@@ -510,26 +510,44 @@ describe('S12-d : matrice RBAC par route (HTTP)', () => {
         summary: `Livraison ${pid}`,
       });
       const extras: Record<string, Record<string, any>> = {
-        deliveryRecord: { D1: delivery('D1', 'P1'), D2: delivery('D2', 'P2') },
+        deliveryRecord: { D1: delivery(id('D1'), id('P1')), D2: delivery(id('D2'), id('P2')) },
         deliveryChecklistItem: {
-          I1: { id: 'I1', deliveryId: 'D1', delivery: delivery('D1', 'P1') },
-          I2: { id: 'I2', deliveryId: 'D2', delivery: delivery('D2', 'P2') },
+          [id('I1')]: {
+            id: id('I1'),
+            deliveryId: id('D1'),
+            delivery: delivery(id('D1'), id('P1')),
+          },
+          [id('I2')]: {
+            id: id('I2'),
+            deliveryId: id('D2'),
+            delivery: delivery(id('D2'), id('P2')),
+          },
         },
         milestone: {
-          M1: { id: 'M1', projectId: 'P1', project: project('P1') },
-          M2: { id: 'M2', projectId: 'P2', project: project('P2') },
+          [id('M1')]: { id: id('M1'), projectId: id('P1'), project: project(id('P1')) },
+          [id('M2')]: { id: id('M2'), projectId: id('P2'), project: project(id('P2')) },
         },
         deliverable: {
-          DL1: { id: 'DL1', projectId: 'P1', project: project('P1') },
-          DL2: { id: 'DL2', projectId: 'P2', project: project('P2') },
+          [id('DL1')]: { id: id('DL1'), projectId: id('P1'), project: project(id('P1')) },
+          [id('DL2')]: { id: id('DL2'), projectId: id('P2'), project: project(id('P2')) },
         },
         timeBlock: {
-          TB1: { id: 'TB1', taskId: 'T1', startTime: new Date(), endTime: new Date() },
-          TB2: { id: 'TB2', taskId: 'T2', startTime: new Date(), endTime: new Date() },
+          [id('TB1')]: {
+            id: id('TB1'),
+            taskId: id('T1'),
+            startTime: new Date(),
+            endTime: new Date(),
+          },
+          [id('TB2')]: {
+            id: id('TB2'),
+            taskId: id('T2'),
+            startTime: new Date(),
+            endTime: new Date(),
+          },
         },
         sprint: {
-          S1: {
-            id: 'S1',
+          [id('S1')]: {
+            id: id('S1'),
             workspaceId: W,
             name: 'S',
             status: 'PLANNED',
@@ -538,52 +556,69 @@ describe('S12-d : matrice RBAC par route (HTTP)', () => {
           },
         },
         integration: {
-          INT1: { id: 'INT1', workspaceId: W, type: 'SLACK', name: 'Canal', active: true },
+          [id('INT1')]: {
+            id: id('INT1'),
+            workspaceId: W,
+            type: 'SLACK',
+            name: 'Canal',
+            active: true,
+          },
         },
         comment: {
-          C1: {
-            id: 'C1',
-            taskId: 'T1',
+          [id('C1')]: {
+            id: id('C1'),
+            taskId: id('T1'),
             userId: USERS.contributor,
             content: 'c1',
-            task: { ...base.data.tasks[0], project: project('P1') },
+            task: { ...base.data.tasks[0], project: project(id('P1')) },
           },
-          C2: {
-            id: 'C2',
-            taskId: 'T2',
+          [id('C2')]: {
+            id: id('C2'),
+            taskId: id('T2'),
             userId: USERS.owner,
             content: 'Tâche 2 secret',
-            task: { ...base.data.tasks[1], project: project('P2') },
+            task: { ...base.data.tasks[1], project: project(id('P2')) },
           },
         },
         attachment: {
-          A1: {
-            id: 'A1',
-            taskId: 'T1',
+          [id('A1')]: {
+            id: id('A1'),
+            taskId: id('T1'),
             uploadedById: USERS.contributor,
-            task: { ...base.data.tasks[0], project: project('P1') },
+            task: { ...base.data.tasks[0], project: project(id('P1')) },
           },
-          A2: {
-            id: 'A2',
-            taskId: 'T2',
+          [id('A2')]: {
+            id: id('A2'),
+            taskId: id('T2'),
             uploadedById: USERS.owner,
-            task: { ...base.data.tasks[1], project: project('P2') },
+            task: { ...base.data.tasks[1], project: project(id('P2')) },
           },
         },
       };
       // Tâche supplémentaire de P2 (cible de dépendance)
       base.data.tasks.push(
-        { id: 'T2b', title: 'Tâche 2b', projectId: 'P2', userId: USERS.owner, deletedAt: null },
+        {
+          id: id('T2b'),
+          title: 'Tâche 2b',
+          projectId: id('P2'),
+          userId: USERS.owner,
+          deletedAt: null,
+        },
         {
           id: '2f1b3c4d-1111-4222-8333-444455557777',
           title: 'Tâche 2 uuid',
-          projectId: 'P2',
+          projectId: id('P2'),
           userId: USERS.owner,
           deletedAt: null,
         },
       );
       extras.taskDependency = {
-        '*': { id: 'dep1', taskId: 'T2', dependsOnTaskId: 'T2b', task: { deletedAt: null } },
+        '*': {
+          id: 'dep1',
+          taskId: id('T2'),
+          dependsOnTaskId: id('T2b'),
+          task: { deletedAt: null },
+        },
       };
       const WRITE = /^(create|createMany|update|updateMany|upsert|delete|deleteMany)$/;
       const model = (name: string) =>
@@ -684,6 +719,19 @@ describe('S12-d : matrice RBAC par route (HTTP)', () => {
 
     const personas = Object.keys(USERS) as Persona[];
     const VARIANT = ' [P1]';
+    /** Les identifiants logiques de la table (P2, T2...) deviennent des UUID : l'URL l'exige (S23). */
+    const LOGICAL_ID =
+      /^(?:P[123X]|T[12X]b?|S1|TB[12]|INT1|[DI][12]|DL[12]|[CM][12]|A[12]|L1|ws-[12])$/;
+    const toUuid = (value: any): any =>
+      typeof value === 'string'
+        ? LOGICAL_ID.test(value)
+          ? id(value)
+          : value
+        : Array.isArray(value)
+          ? value.map(toUuid)
+          : value && typeof value === 'object'
+            ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, toUuid(v)]))
+            : value;
     const tableRow = (key: string): Row =>
       key.endsWith(VARIANT) ? p1Variant(TABLE[key.slice(0, -VARIANT.length)]) : TABLE[key];
     const keys = [
@@ -697,7 +745,9 @@ describe('S12-d : matrice RBAC par route (HTTP)', () => {
     async function call(key: string, persona: Persona) {
       const row = tableRow(key);
       const [method, template] = key.replace(VARIANT, '').split(' ');
-      const path = template.replace(/:([A-Za-z]+)/g, (_m, name) => row.params?.[name] ?? name);
+      const path = template.replace(/:([A-Za-z]+)/g, (_m, name) =>
+        toUuid(row.params?.[name] ?? name),
+      );
       const url = `${baseUrl}${path}${row.query ? `?${row.query}` : ''}`;
       const headers: Record<string, string> = { Authorization: `Bearer ${tokens[persona]}` };
       let body: BodyInit | undefined;
@@ -708,7 +758,7 @@ describe('S12-d : matrice RBAC par route (HTTP)', () => {
         body = form;
       } else if (row.body !== undefined) {
         headers['Content-Type'] = 'application/json';
-        body = JSON.stringify(row.body);
+        body = JSON.stringify(toUuid(row.body));
       }
       writes.length = 0;
       const res = await fetch(url, { method, headers, body });

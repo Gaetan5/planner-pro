@@ -15,6 +15,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { ScimService } from './scim.service';
+import { UuidPipe } from '../../common/uuid.pipe';
 import { ScimEndpoint, ScimExceptionFilter } from './scim-http';
 import { Public } from '../public.decorator';
 import { ForbiddenInImpersonation } from '../forbidden-in-impersonation.decorator';
@@ -109,7 +110,7 @@ export class ScimController {
   // --- Endpoints de gestion des clés API SCIM pour les Admins de l'espace ---
   @Get('workspaces/:workspaceId/scim/keys')
   async listApiKeys(
-    @Param('workspaceId') workspaceId: string,
+    @Param('workspaceId', UuidPipe) workspaceId: string,
     @Req() req: AuthenticatedUserRequest,
   ) {
     return this.scimService.listApiKeys(workspaceId, req.user.id);
@@ -117,7 +118,7 @@ export class ScimController {
   @Post('workspaces/:workspaceId/scim/keys')
   @ForbiddenInImpersonation()
   async createApiKey(
-    @Param('workspaceId') workspaceId: string,
+    @Param('workspaceId', UuidPipe) workspaceId: string,
     @Body() body: CreateScimKeyDto,
     @Req() req: AuthenticatedUserRequest,
   ) {
@@ -125,8 +126,8 @@ export class ScimController {
   }
   @Delete('workspaces/:workspaceId/scim/keys/:keyId')
   async revokeApiKey(
-    @Param('workspaceId') workspaceId: string,
-    @Param('keyId') keyId: string,
+    @Param('workspaceId', UuidPipe) workspaceId: string,
+    @Param('keyId', UuidPipe) keyId: string,
     @Req() req: AuthenticatedUserRequest,
   ) {
     return this.scimService.revokeApiKey(workspaceId, req.user.id, keyId);

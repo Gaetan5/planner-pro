@@ -24,7 +24,7 @@ import { CalendarSyncService } from '../../../src/projects/calendar-sync.service
 import { ProactiveSchedulerService } from '../../../src/projects/proactive-scheduler.service';
 import { RealtimeService } from '../../../src/realtime/realtime.service';
 import { TrackingGateway } from '../../../src/tracking/tracking.gateway';
-import { USERS, W, buildRbacPrisma } from '../../support/rbac-fixture';
+import { USERS, W, buildRbacPrisma, id } from '../../support/rbac-fixture';
 
 /**
  * S12 : tests d'abus. Fixture : workspace W, projets P1 et P2, un CLIENT/COMMENTER/CONTRIBUTOR de
@@ -101,11 +101,11 @@ describe('S12 : cloisonnement par projet dans les services', () => {
     });
 
     it.each([
-      ['owner', ['P1', 'P2']],
-      ['admin', ['P1', 'P2']],
-      ['client', ['P1']],
-      ['commenter', ['P1']],
-      ['contributor', ['P1']],
+      ['owner', [id('P1'), id('P2')]],
+      ['admin', [id('P1'), id('P2')]],
+      ['client', [id('P1')]],
+      ['commenter', [id('P1')]],
+      ['contributor', [id('P1')]],
       ['member', []],
       ['viewer', []],
     ] as const)('%s ne reçoit que %j', async (persona, expected) => {
@@ -118,15 +118,15 @@ describe('S12 : cloisonnement par projet dans les services', () => {
     let service: CommentsService;
     beforeEach(async () => {
       prisma.comment = {
-        findFirst: jest.fn().mockResolvedValue({ id: 'C0', taskId: 'T1' }),
+        findFirst: jest.fn().mockResolvedValue({ id: 'C0', taskId: id('T1') }),
         findMany: jest.fn().mockResolvedValue([]),
         findUnique: jest.fn(async ({ where }: any) =>
           where.id === 'C1'
             ? {
                 id: 'C1',
-                taskId: 'T1',
+                taskId: id('T1'),
                 userId: USERS.contributor,
-                task: { projectId: 'P1', project: { id: 'P1', workspaceId: W } },
+                task: { projectId: id('P1'), project: { id: id('P1'), workspaceId: W } },
               }
             : null,
         ),
@@ -136,7 +136,7 @@ describe('S12 : cloisonnement par projet dans les services', () => {
           attachments: [],
           user: { id: data.userId, name: 'N', email: 'n@x.com' },
         })),
-        delete: jest.fn(async ({ where }: any) => ({ id: where.id, taskId: 'T1' })),
+        delete: jest.fn(async ({ where }: any) => ({ id: where.id, taskId: id('T1') })),
         update: jest.fn(),
       };
       prisma.attachment = {
@@ -146,9 +146,9 @@ describe('S12 : cloisonnement par projet dans les services', () => {
           where.id === 'A1'
             ? {
                 id: 'A1',
-                taskId: 'T1',
+                taskId: id('T1'),
                 uploadedById: USERS.contributor,
-                task: { projectId: 'P1', project: { id: 'P1', workspaceId: W } },
+                task: { projectId: id('P1'), project: { id: id('P1'), workspaceId: W } },
               }
             : null,
         ),
@@ -164,41 +164,41 @@ describe('S12 : cloisonnement par projet dans les services', () => {
     });
 
     it.each([
-      ['viewer', 'T1'],
-      ['member', 'T1'],
-      ['client', 'T1'],
-      ['commenter', 'T2'],
-      ['contributor', 'T2'],
+      ['viewer', id('T1')],
+      ['member', id('T1')],
+      ['client', id('T1')],
+      ['commenter', id('T2')],
+      ['contributor', id('T2')],
     ] as const)('createComment : %s sur %s est refusé', async (persona, taskId) => {
       await refused(service.createComment(taskId, USERS[persona], 'Bonjour'));
       expect(prisma.comment.create).not.toHaveBeenCalled();
     });
 
     it.each([
-      ['commenter', 'T1'],
-      ['contributor', 'T1'],
-      ['admin', 'T2'],
+      ['commenter', id('T1')],
+      ['contributor', id('T1')],
+      ['admin', id('T2')],
     ] as const)('createComment : %s sur %s est accepté', async (persona, taskId) => {
       await expect(service.createComment(taskId, USERS[persona], 'Bonjour')).resolves.toBeDefined();
     });
 
     it.each([
-      ['viewer', 'T1'],
-      ['member', 'T1'],
-      ['client', 'T2'],
-      ['commenter', 'T2'],
+      ['viewer', id('T1')],
+      ['member', id('T1')],
+      ['client', id('T2')],
+      ['commenter', id('T2')],
     ] as const)('listComments : %s sur %s est refusé', async (persona, taskId) => {
       await refused(service.listComments(taskId, USERS[persona]));
     });
 
     it('listComments : un CLIENT lit les commentaires de son projet', async () => {
-      await expect(service.listComments('T1', USERS.client)).resolves.toEqual([]);
+      await expect(service.listComments(id('T1'), USERS.client)).resolves.toEqual([]);
     });
 
     it.each([
-      ['client', 'T1'],
-      ['viewer', 'T1'],
-      ['commenter', 'T2'],
+      ['client', id('T1')],
+      ['viewer', id('T1')],
+      ['commenter', id('T2')],
     ] as const)('createAttachmentForTask : %s sur %s est refusé', async (persona, taskId) => {
       await refused(
         service.createAttachmentForTask(taskId, USERS[persona], 'f.png', 'data:x', 'image/png', 1),
@@ -207,8 +207,8 @@ describe('S12 : cloisonnement par projet dans les services', () => {
     });
 
     it.each([
-      ['viewer', 'T1'],
-      ['client', 'T2'],
+      ['viewer', id('T1')],
+      ['client', id('T2')],
     ] as const)('getAttachmentsForTask : %s sur %s est refusé', async (persona, taskId) => {
       await refused(service.getAttachmentsForTask(taskId, USERS[persona]));
     });
@@ -286,7 +286,7 @@ describe('S12 : cloisonnement par projet dans les services', () => {
     it('listSprints n’expose que les tâches des projets accessibles', async () => {
       await service.listSprints(W, USERS.contributor);
       const args = prisma.sprint.findMany.mock.calls[0][0];
-      expect(args.include.tasks.where.projectId).toEqual({ in: ['P1'] });
+      expect(args.include.tasks.where.projectId).toEqual({ in: [id('P1')] });
     });
   });
 
@@ -303,24 +303,24 @@ describe('S12 : cloisonnement par projet dans les services', () => {
     });
 
     it.each([
-      ['client', 'T1'],
-      ['commenter', 'T1'],
-      ['viewer', 'T1'],
-      ['member', 'T1'],
-      ['contributor', 'T2'],
+      ['client', id('T1')],
+      ['commenter', id('T1')],
+      ['viewer', id('T1')],
+      ['member', id('T1')],
+      ['contributor', id('T2')],
     ] as const)('startTracking : %s sur %s est refusé', async (persona, taskId) => {
       await expect(service.startTracking(USERS[persona], taskId)).rejects.toThrow();
       expect(prisma.timeLog.create).not.toHaveBeenCalled();
     });
 
     it('startTracking : un CONTRIBUTOR de P1 démarre un minuteur sur T1', async () => {
-      await expect(service.startTracking(USERS.contributor, 'T1')).resolves.toBeDefined();
+      await expect(service.startTracking(USERS.contributor, id('T1'))).resolves.toBeDefined();
     });
 
     it.each([
-      ['client', 'T1'],
-      ['viewer', 'T1'],
-      ['contributor', 'T2'],
+      ['client', id('T1')],
+      ['viewer', id('T1')],
+      ['contributor', id('T2')],
     ] as const)('getTimeLogsForTask : %s sur %s est refusé', async (persona, taskId) => {
       await expect(service.getTimeLogsForTask(USERS[persona], taskId)).rejects.toThrow();
       expect(prisma.timeLog.findMany).not.toHaveBeenCalled();
@@ -353,7 +353,7 @@ describe('S12 : cloisonnement par projet dans les services', () => {
         .map(([args]: any) => args.where);
       expect(queried.length).toBeGreaterThan(0);
       for (const where of queried) {
-        expect(where.id).toEqual({ in: ['P1'] });
+        expect(where.id).toEqual({ in: [id('P1')] });
       }
     });
   });
@@ -380,7 +380,7 @@ describe('S12 : cloisonnement par projet dans les services', () => {
     });
 
     it.each([
-      ['contributor', ['P1']],
+      ['contributor', [id('P1')]],
       ['member', []],
     ] as const)('autoScheduleWorkspace : %s ne replanifie que %j', async (persona, expected) => {
       await service.autoScheduleWorkspace(W, USERS[persona]);
@@ -394,10 +394,12 @@ describe('S12 : cloisonnement par projet dans les services', () => {
 
     it('les conflits de calendrier se bornent aux projets accessibles', async () => {
       calendar.detectCalendarConflicts.mockClear();
-      (prisma.task as any).findMany.mockResolvedValue([{ id: 'T1', assignees: [], project: {} }]);
+      (prisma.task as any).findMany.mockResolvedValue([
+        { id: id('T1'), assignees: [], project: {} },
+      ]);
       prisma.timeBlock.count.mockResolvedValue(0);
       await service.autoScheduleWorkspace(W, USERS.contributor);
-      expect(calendar.detectCalendarConflicts).toHaveBeenCalledWith(W, ['P1']);
+      expect(calendar.detectCalendarConflicts).toHaveBeenCalledWith(W, [id('P1')]);
     });
   });
 
@@ -468,7 +470,7 @@ describe('S12 : cloisonnement par projet dans les services', () => {
       (prisma.task as any).findMany = jest.fn(async () =>
         Array.from({ length: 6 }, (_, i) => ({
           id: `OT${i}`,
-          projectId: 'P2',
+          projectId: id('P2'),
           priority: 'MEDIUM',
           estimatedMinutes: 60,
           assignees: [],
@@ -522,7 +524,7 @@ describe('S12 : cloisonnement par projet dans les services', () => {
       'rapport de P2 pour %s : 403, aucune donnée lue',
       async (persona) => {
         (prisma.project as any).findFirst.mockClear();
-        await expect(service.getDeliveryReport('P2', USERS[persona])).rejects.toThrow(
+        await expect(service.getDeliveryReport(id('P2'), USERS[persona])).rejects.toThrow(
           ForbiddenException,
         );
       },
@@ -532,7 +534,7 @@ describe('S12 : cloisonnement par projet dans les services', () => {
       prisma.deliveryChecklistItem = {
         findFirst: jest.fn().mockResolvedValue({
           id: 'I2',
-          delivery: { project: { id: 'P2', workspaceId: W } },
+          delivery: { project: { id: id('P2'), workspaceId: W } },
         }),
         update: jest.fn(),
       };
@@ -546,7 +548,7 @@ describe('S12 : cloisonnement par projet dans les services', () => {
   it('un utilisateur inconnu du workspace ne voit pas P1 par un chemin détourné (404 jamais 200)', async () => {
     const module = await compile([]);
     const policy = module.get(PolicyService);
-    await expect(policy.assertTask('T1', USERS.outsider, 'task.read')).rejects.toThrow(
+    await expect(policy.assertTask(id('T1'), USERS.outsider, 'task.read')).rejects.toThrow(
       ForbiddenException,
     );
     await expect(policy.assertTask('T404', USERS.owner, 'task.read')).rejects.toThrow(

@@ -66,6 +66,8 @@ services:
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:?Set GITHUB_CLIENT_ID in .env.production}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:?Set GITHUB_CLIENT_SECRET in .env.production}
       CORS_ORIGINS: ${CORS_ORIGINS:?Set CORS_ORIGINS in .env.production}
+      # Reverse proxies devant le backend (S24) : IP réelle du client pour la limitation de débit
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:?Set TRUST_PROXY_HOPS in .env.production (1 = un seul Nginx d'hôte)}
       FRONTEND_URL: ${FRONTEND_URL:?Set FRONTEND_URL in .env.production}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}

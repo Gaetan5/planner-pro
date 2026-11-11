@@ -5,6 +5,8 @@ import { APP_GUARD } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import * as cookieParser from 'cookie-parser';
 import { originCheckMiddleware } from '../../src/auth/origin-guard';
+import { registerBodyParsers } from '../../src/common/body-parsers';
+import { configureTrustProxy } from '../../src/common/trust-proxy';
 import { noStoreMiddleware } from '../../src/common/no-store.middleware';
 import { FeatureFlagGuard } from '../../src/config/feature-flag.guard';
 import { JwtAuthGuard } from '../../src/auth/jwt.guard';
@@ -16,6 +18,7 @@ import { PrismaService } from '../../src/prisma/prisma.service';
  */
 export async function startHttpTestApp(
   metadata: ModuleMetadata,
+  options: { trustProxyHops?: number } = {},
 ): Promise<{ app: INestApplication; baseUrl: string }> {
   // Comme AppModule (A1) : drapeau de fonctionnalité puis authentification par défaut, dès que
   // le test fournit JwtAuthGuard (donc SessionService).
@@ -49,7 +52,9 @@ export async function startHttpTestApp(
     logger: false,
     rawBody: true, // comme main.ts (S21)
   });
-  app.useBodyParser('json', { type: ['application/json', 'application/scim+json'] });
+  // Comme main.ts (S24) : sans reverse proxy simulé, X-Forwarded-For est ignoré
+  configureTrustProxy(app, { TRUST_PROXY_HOPS: String(options.trustProxyHops ?? 0) });
+  registerBodyParsers(app); // comme main.ts (S23)
   app.use(noStoreMiddleware()); // comme main.ts (O16)
   app.use(cookieParser());
   app.use(originCheckMiddleware());

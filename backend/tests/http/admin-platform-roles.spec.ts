@@ -25,7 +25,7 @@ describe('S18.1 / S18.3 : console admin (HTTP)', () => {
     updateUserRole: jest.fn().mockResolvedValue({ message: 'ok' }),
     impersonateUser: jest.fn().mockResolvedValue({
       session: { accessToken: 'jeton', accessMaxAgeSeconds: 900, sid: 'imp-sid' },
-      user: { id: 'u-2' },
+      user: { id: '00000000-0000-4000-8000-0000000000c2' },
     }),
     getOverview: jest.fn().mockResolvedValue({ totals: {} }),
     revokeUserSessions: jest.fn().mockResolvedValue({ revokedCount: 1 }),
@@ -88,30 +88,57 @@ describe('S18.1 / S18.3 : console admin (HTTP)', () => {
 
   describe('S18.1 : rôles de plateforme', () => {
     it('PLATFORM_ADMIN qui modifie un rôle : 403, service jamais appelé', async () => {
-      const res = await call('padmin-1', 'PATCH', '/admin/users/u-9/role', { role: 'SUPER_ADMIN' });
+      const res = await call(
+        'padmin-1',
+        'PATCH',
+        '/admin/users/00000000-0000-4000-8000-0000000000c9/role',
+        { role: 'SUPER_ADMIN' },
+      );
       expect(res.status).toBe(403);
       expect(adminService.updateUserRole).not.toHaveBeenCalled();
     });
 
     it('PLATFORM_ADMIN qui impersonne : 403, service jamais appelé', async () => {
-      const res = await call('padmin-1', 'POST', '/admin/users/u-2/impersonate', {
-        reason: 'Ticket support 4521, reproduction du bug',
-      });
+      const res = await call(
+        'padmin-1',
+        'POST',
+        '/admin/users/00000000-0000-4000-8000-0000000000c2/impersonate',
+        {
+          reason: 'Ticket support 4521, reproduction du bug',
+        },
+      );
       expect(res.status).toBe(403);
       expect(adminService.impersonateUser).not.toHaveBeenCalled();
     });
 
     it('SUPER_ADMIN : modification de rôle servie', async () => {
-      const res = await call('super-1', 'PATCH', '/admin/users/u-9/role', {
-        role: 'PLATFORM_ADMIN',
-      });
+      const res = await call(
+        'super-1',
+        'PATCH',
+        '/admin/users/00000000-0000-4000-8000-0000000000c9/role',
+        {
+          role: 'PLATFORM_ADMIN',
+        },
+      );
       expect(res.status).toBe(200);
-      expect(adminService.updateUserRole).toHaveBeenCalledWith('super-1', 'u-9', 'PLATFORM_ADMIN');
+      expect(adminService.updateUserRole).toHaveBeenCalledWith(
+        'super-1',
+        '00000000-0000-4000-8000-0000000000c9',
+        'PLATFORM_ADMIN',
+      );
     });
 
     it('PLATFORM_ADMIN : lecture (overview) et révocation de sessions restent permises', async () => {
       expect((await call('padmin-1', 'GET', '/admin/overview')).status).toBe(200);
-      expect((await call('padmin-1', 'POST', '/admin/users/u-2/revoke-sessions')).status).toBe(201);
+      expect(
+        (
+          await call(
+            'padmin-1',
+            'POST',
+            '/admin/users/00000000-0000-4000-8000-0000000000c2/revoke-sessions',
+          )
+        ).status,
+      ).toBe(201);
     });
 
     it('utilisateur sans rôle de plateforme : 403', async () => {
@@ -142,7 +169,12 @@ describe('S18.1 / S18.3 : console admin (HTTP)', () => {
     });
 
     it('SUPER_ADMIN sans MFA : même la modification de rôle est refusée', async () => {
-      const res = await call('super-nomfa', 'PATCH', '/admin/users/u-9/role', { role: null });
+      const res = await call(
+        'super-nomfa',
+        'PATCH',
+        '/admin/users/00000000-0000-4000-8000-0000000000c9/role',
+        { role: null },
+      );
       expect(res.status).toBe(403);
       expect(adminService.updateUserRole).not.toHaveBeenCalled();
     });
@@ -150,32 +182,54 @@ describe('S18.1 / S18.3 : console admin (HTTP)', () => {
 
   describe('S18.1 / S18.3 : motif d’impersonation', () => {
     it('sans motif : 400', async () => {
-      const res = await call('super-1', 'POST', '/admin/users/u-2/impersonate', {});
+      const res = await call(
+        'super-1',
+        'POST',
+        '/admin/users/00000000-0000-4000-8000-0000000000c2/impersonate',
+        {},
+      );
       expect(res.status).toBe(400);
       expect(adminService.impersonateUser).not.toHaveBeenCalled();
     });
 
     it('motif trop court (< 10 caractères) ou trop long (> 500) : 400', async () => {
       expect(
-        (await call('super-1', 'POST', '/admin/users/u-2/impersonate', { reason: 'court' })).status,
+        (
+          await call(
+            'super-1',
+            'POST',
+            '/admin/users/00000000-0000-4000-8000-0000000000c2/impersonate',
+            { reason: 'court' },
+          )
+        ).status,
       ).toBe(400);
       expect(
         (
-          await call('super-1', 'POST', '/admin/users/u-2/impersonate', {
-            reason: 'x'.repeat(501),
-          })
+          await call(
+            'super-1',
+            'POST',
+            '/admin/users/00000000-0000-4000-8000-0000000000c2/impersonate',
+            {
+              reason: 'x'.repeat(501),
+            },
+          )
         ).status,
       ).toBe(400);
     });
 
     it('motif valide : servi, avec le motif et la session de l’administrateur transmis', async () => {
-      const res = await call('super-1', 'POST', '/admin/users/u-2/impersonate', {
-        reason: 'Ticket support 4521, reproduction du bug',
-      });
+      const res = await call(
+        'super-1',
+        'POST',
+        '/admin/users/00000000-0000-4000-8000-0000000000c2/impersonate',
+        {
+          reason: 'Ticket support 4521, reproduction du bug',
+        },
+      );
       expect(res.status).toBe(201);
       expect(adminService.impersonateUser).toHaveBeenCalledWith(
         'super-1',
-        'u-2',
+        '00000000-0000-4000-8000-0000000000c2',
         'Ticket support 4521, reproduction du bug',
         STUB_SID,
       );

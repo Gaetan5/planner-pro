@@ -9,7 +9,7 @@ import { CommentsService } from '../../../src/projects/comments.service';
 import { IntegrationService } from '../../../src/projects/integration.service';
 import { ProjectPermissionsService } from '../../../src/projects/project-permissions.service';
 import { TasksService } from '../../../src/projects/tasks.service';
-import { USERS, W, buildRbacPrisma } from '../../support/rbac-fixture';
+import { USERS, W, buildRbacPrisma, id } from '../../support/rbac-fixture';
 
 /** S12-c : mentions et assignations ne notifient que des personnes ayant accès au projet. */
 describe('S12-c : notifications limitées aux personnes autorisées', () => {
@@ -63,21 +63,25 @@ describe('S12-c : notifications limitées aux personnes autorisées', () => {
 
     it('mention d’un utilisateur sans rôle sur le projet : ni notification ni identifiant renvoyé', async () => {
       // admin commente T2 (P2) et mentionne « client » (CLIENT de P1 seulement) et « viewer »
-      const result = await service.createComment('T2', USERS.admin, 'Bonjour @client et @viewer');
+      const result = await service.createComment(
+        id('T2'),
+        USERS.admin,
+        'Bonjour @client et @viewer',
+      );
       expect(result.mentionedUserIds).toEqual([]);
       expect(createNotification).not.toHaveBeenCalled();
     });
 
     it('mention d’un COMMENTER du projet : notifié', async () => {
-      const result = await service.createComment('T1', USERS.admin, 'Salut @commenter');
+      const result = await service.createComment(id('T1'), USERS.admin, 'Salut @commenter');
       expect(result.mentionedUserIds).toEqual([USERS.commenter]);
       expect(createNotification).toHaveBeenCalledWith(
-        expect.objectContaining({ userId: USERS.commenter, type: 'MENTION', projectId: 'P1' }),
+        expect.objectContaining({ userId: USERS.commenter, type: 'MENTION', projectId: id('P1') }),
       );
     });
 
     it('une mention non autorisée ne masque pas un homonyme autorisé', async () => {
-      const result = await service.createComment('T1', USERS.admin, '@commenter @viewer');
+      const result = await service.createComment(id('T1'), USERS.admin, '@commenter @viewer');
       expect(result.mentionedUserIds).toEqual([USERS.commenter]);
     });
   });
@@ -94,9 +98,9 @@ describe('S12-c : notifications limitées aux personnes autorisées', () => {
         findUnique: jest.fn().mockResolvedValue({ name: 'Admin', email: 'a@x.com' }),
       };
       prisma.task.findUnique = jest.fn().mockResolvedValue({
-        id: 'T1',
+        id: id('T1'),
         title: 'Tâche 1',
-        projectId: 'P1',
+        projectId: id('P1'),
         deletedAt: null,
         createdAt: new Date('2026-06-01T00:00:00Z'),
         updatedAt: new Date('2026-06-01T00:00:00Z'),
@@ -113,8 +117,8 @@ describe('S12-c : notifications limitées aux personnes autorisées', () => {
 
     it('assigner un membre du workspace sans rôle sur le projet : ignoré, aucune notification', async () => {
       await service.replaceTaskAssignees(
-        'T1',
-        'P1',
+        id('T1'),
+        id('P1'),
         [USERS.member, USERS.viewer, USERS.outsider],
         USERS.admin,
       );
@@ -124,13 +128,13 @@ describe('S12-c : notifications limitées aux personnes autorisées', () => {
 
     it('assigner un détenteur d’un rôle sur le projet : assigné et notifié', async () => {
       await service.replaceTaskAssignees(
-        'T1',
-        'P1',
+        id('T1'),
+        id('P1'),
         [USERS.contributor, USERS.member],
         USERS.admin,
       );
       expect(prisma.taskAssignee.createMany).toHaveBeenCalledWith(
-        expect.objectContaining({ data: [{ taskId: 'T1', userId: USERS.contributor }] }),
+        expect.objectContaining({ data: [{ taskId: id('T1'), userId: USERS.contributor }] }),
       );
       expect(createNotification).toHaveBeenCalledTimes(1);
       expect(createNotification).toHaveBeenCalledWith(
@@ -143,7 +147,7 @@ describe('S12-c : notifications limitées aux personnes autorisées', () => {
     it('ne garde que les utilisateurs ayant l’action, dédoublonnés', async () => {
       const policy = new PolicyService(prisma as unknown as PrismaService);
       const ids = await policy.filterUsersWithProjectAction(
-        'P1',
+        id('P1'),
         [USERS.client, USERS.client, USERS.member, USERS.admin, USERS.deprovisioned, 'inconnu'],
         'task.read',
       );
@@ -153,7 +157,7 @@ describe('S12-c : notifications limitées aux personnes autorisées', () => {
       const policy = new PolicyService(prisma as unknown as PrismaService);
       expect(
         await policy.filterUsersWithProjectAction(
-          'P1',
+          id('P1'),
           [USERS.client, USERS.contributor],
           'task.write',
         ),

@@ -80,6 +80,27 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return Number(results?.[0]?.[1] ?? 0);
   }
 
+  /**
+   * Compteur à fenêtre fixe pour la limitation de débit (S24) : incrémente et, à la création de la
+   * clé, fixe son TTL en millisecondes, le tout de façon atomique (script Lua). Renvoie le nombre
+   * d'appels de la fenêtre et le temps restant avant son expiration.
+   */
+  async incrementWindow(
+    key: string,
+    ttlMilliseconds: number,
+  ): Promise<{ hits: number; ttlMilliseconds: number }> {
+    const [hits, remaining] = (await this.redisClient.eval(
+      `local hits = redis.call('INCR', KEYS[1])
+       local ttl = redis.call('PTTL', KEYS[1])
+       if ttl < 0 then redis.call('PEXPIRE', KEYS[1], ARGV[1]); ttl = tonumber(ARGV[1]) end
+       return {hits, ttl}`,
+      1,
+      key,
+      String(Math.max(1, Math.floor(ttlMilliseconds))),
+    )) as [number, number];
+    return { hits: Number(hits), ttlMilliseconds: Number(remaining) };
+  }
+
   async ping(): Promise<string> {
     return this.redisClient.ping();
   }

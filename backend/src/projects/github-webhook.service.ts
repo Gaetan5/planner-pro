@@ -1,5 +1,7 @@
 import {
   BadRequestException,
+  HttpException,
+  HttpStatus,
   Inject,
   Injectable,
   Logger,
@@ -15,7 +17,12 @@ import {
   extractTaskIdsFromText,
   generateWebhookSecret,
   verifyGitHubSignature,
+  WEBHOOK_FAILURE_WINDOW_SECONDS,
+  WEBHOOK_FAILURES_PER_MINUTE,
+  webhookFailureKey,
 } from './github-webhook.util';
+
+export { WEBHOOK_FAILURES_PER_MINUTE };
 import { TasksService } from './tasks.service';
 import { ProjectPermissionsService } from './project-permissions.service';
 
@@ -61,7 +68,43 @@ export class GitHubWebhookService {
     rawBody: Buffer | undefined,
     signature: string | undefined,
     deliveryId: string | undefined,
-    payload: unknown,
+    clientIp?: string,
+  ): Promise<string[]> {
+    try {
+      return await this.authenticateAndProcess(projectId, rawBody, signature, deliveryId);
+    } catch (error) {
+      if (error instanceof UnauthorizedException) await this.registerFailure(clientIp, projectId);
+      throw error;
+    }
+  }
+
+  /**
+   * Compte un refus pour l'adresse appelante ; au-delà de `WEBHOOK_FAILURES_PER_MINUTE` par minute,
+   * les refus suivants deviennent des 429. Au mieux : Redis indisponible ne change pas la réponse.
+   */
+  private async registerFailure(clientIp: string | undefined, projectId: string): Promise<void> {
+    if (!clientIp) return;
+    let failures: number;
+    try {
+      failures = await this.withRedisTimeout(() =>
+        this.redis.incrementWithTtl(
+          webhookFailureKey(clientIp, projectId),
+          WEBHOOK_FAILURE_WINDOW_SECONDS,
+        ),
+      );
+    } catch {
+      return;
+    }
+    if (failures > WEBHOOK_FAILURES_PER_MINUTE) {
+      throw new HttpException('Trop de requêtes refusées.', HttpStatus.TOO_MANY_REQUESTS);
+    }
+  }
+
+  private async authenticateAndProcess(
+    projectId: string,
+    rawBody: Buffer | undefined,
+    signature: string | undefined,
+    deliveryId: string | undefined,
   ): Promise<string[]> {
     // Seule lecture du secret chiffré : l'omission globale (PRISMA_OMIT) est levée explicitement
     const stored = await this.prisma.project.findFirst({
@@ -79,6 +122,14 @@ export class GitHubWebhookService {
     }
     if (!verifyGitHubSignature(secret, rawBody, signature)) throw this.unauthorized();
 
+    // Le JSON n'est analysé qu'une fois la signature vérifiée sur le corps brut (r44-m1) : un corps
+    // refusé n'est jamais parsé
+    let payload: unknown;
+    try {
+      payload = JSON.parse((rawBody as Buffer).toString('utf8'));
+    } catch {
+      throw new BadRequestException('Corps JSON invalide.');
+    }
     const body = (payload && typeof payload === 'object' ? payload : {}) as GitHubPayload;
     const fullName = body.repository?.full_name;
     if (

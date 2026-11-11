@@ -10,9 +10,11 @@ import {
   Req,
   Query,
   NotFoundException,
+  BadRequestException,
   ForbiddenException,
 } from '@nestjs/common';
 import { ForbiddenInImpersonation } from '../auth/forbidden-in-impersonation.decorator';
+import { OptionalUuidPipe, SprintOrBacklogPipe, UuidPipe, enumPipe } from '../common/uuid.pipe';
 import { DeliverableStatus } from '@prisma/client';
 import { ProjectsService } from './projects.service';
 import { SprintService } from './sprint.service';
@@ -38,6 +40,8 @@ import { UpdateDeliveryStatusDto } from './dto/update-delivery-status.dto';
 import { CreateSprintDto } from './dto/create-sprint.dto';
 import { UpdateSprintDto } from './dto/update-sprint.dto';
 import { AssociateTasksDto } from './dto/associate-tasks.dto';
+import { CalendarOAuthCallbackDto } from './dto/oauth-callback.dto';
+import { AuditLogQueryDto, MAX_TIME_RANGE_MS, TimeRangeQueryDto } from './dto/list-query.dto';
 import { AssignProjectRoleDto } from './dto/assign-project-role.dto';
 import { ProactiveSchedulerService } from './proactive-scheduler.service';
 
@@ -77,7 +81,7 @@ export class ProjectsController {
   }
 
   @Get('workspaces/:workspaceId/members')
-  getMembersByWorkspace(@Req() req: any, @Param('workspaceId') workspaceId: string) {
+  getMembersByWorkspace(@Req() req: any, @Param('workspaceId', UuidPipe) workspaceId: string) {
     return this.projectsService.getWorkspaceMembers(req.user.id, workspaceId);
   }
 
@@ -88,31 +92,23 @@ export class ProjectsController {
   @Get('workspaces/:workspaceId/audit/logs')
   getAuditLogs(
     @Req() req: any,
-    @Param('workspaceId') workspaceId: string,
-    @Query('limit') limit?: string,
+    @Param('workspaceId', UuidPipe) workspaceId: string,
+    @Query() query: AuditLogQueryDto,
   ) {
-    return this.projectPermissionsService.getAuditLogs(
-      req.user.id,
-      workspaceId,
-      limit ? parseInt(limit, 10) : undefined,
-    );
+    return this.projectPermissionsService.getAuditLogs(req.user.id, workspaceId, query.limit);
   }
 
   @Get(':id/audit/logs')
   getProjectAuditLogs(
     @Req() req: any,
-    @Param('id') projectId: string,
-    @Query('limit') limit?: string,
+    @Param('id', UuidPipe) projectId: string,
+    @Query() query: AuditLogQueryDto,
   ) {
-    return this.projectPermissionsService.getProjectAuditLogs(
-      projectId,
-      req.user.id,
-      limit ? parseInt(limit, 10) : undefined,
-    );
+    return this.projectPermissionsService.getProjectAuditLogs(projectId, req.user.id, query.limit);
   }
 
   @Get(':id/members')
-  getProjectMembers(@Req() req: any, @Param('id') projectId: string) {
+  getProjectMembers(@Req() req: any, @Param('id', UuidPipe) projectId: string) {
     return this.projectPermissionsService.getProjectMembers(projectId, req.user.id);
   }
 
@@ -120,7 +116,7 @@ export class ProjectsController {
   @ForbiddenInImpersonation()
   assignProjectRole(
     @Req() req: any,
-    @Param('id') projectId: string,
+    @Param('id', UuidPipe) projectId: string,
     @Body() body: AssignProjectRoleDto,
   ) {
     return this.projectPermissionsService.assignProjectRole(
@@ -135,32 +131,37 @@ export class ProjectsController {
   @ForbiddenInImpersonation()
   removeProjectRole(
     @Req() req: any,
-    @Param('id') projectId: string,
-    @Param('userId') targetUserId: string,
+    @Param('id', UuidPipe) projectId: string,
+    @Param('userId', UuidPipe) targetUserId: string,
   ) {
     return this.projectPermissionsService.removeProjectRole(projectId, targetUserId, req.user.id);
   }
 
   @Get('timeblocks/all')
-  getTimeBlocks(@Req() req: any, @Query('start') start?: string, @Query('end') end?: string) {
-    return this.projectsService.getTimeBlocks(
-      req.user.id,
-      start ? new Date(start) : undefined,
-      end ? new Date(end) : undefined,
-    );
+  getTimeBlocks(@Req() req: any, @Query() query: TimeRangeQueryDto) {
+    const start = query.start ? new Date(query.start) : undefined;
+    const end = query.end ? new Date(query.end) : undefined;
+    // Fenêtre bornée : fin après le début et au plus un an (S23)
+    if (start && end && (end < start || end.getTime() - start.getTime() > MAX_TIME_RANGE_MS)) {
+      throw new BadRequestException('Fenêtre de dates invalide (au plus un an, fin après début).');
+    }
+    return this.projectsService.getTimeBlocks(req.user.id, start, end);
   }
 
   @Get('resources/capacity')
-  getResourceCapacity(@Req() req: any, @Query('workspaceId') workspaceId?: string) {
+  getResourceCapacity(
+    @Req() req: any,
+    @Query('workspaceId', OptionalUuidPipe) workspaceId?: string,
+  ) {
     return this.projectsService.getResourceCapacityReport(req.user.id, workspaceId);
   }
 
   @Put('resources/:userId/profile')
   updateResourceProfile(
     @Req() req: any,
-    @Param('userId') userId: string,
+    @Param('userId', UuidPipe) userId: string,
     @Body() body: UpdateResourceProfileDto,
-    @Query('workspaceId') workspaceId?: string,
+    @Query('workspaceId', OptionalUuidPipe) workspaceId?: string,
   ) {
     return this.projectsService.updateResourceProfile(req.user.id, userId, body, workspaceId);
   }
@@ -168,7 +169,7 @@ export class ProjectsController {
   @Post('resources/:userId/leaves')
   createResourceLeave(
     @Req() req: any,
-    @Param('userId') userId: string,
+    @Param('userId', UuidPipe) userId: string,
     @Body() body: CreateResourceLeaveDto,
   ) {
     return this.projectsService.createResourceLeave(
@@ -181,19 +182,19 @@ export class ProjectsController {
   }
 
   @Get('resources/:userId/leaves')
-  getResourceLeaves(@Req() req: any, @Param('userId') userId: string) {
+  getResourceLeaves(@Req() req: any, @Param('userId', UuidPipe) userId: string) {
     return this.projectsService.getResourceLeaves(req.user.id, userId);
   }
 
   @Delete('resources/leaves/:leaveId')
-  deleteResourceLeave(@Req() req: any, @Param('leaveId') leaveId: string) {
+  deleteResourceLeave(@Req() req: any, @Param('leaveId', UuidPipe) leaveId: string) {
     return this.projectsService.deleteResourceLeave(req.user.id, leaveId);
   }
 
   @Post(':id/allocations')
   createResourceAllocation(
     @Req() req: any,
-    @Param('id') projectId: string,
+    @Param('id', UuidPipe) projectId: string,
     @Body() body: CreateResourceAllocationDto,
   ) {
     return this.projectsService.createResourceAllocation(
@@ -226,27 +227,35 @@ export class ProjectsController {
   }
 
   @Get(':id')
-  getProject(@Req() req: any, @Param('id') id: string) {
+  getProject(@Req() req: any, @Param('id', UuidPipe) id: string) {
     return this.projectsService.getProject(id, req.user.id);
   }
 
   @Put(':id')
-  updateProject(@Req() req: any, @Param('id') id: string, @Body() body: UpdateProjectDto) {
+  updateProject(
+    @Req() req: any,
+    @Param('id', UuidPipe) id: string,
+    @Body() body: UpdateProjectDto,
+  ) {
     return this.projectsService.updateProject(id, req.user.id, body);
   }
 
   @Delete(':id')
-  deleteProject(@Req() req: any, @Param('id') id: string) {
+  deleteProject(@Req() req: any, @Param('id', UuidPipe) id: string) {
     return this.projectsService.deleteProject(id, req.user.id);
   }
 
   @Get(':id/delivery-report')
-  getDeliveryReport(@Req() req: any, @Param('id') projectId: string) {
+  getDeliveryReport(@Req() req: any, @Param('id', UuidPipe) projectId: string) {
     return this.projectsService.getDeliveryReport(projectId, req.user.id);
   }
 
   @Post(':id/deliveries')
-  createDelivery(@Req() req: any, @Param('id') projectId: string, @Body() body: CreateDeliveryDto) {
+  createDelivery(
+    @Req() req: any,
+    @Param('id', UuidPipe) projectId: string,
+    @Body() body: CreateDeliveryDto,
+  ) {
     return this.projectsService.createDelivery(
       projectId,
       req.user.id,
@@ -258,19 +267,23 @@ export class ProjectsController {
   @Put('deliveries/:deliveryId/status')
   updateDeliveryStatus(
     @Req() req: any,
-    @Param('deliveryId') deliveryId: string,
+    @Param('deliveryId', UuidPipe) deliveryId: string,
     @Body() body: UpdateDeliveryStatusDto,
   ) {
     return this.projectsService.updateDeliveryStatus(deliveryId, req.user.id, body.status);
   }
 
   @Put('deliveries/items/:itemId/toggle')
-  toggleDeliveryChecklistItem(@Req() req: any, @Param('itemId') itemId: string) {
+  toggleDeliveryChecklistItem(@Req() req: any, @Param('itemId', UuidPipe) itemId: string) {
     return this.projectsService.toggleDeliveryChecklistItem(itemId, req.user.id);
   }
 
   @Post(':id/tasks')
-  createTask(@Req() req: any, @Param('id') projectId: string, @Body() body: CreateTaskDto) {
+  createTask(
+    @Req() req: any,
+    @Param('id', UuidPipe) projectId: string,
+    @Body() body: CreateTaskDto,
+  ) {
     const { title, description, priority, ...options } = body;
     return this.projectsService.createTask(
       projectId,
@@ -283,19 +296,19 @@ export class ProjectsController {
   }
 
   @Get(':id/tasks')
-  getTasks(@Req() req: any, @Param('id') projectId: string) {
+  getTasks(@Req() req: any, @Param('id', UuidPipe) projectId: string) {
     return this.projectsService.getTasks(projectId, req.user.id);
   }
 
   @Get(':id/critical-path')
-  getCriticalPath(@Req() req: any, @Param('id') projectId: string) {
+  getCriticalPath(@Req() req: any, @Param('id', UuidPipe) projectId: string) {
     return this.projectsService.getCriticalPath(projectId, req.user.id);
   }
 
   @Post(':id/milestones')
   createMilestone(
     @Req() req: any,
-    @Param('id') projectId: string,
+    @Param('id', UuidPipe) projectId: string,
     @Body() body: CreateMilestoneDto,
   ) {
     return this.projectsService.createMilestone(
@@ -308,14 +321,14 @@ export class ProjectsController {
   }
 
   @Put('milestones/:milestoneId/complete')
-  completeMilestone(@Req() req: any, @Param('milestoneId') milestoneId: string) {
+  completeMilestone(@Req() req: any, @Param('milestoneId', UuidPipe) milestoneId: string) {
     return this.projectsService.completeMilestone(milestoneId, req.user.id);
   }
 
   @Post(':id/deliverables')
   createDeliverable(
     @Req() req: any,
-    @Param('id') projectId: string,
+    @Param('id', UuidPipe) projectId: string,
     @Body() body: CreateDeliverableDto,
   ) {
     return this.projectsService.createDeliverable(
@@ -331,8 +344,8 @@ export class ProjectsController {
   @Put('deliverables/:deliverableId/status/:status')
   updateDeliverableStatus(
     @Req() req: any,
-    @Param('deliverableId') deliverableId: string,
-    @Param('status') status: DeliverableStatus,
+    @Param('deliverableId', UuidPipe) deliverableId: string,
+    @Param('status', enumPipe(DeliverableStatus, 'Statut')) status: DeliverableStatus,
   ) {
     return this.projectsService.updateDeliverableStatus(deliverableId, req.user.id, status);
   }
@@ -340,7 +353,7 @@ export class ProjectsController {
   @Post('tasks/:taskId/dependencies')
   addTaskDependency(
     @Req() req: any,
-    @Param('taskId') taskId: string,
+    @Param('taskId', UuidPipe) taskId: string,
     @Body() body: CreateTaskDependencyDto,
   ) {
     return this.projectsService.addTaskDependency(
@@ -354,14 +367,18 @@ export class ProjectsController {
   @Delete('tasks/:taskId/dependencies/:dependsOnTaskId')
   removeTaskDependency(
     @Req() req: any,
-    @Param('taskId') taskId: string,
-    @Param('dependsOnTaskId') dependsOnTaskId: string,
+    @Param('taskId', UuidPipe) taskId: string,
+    @Param('dependsOnTaskId', UuidPipe) dependsOnTaskId: string,
   ) {
     return this.projectsService.removeTaskDependency(taskId, req.user.id, dependsOnTaskId);
   }
 
   @Put('tasks/:taskId')
-  async updateTask(@Req() req: any, @Param('taskId') taskId: string, @Body() body: UpdateTaskDto) {
+  async updateTask(
+    @Req() req: any,
+    @Param('taskId', UuidPipe) taskId: string,
+    @Body() body: UpdateTaskDto,
+  ) {
     const updated = await this.projectsService.updateTask(taskId, req.user.id, body);
     if (this.realtime.isReady) {
       const [dbTask] = await this.projectsService.getTasksForBroadcast([taskId]);
@@ -397,14 +414,14 @@ export class ProjectsController {
   }
 
   @Delete('tasks/:taskId')
-  deleteTask(@Req() req: any, @Param('taskId') taskId: string) {
+  deleteTask(@Req() req: any, @Param('taskId', UuidPipe) taskId: string) {
     return this.projectsService.deleteTask(taskId, req.user.id);
   }
 
   @Post('tasks/:taskId/timeblocks')
   createTimeBlock(
     @Req() req: any,
-    @Param('taskId') taskId: string,
+    @Param('taskId', UuidPipe) taskId: string,
     @Body() body: CreateTimeBlockDto,
   ) {
     return this.projectsService.createTimeBlock(
@@ -418,7 +435,7 @@ export class ProjectsController {
   @Put('timeblocks/:timeBlockId')
   updateTimeBlock(
     @Req() req: any,
-    @Param('timeBlockId') timeBlockId: string,
+    @Param('timeBlockId', UuidPipe) timeBlockId: string,
     @Body() body: CreateTimeBlockDto,
   ) {
     return this.projectsService.updateTimeBlock(
@@ -430,12 +447,12 @@ export class ProjectsController {
   }
 
   @Delete('timeblocks/:timeBlockId')
-  deleteTimeBlock(@Req() req: any, @Param('timeBlockId') timeBlockId: string) {
+  deleteTimeBlock(@Req() req: any, @Param('timeBlockId', UuidPipe) timeBlockId: string) {
     return this.projectsService.deleteTimeBlock(timeBlockId, req.user.id);
   }
 
   @Post('workspaces/:workspaceId/resources/optimize')
-  async optimizeResources(@Req() req: any, @Param('workspaceId') workspaceId: string) {
+  async optimizeResources(@Req() req: any, @Param('workspaceId', UuidPipe) workspaceId: string) {
     const result = await this.projectsService.optimizeWorkspaceResources(workspaceId, req.user.id);
     if (result.success && result.reallocatedTaskIds) {
       await this.broadcastTasks(result.reallocatedTaskIds);
@@ -444,14 +461,17 @@ export class ProjectsController {
   }
 
   @Get('workspaces/:workspaceId/integrations')
-  async listIntegrations(@Req() req: any, @Param('workspaceId') workspaceId: string) {
+  async listIntegrations(@Req() req: any, @Param('workspaceId', UuidPipe) workspaceId: string) {
     // Configuration interne : pas pour un VIEWER (P11)
     await this.policy.assertWorkspace(workspaceId, req.user.id, 'workspace.directory.read');
     return this.integrationService.listIntegrations(workspaceId);
   }
 
   @Get('workspaces/:workspaceId/integrations/status')
-  async getIntegrationsStatus(@Req() req: any, @Param('workspaceId') workspaceId: string) {
+  async getIntegrationsStatus(
+    @Req() req: any,
+    @Param('workspaceId', UuidPipe) workspaceId: string,
+  ) {
     await this.policy.assertWorkspace(workspaceId, req.user.id, 'workspace.directory.read');
     return this.integrationService.getIntegrationsStatus(workspaceId);
   }
@@ -460,7 +480,7 @@ export class ProjectsController {
   @ForbiddenInImpersonation()
   async createIntegration(
     @Req() req: any,
-    @Param('workspaceId') workspaceId: string,
+    @Param('workspaceId', UuidPipe) workspaceId: string,
     @Body() body: CreateIntegrationDto,
   ) {
     await this.projectPermissionsService.assertWorkspaceAccess(workspaceId, req.user.id, [
@@ -498,13 +518,19 @@ export class ProjectsController {
   }
 
   @Post('integrations/:integrationId/toggle')
-  async toggleIntegration(@Req() req: any, @Param('integrationId') integrationId: string) {
+  async toggleIntegration(
+    @Req() req: any,
+    @Param('integrationId', UuidPipe) integrationId: string,
+  ) {
     const workspaceId = await this.resolveManagedIntegration(integrationId, req.user.id);
     return this.integrationService.toggleIntegration(workspaceId, integrationId);
   }
 
   @Delete('integrations/:integrationId')
-  async deleteIntegration(@Req() req: any, @Param('integrationId') integrationId: string) {
+  async deleteIntegration(
+    @Req() req: any,
+    @Param('integrationId', UuidPipe) integrationId: string,
+  ) {
     const workspaceId = await this.resolveManagedIntegration(integrationId, req.user.id);
     return this.integrationService.deleteIntegration(workspaceId, integrationId);
   }
@@ -512,8 +538,8 @@ export class ProjectsController {
   @Post('workspaces/:workspaceId/integrations/:integrationId/export')
   async exportToCalendar(
     @Req() req: any,
-    @Param('workspaceId') workspaceId: string,
-    @Param('integrationId') integrationId: string,
+    @Param('workspaceId', UuidPipe) workspaceId: string,
+    @Param('integrationId', UuidPipe) integrationId: string,
   ) {
     // Écrit dans l'agenda externe avec les jetons OAuth du workspace : OWNER/ADMIN uniquement (S5)
     await this.projectPermissionsService.assertWorkspaceAccess(workspaceId, req.user.id, [
@@ -524,7 +550,7 @@ export class ProjectsController {
   }
 
   @Get('workspaces/:workspaceId/calendar-conflicts')
-  async getCalendarConflicts(@Req() req: any, @Param('workspaceId') workspaceId: string) {
+  async getCalendarConflicts(@Req() req: any, @Param('workspaceId', UuidPipe) workspaceId: string) {
     await this.policy.assertWorkspace(workspaceId, req.user.id, 'workspace.read');
     // Uniquement les créneaux des projets accessibles à l'appelant (S12)
     const projectIds = await this.policy.listAccessibleProjectIds(req.user.id, { workspaceId });
@@ -536,13 +562,13 @@ export class ProjectsController {
   // ═══════════════════════════════════════════════════════════════════
 
   @Get('workspaces/:workspaceId/calendar/oauth/google/auth-url')
-  async getGoogleAuthUrl(@Req() req: any, @Param('workspaceId') workspaceId: string) {
+  async getGoogleAuthUrl(@Req() req: any, @Param('workspaceId', UuidPipe) workspaceId: string) {
     await this.projectPermissionsService.assertWorkspaceAccess(workspaceId, req.user.id);
     return { url: this.calendarSyncService.generateAuthUrl('GOOGLE_CALENDAR', workspaceId) };
   }
 
   @Get('workspaces/:workspaceId/calendar/oauth/outlook/auth-url')
-  async getOutlookAuthUrl(@Req() req: any, @Param('workspaceId') workspaceId: string) {
+  async getOutlookAuthUrl(@Req() req: any, @Param('workspaceId', UuidPipe) workspaceId: string) {
     await this.projectPermissionsService.assertWorkspaceAccess(workspaceId, req.user.id);
     return { url: this.calendarSyncService.generateAuthUrl('OUTLOOK', workspaceId) };
   }
@@ -551,8 +577,8 @@ export class ProjectsController {
   @ForbiddenInImpersonation()
   async handleOAuthCallback(
     @Req() req: any,
-    @Param('workspaceId') workspaceId: string,
-    @Body() body: { provider: 'GOOGLE_CALENDAR' | 'OUTLOOK'; code: string },
+    @Param('workspaceId', UuidPipe) workspaceId: string,
+    @Body() body: CalendarOAuthCallbackDto,
   ) {
     await this.projectPermissionsService.assertWorkspaceAccess(workspaceId, req.user.id, [
       'OWNER',
@@ -562,7 +588,7 @@ export class ProjectsController {
   }
 
   @Post('workspaces/:workspaceId/calendar/sync')
-  async syncCalendarEvents(@Req() req: any, @Param('workspaceId') workspaceId: string) {
+  async syncCalendarEvents(@Req() req: any, @Param('workspaceId', UuidPipe) workspaceId: string) {
     // Importe des créneaux dans le planning : OWNER/ADMIN uniquement, tâche créée au nom de l'appelant (S5)
     await this.projectPermissionsService.assertWorkspaceAccess(workspaceId, req.user.id, [
       'OWNER',
@@ -572,7 +598,10 @@ export class ProjectsController {
   }
 
   @Post('workspaces/:workspaceId/auto-schedule')
-  async autoScheduleWorkspace(@Req() req: any, @Param('workspaceId') workspaceId: string) {
+  async autoScheduleWorkspace(
+    @Req() req: any,
+    @Param('workspaceId', UuidPipe) workspaceId: string,
+  ) {
     // Droits et périmètre (projets où l'appelant peut écrire) contrôlés par le service (S12)
     return this.proactiveSchedulerService.autoScheduleWorkspace(workspaceId, req.user.id);
   }
@@ -580,35 +609,35 @@ export class ProjectsController {
   @Post('workspaces/:workspaceId/sprints')
   createSprint(
     @Req() req: any,
-    @Param('workspaceId') workspaceId: string,
+    @Param('workspaceId', UuidPipe) workspaceId: string,
     @Body() body: CreateSprintDto,
   ) {
     return this.sprintService.createSprint(workspaceId, req.user.id, body);
   }
 
   @Get('workspaces/:workspaceId/sprints')
-  listSprints(@Req() req: any, @Param('workspaceId') workspaceId: string) {
+  listSprints(@Req() req: any, @Param('workspaceId', UuidPipe) workspaceId: string) {
     return this.sprintService.listSprints(workspaceId, req.user.id);
   }
 
   @Put('sprints/:sprintId')
   updateSprint(
     @Req() req: any,
-    @Param('sprintId') sprintId: string,
+    @Param('sprintId', UuidPipe) sprintId: string,
     @Body() body: UpdateSprintDto,
   ) {
     return this.sprintService.updateSprint(sprintId, req.user.id, body);
   }
 
   @Delete('sprints/:sprintId')
-  deleteSprint(@Req() req: any, @Param('sprintId') sprintId: string) {
+  deleteSprint(@Req() req: any, @Param('sprintId', UuidPipe) sprintId: string) {
     return this.sprintService.deleteSprint(sprintId, req.user.id);
   }
 
   @Post('sprints/:sprintId/tasks')
   async associateTasksToSprint(
     @Req() req: any,
-    @Param('sprintId') sprintId: string,
+    @Param('sprintId', SprintOrBacklogPipe) sprintId: string,
     @Body() body: AssociateTasksDto,
   ) {
     const sId = sprintId === 'backlog' ? null : sprintId;
@@ -619,18 +648,21 @@ export class ProjectsController {
   }
 
   @Get('workspaces/:workspaceId/velocity')
-  async getAverageVelocity(@Req() req: any, @Param('workspaceId') workspaceId: string) {
+  async getAverageVelocity(@Req() req: any, @Param('workspaceId', UuidPipe) workspaceId: string) {
     const velocity = await this.sprintService.getAverageVelocity(workspaceId, req.user.id);
     return { velocity };
   }
 
   @Get('sprints/:sprintId/burndown')
-  getBurndownChart(@Req() req: any, @Param('sprintId') sprintId: string) {
+  getBurndownChart(@Req() req: any, @Param('sprintId', UuidPipe) sprintId: string) {
     return this.sprintService.getBurndownChart(sprintId, req.user.id);
   }
 
   @Get('workspaces/:workspaceId/finances')
-  getWorkspaceFinancialSummary(@Req() req: any, @Param('workspaceId') workspaceId: string) {
+  getWorkspaceFinancialSummary(
+    @Req() req: any,
+    @Param('workspaceId', UuidPipe) workspaceId: string,
+  ) {
     return this.projectsService.getWorkspaceFinancialSummary(workspaceId, req.user.id);
   }
 }
