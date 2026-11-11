@@ -5635,3 +5635,91 @@ Hors P7 : r48-a1 (client HTTP commun), A9-b, A8, P2.
 4. Améliorations : r48-a1 (client HTTP commun), r48-a2 (pnpm global du poste, action utilisateur), O22 et Q-2 (dans P7).
 5. Reliquats antérieurs : r44-a3, r42-a1, parcours manuel avant `CSP_MODE=enforce`, S30, recensement S19/S20, S26, A5 à A7, P5, P8, O10 à O15, O17.
 6. Actions d'exploitation : sauvegarde avant migration, comparaison complète du schéma de production, vérifications GitHub requises.
+
+---
+
+## Revue r51 (architecte) : lot Phase 6-2 (P7, suite e2e de sécurité) : VALIDÉ, deux réserves de test et un constat de balayage (Mineurs, non bloquants)
+
+**Verdict global : VALIDÉ, feu vert de commit.** Le code livré est correct et sans faille ; la suite e2e est réelle (337 tests, vraies assertions, aucun `.skip` ni `.only`). Je relève trois constats Mineurs, tous des lacunes de couverture ou de balayage, aucun n'est une faille exploitable : r51-m1, r51-m2, r51-m3. Ils partent dans un petit lot « P7-b » avant A9-b.
+
+| Point | Verdict |
+| --- | --- |
+| O22 (arrêt propre, `forceExit` retiré) | **VALIDÉ** (voir O23 : en production, les crochets d'arrêt ne sont pas activés) |
+| Point 2 : authentification et session (20 tests) | **VALIDÉ**, réserve r51-m1 (valeur du `Retry-After` non verrouillée par un test) |
+| Point 3 : IDOR/BOLA, RBAC, impersonation (98 tests) | **VALIDÉ**, réserve r51-m2 (garde principale des finances non isolée) |
+| Point 4 : limiteurs, `trust proxy` (7 tests) | **VALIDÉ** |
+| Point 5 : webhook GitHub et SCIM (12 tests) | **VALIDÉ** |
+| Point 6 : Q-2 (192 cas, exceptions vides) | **VALIDÉ**, réserve r51-m3 (le catalogue ne couvre pas tous les DTO) |
+| N1 (`Retry-After` sur les 429 par compte) | **VALIDÉ** (code), test à compléter (r51-m1) |
+| N2 (`@MaxLength` sur 5 DTO) | **VALIDÉ**, données de production conformes, balayage à faire (r51-m3) |
+
+### Constats
+
+**N1 (code) : régression du verrou, anciennes valeurs, filtre global.**
+- Valeur `'1'` d'un ancien verrou : `Number('1')` vaut 1, non supérieur à `Date.now()`, donc repli sur `LOCKOUT_BASE_SECONDS`. Une valeur illisible (NaN) retombe pareil. Le verrou reste posé (`read() !== null`), seul le délai annoncé est approximatif pour un ancien verrou de palier supérieur (sous-estimé, au pire 24 h annoncées 15 min) ; il expire de lui-même. Déploiement en rolling : une ancienne instance qui lit une valeur horodatée ne teste que `!== null`, donc le verrou tient. Aucune migration.
+- TTL Redis inchangé (`seconds`), repli mémoire inchangé (la valeur est une chaîne comme avant). `reset` ne touche pas au verrou, comme avant.
+- Filtre : `@Catch(TooManyAttemptsException)` uniquement, enregistré en `APP_FILTER`. Il ne capte ni le 429 du `ThrottlerGuard`, ni celui de SCIM, ni aucune autre exception. Corps identique à celui de Nest (`{ statusCode, message }`), statut identique. Aucun autre `useGlobalFilters` dans le code.
+- **r51-m1 (Mineur, test)** : la contre-mutation « délai annoncé constant, égal à `LOCKOUT_BASE_SECONDS` (l'instant de fin ignoré) » n'est détectée ni par `retry-after.filter.spec.ts` ni par `auth-session.e2e-spec.ts` (20/20 et 933/933 restent verts), car au premier palier le délai restant vaut déjà 900 s. Le stockage de l'instant de fin, cœur de N1, n'est donc pas verrouillé. Remédiation : test unitaire avec horloge simulée (`jest.spyOn(Date, 'now')`), soit 20 échecs (palier 2, 1 800 s), soit 5 min écoulées après le premier verrou (reste environ 600 s), avec `Retry-After` décroissant. Critère : la mutation ci-dessus échoue.
+
+**N2 (contrat)** : lecture seule en production (utilisateur applicatif, `SELECT MAX(CHAR_LENGTH/LENGTH)`, aucun secret) : `Project.name` max 26 (5 projets), `Project.description` max 96 (0 au-delà de 16 000), `billingType` max 18, `Task.title` max 61 (15 tâches), `Task.description` max 149 (0 au-delà), `Task.labels` max 6, `Sprint` vide. Aucune donnée existante ne dépasse les bornes : aucune mise à jour future d'un enregistrement existant ne sera refusée. Colonnes réelles : `description` et `labels` en TEXT (65 535 octets), pour lesquels 16 000 caractères tiennent même à 3 octets par caractère (48 000) ; `name`/`title` en VARCHAR(191). La borne de 16 000 est **acceptée** (alignée sur `NoteDto`). `@MaxLength` compte des unités UTF-16 : à 191 unités, jamais plus de 191 caractères MySQL.
+- **r51-m3 (Mineur)** : le balayage n'est pas fait. Champs `@IsString` sans `@MaxLength` encore présents : `update-sprint.dto.ts` (`name`, même colonne VARCHAR(191) que la création : un PUT de sprint avec un nom de 300 000 caractères donne très probablement un 500, à confirmer par le catalogue), `create-comment`, `create-milestone`, `create-deliverable`, `create-delivery`, `create-resource-allocation`, `create-resource-leave`, `update-resource-profile`, `update-project-finances`, `create-task-dependency`, `ai-command` (1/3), `execute-ai-actions` (0/17), `admin.dto`, `firebase-login`, `invitation-token`, `sso.dto` (5/10), `scim.dto` (11/12), `github.dto`, ainsi que les champs restants de `create-project`/`create-task`/`update-task` (2/4, 3/5, 3/5). Surface : utilisateur authentifié, corps limité à 1 Mo, aucune donnée exposée. Remédiation : (1) borne sur chaque champ texte selon la colonne (VARCHAR(191) → 191, TEXT → 16 000, autre → valeur justifiée) ; (2) **un test unitaire de garde** qui parcourt les métadonnées `class-validator` de tous les DTO et échoue sur tout `@IsString` sans `@MaxLength` (liste d'exceptions justifiées), plutôt qu'un catalogue à compléter à la main ; (3) étendre Q-2 aux routes concernées (au moins `PUT sprint`, commentaire, jalon, livrable).
+
+**Mutation « finances ouvert au MEMBER » non détectée : confirmée masquée, pas de faille.**
+- `getWorkspaceFinancialSummary` (`finances.service.ts`) contrôle OWNER/ADMIN, puis appelle `getProjectFinances` pour chaque projet, qui refait le même `assertWorkspaceRoles` (ligne 28) : seconde barrière réelle. Reproduit : suppression du seul contrôle du résumé, `authz` 98/98 reste vert.
+- Elle ne couvre pas un espace **sans projet** : `Promise.all([])` renvoie alors un résumé à zéro sans contrôle. Aucun contenu sensible (zéros), mais la garde principale n'est protégée par aucun test, et un futur refactor du résumé (agrégation SQL directe, sans passer par projet) ouvrirait les finances à tout membre sans qu'un test échoue.
+- **r51-m2 (Mineur, test)** : ajouter à `authz.e2e-spec.ts` un cas `finances` sur un **espace sans projet** (MEMBER et profils de projet : 403, OWNER/ADMIN : 200) ; critère : la mutation « garde du résumé retirée » échoue. Note : `getProjectFinances` n'est plus routé directement (seulement via le résumé) ; il lève `new Error('Project not found')` (500) si le projet disparaît entre les deux lectures : course théorique, à remplacer par `NotFoundException` au passage.
+
+**Qualité des tests e2e** : assertions précises (statuts exacts, `[nom, résultat]` pour une sortie lisible, absence de marqueur secret, base relue pour prouver « rien ne change »). Tolérances relevées et acceptées : `[403, 404]` sur les lectures croisées (deux issues légitimes), `< 500` sur la suppression de la note d'autrui (accompagnée de « aucune fuite »). Aucun `.skip`, `.only`, `xit`, `fdescribe`. Isolation : un monde par suite (comptes et espaces créés puis nettoyés, adresse `X-Forwarded-For` neuve par requête), les compteurs Redis sont par adresse ou par compte. Durée : 47 s (48 s avec `--detectOpenHandles`).
+
+**O23 (Amélioration, nouveau)** : `main.ts` n'appelle pas `enableShutdownHooks()`. En production, un SIGTERM (`docker stop`) tue donc Node sans passer par `onModuleDestroy` : le correctif O22 profite aux tests, pas à l'exploitation (aucune régression non plus). Si on active les crochets, borner `quit()` (course contre un délai de 2 s, puis `disconnect()`) : avec `maxRetriesPerRequest: null`, un `quit()` envoyé pendant une panne de Redis peut attendre indéfiniment la reconnexion. À traiter avec A8 ou en exploitation, pas bloquant.
+
+**Observations du fixeur, tranchées**
+- **O-a** (GET d'une note d'autrui : 200 sans corps) : hygiène d'API, aucune fuite. À corriger en 404 (Amélioration), après vérification que le frontend ne s'appuie pas sur le corps vide ; test e2e à resserrer à 404 une fois fait. Non bloquant.
+- **O-b** (listes de rôles en dur) : **ne pas aligner avant A8** ; l'aligner dans A8 (ou la refonte de la politique), où `permissions.ts` devient l'unique source. D'ici là, le comportement est verrouillé par l'oracle de la matrice e2e (écrit dans le test, indépendant de la table) : c'est la bonne protection, à conserver comme filet de sécurité de cette refonte.
+- **O-c** : `TRUST_PROXY_HOPS` de production à confirmer par l'exploitation (action ouverte).
+- **O-d** (compte suspendu actif jusqu'à 60 s en cas de suspension directe en base) : **accepté** (cache de session documenté, parcours applicatifs et SCIM révoquent). Ajouter au lot P7-b un test e2e des parcours applicatifs (suspension par l'administration, par SCIM : session refusée immédiatement), plus utile que le cas direct en base. Amélioration.
+- **O-e** (403 contre 404 pour un projet d'un autre espace) : négligeable (UUID v4), non corrigé.
+
+### Réponses aux questions du fixeur
+1. **Borne de 16 000** : acceptée. **Balayage** : oui, en lot dédié P7-b (r51-m3), avec le test de garde sur les métadonnées plutôt que des cas à la main.
+2. **`Retry-After` 60 s** : accepté (borne haute valide au sens de la RFC 9110 ; le TTL exact exigerait de changer `LockoutStore` pour un gain nul). Le délai du verrou, lui, est exact (instant de fin).
+3. **O-b avant A8** : non, dans A8.
+4. **Durée de l'e2e en CI** : la question est dépassée, le job `e2e` a déjà tourné sur GitHub pour d1a1da7 (6 jobs verts). La suite de ce lot passe de 5 tests à 337 ; mesuré ici 47 s, soit environ 2 à 3 min en CI avec l'installation, très en dessous du plafond de 20 min. Risque nouveau : sans `forceExit`, un handle fuyant ferait attendre le job jusqu'au plafond de 20 min au lieu d'échouer vite ; le test O22 le détecte en amont. Acceptable.
+
+### Mesures de la revue (MySQL 8.0 et Redis 7 temporaires, supprimés ensuite)
+| Mesure | Résultat |
+| --- | --- |
+| e2e `--runInBand --detectOpenHandles` | 7 suites, **337/337**, 47 s, aucun handle ouvert |
+| jest backend (`env -u DATABASE_URL`) | 107 suites, **2 964/2 964** |
+| `nest build`, `tsc -p tests --noEmit` | 0 erreur |
+| ESLint (`src` et `tests`) | 0 erreur, 15 avertissements `no-explicit-any` préexistants |
+| Prettier (fichiers modifiés et créés) | propre |
+| vitest frontend | 34 fichiers, **296/296** |
+| Contre-mutations (restauration par `\cp`, `cmp` identique, `git status` inchangé) | O22 passerelle (conservation des clients retirée) : détectée (2 sockets Redis restées ouvertes) ; O22 `$disconnect()` retiré de Prisma : détectée ; N2 `@MaxLength(16_000)` de la description de projet à 1 000 000 : détectée (1/194) ; N2 titre de tâche 191 à 1 000 000 : détectée (1/194) ; N1 repli de l'ancienne valeur `'1'` à 1 s : détectée (unitaire) ; **N1 délai constant au lieu de l'instant de fin : NON détectée (r51-m1)** ; **finances, garde du résumé retirée : NON détectée (r51-m2)** |
+| Production (lecture seule) | 7 `SELECT MAX(CHAR_LENGTH)`, aucun enregistrement au-delà des bornes |
+| Environnement | conteneurs `r51-mysql` et `r51-redis` supprimés ; aucun processus résiduel ; rien commité ni poussé |
+
+### Feu vert de commit (chemins explicites, jamais `git add -A`, ni `.claude/`, ni `.env*`) : 5 commits, dans cet ordre
+1. `fix(backend): arrêt propre de l'application, clients Redis de l'adaptateur Socket.IO, Prisma et Redis fermés, forceExit retiré (O22)` : `backend/src/tracking/tracking.gateway.ts`, `backend/src/prisma/prisma.service.ts`, `backend/src/redis/redis.service.ts`, `backend/jest-e2e.json`.
+2. `fix(security): Retry-After sur les 429 de verrouillage de compte, de login par minute et de MFA (N1)` : `backend/src/auth/account-lockout.ts`, `backend/src/common/retry-after.filter.ts`, `backend/src/app.module.ts`, `backend/tests/unit/common/retry-after.filter.spec.ts`.
+3. `fix(security): longueurs maximales sur les champs texte des DTO de projet, de tâche et de sprint (N2)` : `backend/src/projects/dto/create-project.dto.ts`, `create-sprint.dto.ts`, `create-task.dto.ts`, `update-project.dto.ts`, `update-task.dto.ts` (même dossier).
+4. `test(e2e): suite e2e de sécurité, authentification, autorisation, limiteurs, webhook, SCIM, abus sans 5xx et arrêt propre (P7, Q-2)` : `backend/tests/e2e/security/abuse-no-5xx.e2e-spec.ts`, `auth-session.e2e-spec.ts`, `authz.e2e-spec.ts`, `o22-shutdown.e2e-spec.ts`, `rate-limits.e2e-spec.ts`, `webhook-scim.e2e-spec.ts`, `backend/tests/e2e/support/e2e-world.ts`, `backend/tests/e2e/support/e2e-app.ts`.
+5. `docs(security): revues r50 et r51, lot P7 (O22, N1, N2, suite e2e de sécurité)` : `docs/security/rapport-audit.md`, `docs/security/journal-corrections.md`, en dernier.
+Aucune mention d'outil d'assistance ni `Co-Authored-By`. Pousser après les 5 commits et attendre les 6 jobs verts (le job `e2e` exécute pour la première fois la suite complète sur GitHub).
+
+### Conditions de déploiement (production actuelle : 93711a8)
+1. Le lot s'ajoute à l'ensemble déjà en attente (722df54 à d1a1da7) : **toutes les conditions de la revue r49 restent valables** (sauvegarde `mysqldump` avant, migration `20261116000000_a9_migration_drift` gardée, comparaison du schéma recommandée, images backend et frontend reconstruites). Ce lot n'ajoute **aucune migration, aucun changement de schéma, de dépendance, de variable d'environnement ni de configuration Nginx**.
+2. CI verte (6 jobs) sur le dernier commit poussé avant de déployer.
+3. Backend uniquement pour ce lot (le frontend n'est pas modifié). Aucune donnée de production ne dépasse les bornes de N2 (vérifié en lecture seule) : aucun enregistrement existant ne devient non modifiable.
+4. Verrous Redis en cours : compatibles (ancien format `'1'` lu avec le délai de base) ; aucune purge à faire. Les verrous posés après la mise à jour portent l'instant de fin.
+5. Vérifications après déploiement : démarrage (`node dist/main`) ; un 429 de verrouillage (10 échecs sur une adresse e-mail inexistante créée pour l'occasion) avec corps `Trop de tentatives échouées : compte temporairement verrouillé, réessayez plus tard.` et en-tête `Retry-After` proche de 900 ; un 429 global inchangé ; la création d'une tâche avec un titre de 200 caractères répond 400, un titre normal 201.
+6. Rollback : images précédentes (aucun état à défaire ; un verrou horodaté lu par l'ancien code reste un verrou).
+7. L'arrêt propre n'a pas d'effet en production tant que `enableShutdownHooks()` n'est pas activé (O23).
+
+### Ordre des constats ouverts (fin de r51)
+1. **P7-b (avant A9-b, petit lot, Mineurs)** : **r51-m1** (test du délai décroissant du verrou), **r51-m2** (finances sur un espace sans projet, `NotFoundException` à la place de `Error`), **r51-m3** (balayage des DTO, test de garde sur les métadonnées, extension de Q-2). Ajouter le test e2e de suspension par l'administration et par SCIM (O-d).
+2. **Suite de la Phase 6** : **A9-b** (NestJS 11, avec `jose` 4 vers 6), puis **A8** (y inclure O-b : `permissions.ts` source unique), puis **P2**.
+3. Améliorations : **O23** (`enableShutdownHooks` avec `quit()` borné), O-a (404 pour une note d'autrui), r48-a1 (client HTTP commun), r48-a2 (pnpm global du poste, action utilisateur).
+4. Reliquats antérieurs : r44-a3, r42-a1, parcours manuel avant `CSP_MODE=enforce`, S30, recensement S19/S20, S26, A5 à A7, P5, P8, O10 à O15, O17.
+5. Actions d'exploitation : sauvegarde avant migration, comparaison complète du schéma de production, vérifications GitHub requises, confirmation de `TRUST_PROXY_HOPS` de production (O-c).
+6. Clos par cette revue : O22, P7 (points 2 à 6), Q-2, N1, N2 (avec les réserves ci-dessus).

@@ -4696,3 +4696,192 @@ Vérifié sur le code et rejoué : vitest 34 fichiers, 295/295 ; `tsc --noEmit` 
 **Feu vert** : commit 5 (10 fichiers frontend de r49) : `fix(frontend): messages d'erreur HTTP communs, message du serveur prioritaire et repli générique pour un 429 sans corps exploitable (r47-m2, r48-m1)`. Commit 6 (docs, en dernier) : `docs(security): revues r47 à r49 du lot A9, migration de dérive et message du 429 frontend`.
 
 **Constats encore ouverts** : aucun Mineur ou supérieur dans ce lot. Suite : P7 (périmètre en r49, O22 en tête, Q-2 rattaché), puis A9-b, A8, P2 ; améliorations r48-a1, r48-a2.
+
+## Lot Phase 6-2 (fixeur) — P7
+
+Périmètre : « Périmètre du lot P7 » (Revue r49), constat P7, Q-2, O22. Points 1 à 6 traités ; rien n'est commité ni poussé. Suite e2e : `backend/tests/e2e/security/` (7 fichiers, 337 tests) plus le support `backend/tests/e2e/support/e2e-world.ts` (monde de test : application complète, comptes, espaces, connexion réelle, nettoyage). Aucune dépendance ajoutée, `ci.yml` inchangé (le job `e2e` lance déjà `jest --config jest-e2e.json --runInBand` sur tout le dossier).
+
+### Statut par point
+
+| Point | Statut | Fichiers de test |
+| --- | --- | --- |
+| 1. O22 (fermeture propre, `forceExit` retiré) | CORRIGÉ – À REVOIR | `o22-shutdown.e2e-spec.ts` |
+| 2. Authentification et session | CORRIGÉ – À REVOIR (un nouveau constat corrigé : N1) | `auth-session.e2e-spec.ts` (20 tests) |
+| 3. IDOR/BOLA, matrice RBAC, impersonation | CORRIGÉ – À REVOIR | `authz.e2e-spec.ts` (98 tests) |
+| 4. Limiteurs, `trust proxy` | CORRIGÉ – À REVOIR | `rate-limits.e2e-spec.ts` (7 tests) |
+| 5. Webhook GitHub et SCIM | CORRIGÉ – À REVOIR | `webhook-scim.e2e-spec.ts` (12 tests) |
+| 6. Q-2 (aucun 5xx sur les abus) | CORRIGÉ – À REVOIR (un nouveau constat corrigé : N2) | `abuse-no-5xx.e2e-spec.ts` (194 tests) |
+
+### O22 — arrêt propre de l'application
+
+**Cause confirmée** : `TrackingGateway.afterInit` (`tracking.gateway.ts`) crée deux clients `redis` (pub/sub de l'adaptateur Socket.IO) sans jamais les fermer. En enquêtant avec `--detectOpenHandles` et un crochet `async_hooks`, deux causes de plus : `PrismaService` n'avait pas de `onModuleDestroy` (10 sockets MySQL restaient ouvertes) et `RedisService.onModuleDestroy` appelait `disconnect()` (coupure brutale, minuterie de 2 s ioredis).
+
+**Changement**
+- `backend/src/tracking/tracking.gateway.ts` : `implements OnModuleDestroy` ; les deux clients sont conservés (`adapterClients`) puis fermés par `quit()` (ou `disconnect()` en repli, sans jamais faire échouer l'arrêt : un client jamais connecté, déjà fermé ou simulé est ignoré).
+- `backend/src/prisma/prisma.service.ts` : `onModuleDestroy` → `$disconnect()`.
+- `backend/src/redis/redis.service.ts` : `onModuleDestroy` → `quit()` avec repli `disconnect()`.
+- `backend/jest-e2e.json` : `forceExit` retiré.
+- Un seul `app.close()` suffit dans `e2e-app.ts` (aucun changement nécessaire).
+
+**Tests** : `o22-shutdown.e2e-spec.ts` démarre l'application, vérifie que des sockets vers MySQL et Redis sont ouvertes, appelle `app.close()` puis vérifie qu'il n'en reste aucune (handles actifs `Socket` vers les ports MySQL et Redis).
+- Avant correction (sans `forceExit`) : jest ne se termine pas seul (vérifié, processus tué à la main).
+- Après : `jest --config jest-e2e.json --runInBand --detectOpenHandles` : aucun handle signalé ; sans `--detectOpenHandles`, plus d'avertissement « did not exit » ; les 5 tests S3 d'origine passent.
+- Remarque de test : le test attend `redis.ping()` avant de fermer ; une fermeture pendant la poignée de main ioredis (réponse `INFO` en vol) laisse une minuterie de 2 s. Situation de démarrage-arrêt immédiat, sans effet sur une suite normale.
+- Un test d'intégration existant (`tests/integration/realtime/task-room-revocation.spec.ts`) simule `redis` sans `disconnect` : il a révélé une première version trop fragile de `onModuleDestroy`, corrigée (arrêt jamais en échec). Jest backend 106 suites, 2 961 tests verts.
+
+### Authentification et session
+
+Tests (`auth-session.e2e-spec.ts`) : verrouillage (10 échecs : 429 `Trop de tentatives échouées : compte temporairement verrouillé…` avec `Retry-After`, même avec le bon mot de passe ; compte inexistant verrouillé de la même façon ; 6e essai en une minute) ; cookies (`HttpOnly`, `SameSite=Strict`, `Path=/` et `/auth`, absence de jeton dans le corps ; en production `__Host-`/`__Secure-`, `Secure`, sans `Domain` ; déconnexion qui efface les cookies et révoque) ; rotation (nouveaux jetons à chaque `refresh`, ancien jeton rejoué au-delà de la tolérance : 401, cookies effacés, famille révoquée y compris le jeton légitime suivant et son jeton d'accès ; deux requêtes simultanées : 409 sans révocation) ; 401 (6 routes protégées sans jeton, jeton falsifié, charge utile modifiée, cookies d'accès dupliqués) ; MFA (code TOTP déjà consommé refusé même avec un nouveau ticket ; 5 essais ratés tuent le ticket ; la limite de 5 essais par minute et par compte survit à un nouveau ticket : 429 avec `Retry-After`).
+
+Choix de test : une adresse `X-Forwarded-For` neuve par requête (le limiteur par adresse ne masque pas le contrôle visé) ; le transport est `node:http` (le `fetch` d'undici ignore l'en-tête `Origin`, que le contrôle anti-CSRF exige avec un cookie de session) ; le compteur « par minute » est vidé dans Redis entre deux séries d'échecs pour atteindre le seuil cumulé de 10.
+
+### N1 — Le 429 de verrouillage de compte n'avait pas `Retry-After` (nouveau constat, Mineur, CORRIGÉ – À REVOIR)
+
+**Constat** : le périmètre du lot exige « le 429 renvoie le message de verrouillage, `Retry-After` présent ». Le test a échoué : `AccountLockout` levait une `HttpException(429)` simple ; seuls les 429 du limiteur global (`ThrottlerGuard`) et de SCIM posaient l'en-tête. Cela vaut pour le verrou (10 échecs), la limite par minute (login) et la limite MFA par compte. Aucune donnée exposée ; les clients et proxys ne pouvaient pas connaître le délai.
+
+**Correctif** (simple, sans changement de contrat : même statut, même message, même corps)
+- `backend/src/auth/account-lockout.ts` : `TooManyAttemptsException` (étend `HttpException`, porte `retryAfterSeconds`) ; la valeur du verrou stocke désormais l'instant de fin (ms) au lieu de `'1'` pour calculer le délai restant ; un ancien verrou `'1'` déjà en Redis retombe sur la durée de base (aucune migration, les verrous expirent en 15 min à 24 h) ; limite par minute : 60 s.
+- `backend/src/common/retry-after.filter.ts` (nouveau) : `RetryAfterFilter` pose `Retry-After` ; enregistré en `APP_FILTER` dans `backend/src/app.module.ts` (donc actif aussi dans l'application de test, sans toucher `main.ts`).
+- Test unitaire : `tests/unit/common/retry-after.filter.spec.ts` (3 tests : en-tête, plancher à 1 s, délai restant et ancien format). Tests `account-lockout.spec.ts` existants inchangés et verts.
+- **Changement cassant** : aucun (en-tête ajouté). Frontend inchangé (message toujours lu dans le corps).
+
+### Autorisation (IDOR/BOLA, RBAC, impersonation)
+
+Tests (`authz.e2e-spec.ts`) :
+- IDOR : un OWNER de l'espace A, connecté, ne lit rien de l'espace B (13 lectures : projet, tâches, membres, journaux, chemin critique, rapport de livraison, annuaire, intégrations, finances, sprints, vélocité) ; ses listes ne contiennent aucune donnée de B ; 13 écritures refusées (modifier, supprimer, créer projet, tâche, rôle, intégration, secret de webhook, note) et la base est inchangée (projet, tâche, note, intégration, aucun projet « intrus ») ; une note d'autrui répond 200 sans corps (filtrée par propriétaire, voir observation O-a) ; le secret de webhook n'apparaît dans aucune lecture, même pour le propriétaire.
+- RBAC : 11 règles sur 8 profils (OWNER, ADMIN, MEMBER, VIEWER, et les rôles de projet CLIENT, COMMENTER, CONTRIBUTOR, MANAGER) = 88 cas, oracle écrit dans le test (jamais importé de `permissions.ts`) : `project.read`, `task.read`, `task.write`, `project.write`, `project.manage` (attribution de rôle, secret de webhook), audit, finances, annuaire/intégrations, sprints, création de projet ; refus = 403 exactement ; autorisé = < 300. Suppression de projet (MANAGER seulement), escalade (un CONTRIBUTOR ne s'attribue pas MANAGER, un MANAGER non plus).
+- Impersonation : désactivée par défaut (404 même pour un SUPER_ADMIN) ; refus pour simple utilisateur, PLATFORM_ADMIN, motif absent, cible de plateforme, cible inconnue (aucun audit écrit) ; session d'impersonation : aucun jeton dans le corps, pas de cookie de rafraîchissement, session de l'administrateur révoquée, lecture permise, 403 sur MFA, GitHub, sessions, régénération du secret de webhook, attribution de rôle de projet, `/admin`, chaînage d'impersonation ; ligne d'audit avec le motif.
+
+### Limiteurs
+
+`rate-limits.e2e-spec.ts` : limiteur global (60 requêtes, la 61e : 429 `Trop de requêtes. Réessayez dans quelques instants.`, `Retry-After` entre 1 et 60, autre adresse intacte) ; routes publiques (`/auth/password/forgot` 3 par minute, `/auth/login` et `/auth/register` 5) ; `trust proxy` : adresses falsifiées à gauche du proxy de confiance sans effet (même compteur), adresses réelles distinctes comptées séparément, valeur illisible sans 5xx, `TRUST_PROXY_HOPS=0` (second démarrage de l'application) : `X-Forwarded-For` ignoré.
+
+### Webhook GitHub et SCIM
+
+`webhook-scim.e2e-spec.ts` : livraison valide (tâche close) puis rejeu de la même livraison ignoré (tâche rouverte non reclose) ; signature absente, sans préfixe, mal formée, d'un autre secret, calculée sur un autre corps, `sha1=` : 401 et rien n'est clos ; livraison absente ou invalide, dépôt différent, projet inconnu : 401 au corps identique (aucun oracle) ; JSON invalide correctement signé : 400 ; charge de 2 Mo + 4 Ko : 413 ; plus de 20 refus par minute pour une adresse et un projet : 429 même pour une livraison valide, autre adresse intacte ; ancienne route à secret global : 410. SCIM : clé absente, vide, inconnue, révoquée, expirée : 401 au format SCIM ; clé de l'espace A sans accès aux comptes de B (404, liste sans l'adresse, suppression refusée, appartenance conservée) ; corps > 1 Mo : 413 ; JSON malformé : 400 ; 300 requêtes par minute et par clé, la suivante : 429 au format SCIM avec le message français et `Retry-After`, une autre clé intacte.
+
+### Q-2 — aucun 5xx sur les abus
+
+`abuse-no-5xx.e2e-spec.ts` : catalogue de 192 cas d'abus (unique par nom, au moins 100 exigés par un test méta) paramétré par `it.each` ; échec sur tout statut `>= 500` et sur toute réponse laissant voir une pile d'appels, `PrismaClient`, un code `ER_*`, `SQLSTATE` ou `node_modules`. Classes : 10 routes publiques d'authentification × 9 corps hostiles (JSON tronqué, vide, tableau, `null`, types inattendus, pollution de prototype, chaînes de 300 Ko, `text/plain`, formulaire), injections SQL, octet nul, jetons falsifiés, en-têtes hostiles (`Authorization`, cookies, `X-Forwarded-For`, `Origin`), identifiants de chemin hostiles (non UUID, inconnu, traversée, injection, 2 000 caractères) sur 4 préfixes puis 30 routes, corps hostiles authentifiés, champs trop longs sur ses propres ressources, SCIM, webhook, routes et méthodes inexistantes, encodage invalide. **Liste d'exceptions admises : vide** (`ALLOWED_5XX`, avec un test qui exige une justification de plus de 20 caractères pour toute entrée future). La borne `< 500` des profils autorisés est tenue par la matrice de `authz.e2e-spec.ts` (autorisé = < 300 sur la vraie base ; les 120 cas en 500 du simulacre Prisma n'existent plus ici).
+
+### N2 — Champs texte sans longueur maximale : 500 sur une valeur trop longue (nouveau constat, Mineur, CORRIGÉ – À REVOIR)
+
+**Constat** : Q-2 a fait échouer 6 cas. Un utilisateur authentifié qui envoie un `name` (projet, sprint) ou un `title` (tâche) de 300 000 caractères, ou une `description` (projet) de 900 000 caractères, reçoit un 500 (MySQL « Data too long », colonne VARCHAR(191) ou TEXT de 65 535 octets), au lieu d'un 400. Aucune donnée exposée ni écriture partielle ; surface de déni de service limitée (1 Mo de corps, utilisateur connecté). `NoteDto` avait déjà ces bornes (S23) ; les DTO de projet, tâche et sprint non.
+
+**Correctif** : `@MaxLength(191)` sur `name`/`title`/`billingType`, `@MaxLength(16_000)` sur `description`/`labels` (mêmes valeurs que `NoteDto`) dans `create-project.dto.ts`, `update-project.dto.ts`, `create-task.dto.ts`, `update-task.dto.ts`, `create-sprint.dto.ts`. **Changement cassant éventuel** : une description de plus de 16 000 caractères (entre 16 000 et 65 535 octets en ASCII) est maintenant refusée (400) alors qu'elle passait ; à confirmer côté produit (valeur alignée sur les notes). Les autres DTO du dossier `projects/dto` n'ont pas été passés en revue champ par champ : le catalogue ne couvre que les routes citées. **Recommandation** : balayer les DTO restants (commentaires, jalons, livrables, ressources, intégrations) et étendre le catalogue.
+
+### Contre-mutations
+
+Méthode : le code de production est muté (script jetable hors dépôt), la suite visée est lancée avec `--forceExit` (les mutations O22 laissent des connexions ouvertes), puis le fichier est restauré par `\cp -f` depuis une copie faite juste avant, avec `cmp` identique pour chaque mutation. Une première exécution avait un environnement erroné (toutes les suites en échec pour une mauvaise raison) : elle a été écartée et refaite ; une interruption a laissé `auth.service.ts` muté, restauré par `\cp` et `cmp`, `git diff` vide sur ce fichier. Résultat final, échecs / tests de la suite visée :
+
+| # | Mutation | Résultat |
+| --- | --- | --- |
+| 01 | O22 : clients Redis de la gateway non conservés (donc non fermés) | 1/1 |
+| 02 | O22 : `$disconnect()` retiré de `PrismaService` | 1/1 |
+| 03 | O22 : `quit()` retiré de `RedisService` | 1/1 |
+| 04 | `LOCKOUT_THRESHOLD` 10 vers 1000 | 2/20 |
+| 05 | `Retry-After` retiré du filtre | 3/20 |
+| 06 | `ACCOUNT_FAILURES_PER_MINUTE` 5 vers 5000 | 2/20 |
+| 07 | réutilisation du refresh : famille non révoquée | 1/20 |
+| 08 | rotation : ancien jeton non révoqué | 2/20 |
+| 09 | cookie `SameSite=Lax` | 2/20 |
+| 10 | cookie `Secure` retiré en production | 1/20 |
+| 11 | cookie `HttpOnly` retiré | 2/20 |
+| 12 | garde JWT : absence de jeton acceptée | 6/20 |
+| 13 | anti-rejeu TOTP retiré | 1/20 |
+| 14 | essais par ticket MFA 5 vers 500 | 1/20 |
+| 15 | déconnexion sans révocation | 1/20 |
+| 16 | IDOR : un non-membre est MANAGER (`effectiveProjectRole`) | 2/98 |
+| 17 | IDOR : filtre `workspaceId` retiré de `assertWorkspaceMember` | 2/98 |
+| 19 | RBAC : `createTask` ouvert au COMMENTER | 1/98 |
+| 20 | impersonation : drapeau `IMPERSONATION` retiré | 2/98 |
+| 21 | impersonation : régénération du secret de webhook autorisée | 1/98 |
+| 22 | impersonation : attribution de rôle de projet autorisée | 1/98 |
+| 23 | impersonation : cible de plateforme permise | 1/98 |
+| 24 | limiteur global 60 vers 6000 | 1/7 |
+| 25 | `trust proxy` à `true` (XFF falsifiable) | 2/7 |
+| 26 | `trust proxy` : `X-Forwarded-For` lu à 0 saut | 1/7 |
+| 27 | limite SCIM par clé 300 vers 3000 | 1/12 |
+| 28 | SCIM : clé révoquée acceptée | 1/12 |
+| 29 | SCIM : clé expirée acceptée | 1/12 |
+| 30 | webhook : comparaison de signature retirée | 3/12 |
+| 31 | webhook : signature absente acceptée | 2/12 |
+| 32 | webhook : rejeu accepté | 1/12 |
+| 33 | webhook : plafond 2 Mo vers 50 Mo | 1/12 |
+| 34 | webhook : refus tolérés 20 vers 2000 | 1/12 |
+| 35 | corps JSON 1 Mo vers 50 Mo | 1/12 (SCIM 413) |
+| 36 | Q-2 : `MaxLength` du nom de projet retiré | 1/194 |
+| 37 | Q-2 : `MaxLength` du titre de tâche retiré | 1/194 |
+
+Mutations NON détectées (à connaître) :
+- **18** (`finances` ouvert au MEMBER dans `finances.service.ts`) : 0 échec. La route calcule ensuite le résumé projet par projet avec un second contrôle de rôle de projet, qui refuse toujours un MEMBER sans rôle de projet : mutation masquée par une seconde barrière (lecture déduite du comportement, chemin de code non relu ligne à ligne). Le comportement de bout en bout reste couvert (403 pour les 6 profils non OWNER/ADMIN).
+- Première version des mutations RBAC sur `permissions.ts` (`workspace.finances.read`, `task.write`) : 0 échec, parce que ces routes utilisent des listes de rôles écrites en dur dans les services (`finances.service.ts`, `tasks.service.ts`) et non la table `permissions.ts`. Observation O-b ci-dessous. Remplacées par les mutations 18 et 19.
+- Première version des mutations d'impersonation sur `mfa/setup` et sur le contrôleur `/admin` : 0 échec : ces routes refusent aussi la cible d'une autre façon (second contrôle, la cible n'a pas de rôle de plateforme). Le test a été durci avec des routes où seule l'interdiction d'impersonation s'oppose (mutations 21 et 22). Retirer `@ForbiddenInImpersonation()` du contrôleur `/admin` reste sans effet observable (équivalente, car une cible n'a jamais de rôle de plateforme).
+- Test O22 : la mutation « arrêt immédiat avant poignée de main » n'a pas été testée.
+- Test unitaire `retry-after.filter.spec.ts` : pas de contre-mutation propre (le même comportement est couvert par la mutation 05 en e2e).
+- Mutation d'un test précédente (Q-2, plafond JSON 50 Mo) : le cas « corps > 1 Mo » du catalogue ne la détecte pas (le refus 400 de la validation suffit au critère « pas de 5xx ») ; elle est détectée par le test SCIM (mutation 35).
+
+### Mesures (MySQL 8.0 et Redis 7 en conteneurs temporaires sur des ports libres, supprimés ensuite)
+
+| Mesure | Résultat |
+| --- | --- |
+| e2e (`jest --config jest-e2e.json --runInBand`) | **7 suites, 337 tests verts, 39 s** (62 s avec `--detectOpenHandles`, aucun handle signalé, aucun « did not exit »). Cible CI < 5 min : tenue, en local |
+| jest backend (`env -u DATABASE_URL`) | 106 suites, 2 961 tests verts (1 min 36) |
+| `nest build` | 0 erreur |
+| `tsc -p tests --noEmit` | 0 erreur |
+| ESLint (backend `src` et `tests`) | 0 erreur, 15 avertissements `no-explicit-any` préexistants |
+| Prettier | propre sur tous les fichiers modifiés ou créés |
+| vitest (frontend) | 34 fichiers, 296/296 |
+| actionlint | non lancé : `ci.yml` inchangé |
+| Conteneurs et processus | `p7tmp-mysql` et `p7tmp-redis` supprimés ; aucun jest ni script restant |
+
+### Observations (non bloquantes, pas des failles)
+
+- **O-a** : `GET /notes/:id` d'une note d'autrui ou inexistante répond 200 sans corps (le service renvoie `null`) au lieu de 404. Aucune fuite (filtre par propriétaire) ; hygiène d'API. Test tolérant (200, 403 ou 404, jamais de contenu).
+- **O-b** : la table `permissions.ts` n'est pas l'unique source des contrôles : plusieurs services (`finances.service.ts`, `tasks.service.ts`...) codent des listes de rôles en dur. Un changement de la table ne change pas ces routes. Les tests e2e protègent le comportement réel, pas la table. À traiter si A8 ou une refonte de la politique est envisagée.
+- **O-c** : `X-Forwarded-For` falsifié : le compteur `trust proxy` est correct pour `TRUST_PROXY_HOPS=1` ; la suite ne peut pas valider la valeur de production (nombre de proxys Nginx/Cloudflare), à confirmer par l'exploitation.
+- **O-d** : un compte suspendu garde l'accès jusqu'à 60 s si on le suspend directement en base sans révoquer (cache de session Redis, documenté dans `session.service.ts`). Les parcours applicatifs (administration, SCIM) révoquent. Non testé en e2e (le test direct en base contourne ce parcours).
+- **O-e** : un identifiant de projet d'un autre espace répond 403, un identifiant inexistant 404 : un attaquant qui devine des UUID distingue les deux. Risque négligeable (UUID v4) ; non « corrigé ».
+
+### Ce qui reste à faire / hors lot
+
+- Rien du périmètre P7 (points 1 à 6) n'est laissé de côté. Réserves : le balayage des DTO restants (N2), l'avis produit sur la borne de 16 000 caractères, et la contre-mutation 18 masquée.
+- Hors P7 (inchangés) : r48-a1, A9-b, A8, P2.
+
+### Questions pour l'architecte
+
+1. N2 : valider la borne de 16 000 caractères des descriptions et étiquettes (alignée sur `NoteDto`), et décider d'un balayage systématique des DTO de `projects/dto` (commentaires, jalons, livrables, ressources, intégrations) en lot dédié.
+2. N1 : le `Retry-After` d'une limite « par minute » vaut 60 s (borne haute, le compteur réel peut expirer plus tôt) ; accepter, ou exposer le TTL exact du compteur (changement de `LockoutStore`).
+3. O-b : faut-il aligner les contrôles en dur sur `permissions.ts` (une seule source) avant A8 ?
+4. Le job CI `e2e` n'a pas été exécuté sur GitHub (comportement réel non observé) ; la durée mesurée ici est locale (39 s).
+
+### Constats à passer en revue
+O22, P7 points 2 à 6, Q-2, N1 (Mineur), N2 (Mineur) : tous `CORRIGÉ – À REVOIR`.
+
+---
+
+## Revue architecte (r51) : lot Phase 6-2 (P7)
+
+Détail, mesures, contre-mutations et feu vert de commit : voir « Revue r51 » à la fin de `rapport-audit.md`. Code et tests relus et relancés (e2e 337/337 en 47 s avec `--detectOpenHandles`, jest backend 107 suites et 2 964 tests, build, `tsc -p tests`, ESLint, Prettier, vitest 296/296).
+
+| Constat | Verdict |
+| --- | --- |
+| O22 | **VALIDÉ** (crochets d'arrêt non activés en production : O23, Amélioration) |
+| P7 point 2 (authentification, session) | **VALIDÉ**, réserve r51-m1 |
+| P7 point 3 (IDOR/BOLA, RBAC, impersonation) | **VALIDÉ**, réserve r51-m2 |
+| P7 point 4 (limiteurs, `trust proxy`) | **VALIDÉ** |
+| P7 point 5 (webhook, SCIM) | **VALIDÉ** |
+| P7 point 6 / Q-2 | **VALIDÉ**, réserve r51-m3 |
+| N1 | **VALIDÉ** (code), test du délai à compléter (r51-m1) |
+| N2 | **VALIDÉ** ; production conforme (max 149 caractères en description, 61 en titre) ; balayage : r51-m3 |
+
+#### Revue architecte
+- **Contre-mutation finances non détectée** : seconde barrière confirmée (`getProjectFinances` refait le contrôle OWNER/ADMIN pour chaque projet). Il manque un test sur un espace sans projet (r51-m2). Pas de faille.
+- **Questions** : borne de 16 000 acceptée ; balayage des DTO en lot P7-b avec un test de garde sur les métadonnées `class-validator` ; `Retry-After` de 60 s accepté pour la limite par minute (délai du verrou exact) ; O-b dans A8, pas avant ; durée CI : le job `e2e` a déjà tourné sur GitHub (d1a1da7, 6 jobs verts), suite estimée à 2-3 min ; O-a à corriger en 404 plus tard (Amélioration) ; O-d accepté, ajouter un test de suspension par l'administration et par SCIM.
+- **Nouveaux constats** : r51-m1 (Mineur, test : le délai restant du verrou n'est pas verrouillé, mutation « délai constant » survivante), r51-m2 (Mineur, test : garde principale des finances non isolée), r51-m3 (Mineur : DTO sans `@MaxLength`, `update-sprint` probablement en 500), O23 (Amélioration : `enableShutdownHooks` absent, `quit()` à borner).
+- **Feu vert** : 5 commits (O22 ; N1 ; N2 ; suite e2e ; docs), détail dans le rapport. Rien n'est commité par l'architecte.
+
+#### Constats encore ouverts (pour relancer `fixeur`)
+1. r51-m1, r51-m2, r51-m3 (lot P7-b, avant A9-b), plus test de suspension (O-d).
+2. Améliorations : O23, O-a, r48-a1, r48-a2.
+3. Phase 6 : A9-b, puis A8 (avec O-b), puis P2.
