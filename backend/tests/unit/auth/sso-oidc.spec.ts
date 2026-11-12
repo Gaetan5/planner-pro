@@ -15,9 +15,9 @@ import {
   SignJWT,
   createLocalJWKSet,
   exportJWK,
+  exportSPKI,
   generateKeyPair,
   JWK,
-  KeyLike,
   JWTVerifyGetKey,
 } from 'jose';
 import { PrismaClient } from '@prisma/client';
@@ -45,8 +45,9 @@ describe('S10 : SSO OIDC', () => {
   let service: SsoService;
   let prisma: FakePrisma;
   let redis: FakeRedisService;
-  let privateKey: KeyLike;
-  let otherPrivateKey: KeyLike;
+  let privateKey: CryptoKey;
+  let publicKey: CryptoKey;
+  let otherPrivateKey: CryptoKey;
   let jwks: JWTVerifyGetKey;
   let fetchSpy: jest.SpyInstance;
   const authService = { completeLogin: jest.fn() };
@@ -57,6 +58,7 @@ describe('S10 : SSO OIDC', () => {
     const pair = await generateKeyPair('RS256');
     const other = await generateKeyPair('RS256');
     privateKey = pair.privateKey;
+    publicKey = pair.publicKey;
     otherPrivateKey = other.privateKey;
     const jwk: JWK = { ...(await exportJWK(pair.publicKey)), kid: 'k1', alg: 'RS256', use: 'sig' };
     jwks = createLocalJWKSet({ keys: [jwk] });
@@ -112,20 +114,29 @@ describe('S10 : SSO OIDC', () => {
   const sign = async (
     claims: Record<string, unknown>,
     options: {
-      key?: KeyLike;
+      key?: CryptoKey;
       iss?: string;
       aud?: string;
       exp?: string | number;
       alg?: string;
+      kid?: string;
+      omitIat?: boolean;
     } = {},
-  ) =>
-    new SignJWT({ tid: TENANT, oid: 'oid-1', email: 'ada@acme.com', name: 'Ada', ...claims })
-      .setProtectedHeader({ alg: (options.alg ?? 'RS256') as 'RS256', kid: 'k1' })
+  ) => {
+    const jwt = new SignJWT({
+      tid: TENANT,
+      oid: 'oid-1',
+      email: 'ada@acme.com',
+      name: 'Ada',
+      ...claims,
+    })
+      .setProtectedHeader({ alg: (options.alg ?? 'RS256') as 'RS256', kid: options.kid ?? 'k1' })
       .setIssuer(options.iss ?? ISSUER)
       .setAudience(options.aud ?? CLIENT_ID)
-      .setIssuedAt()
-      .setExpirationTime(options.exp ?? '5m')
-      .sign(options.key ?? privateKey);
+      .setExpirationTime(options.exp ?? '5m');
+    if (!options.omitIat) jwt.setIssuedAt();
+    return jwt.sign(options.key ?? privateKey);
+  };
 
   /** Démarre le flux et renvoie le state, le nonce et l'URL. */
   const start = async () => {
@@ -177,6 +188,14 @@ describe('S10 : SSO OIDC', () => {
       ['audience différente', () => ({ options: { aud: 'autre-client' } })],
       ['nonce différent', () => ({ claims: { nonce: 'autre-nonce' } })],
       ['jeton expiré', () => ({ options: { exp: Math.floor(Date.now() / 1000) - 3600 } })],
+      [
+        'jeton expiré depuis 10 minutes (au-delà de la tolérance de 60 s)',
+        () => ({ options: { exp: Math.floor(Date.now() / 1000) - 600 } }),
+      ],
+      ['iat manquant', () => ({ options: { omitIat: true } })],
+      ['nonce absent', () => ({ claims: { nonce: undefined } })],
+      ['nonce de type non textuel', () => ({ claims: { nonce: 12345 } })],
+      ['clé inconnue (kid absent du JWKS)', () => ({ options: { kid: 'k-inconnu' } })],
       ['tid d’un autre tenant', () => ({ claims: { tid: OTHER_TENANT } })],
       ['oid manquant', () => ({ claims: { oid: undefined } })],
     ])('%s : 401, ni compte ni session', async (_label, make) => {
@@ -189,6 +208,57 @@ describe('S10 : SSO OIDC', () => {
       await expect(service.handleCallback('code', flow.state, flow.state)).rejects.toThrow(
         UnauthorizedException,
       );
+      expectNoSideEffect();
+    });
+
+    it('liste blanche d’algorithmes : PS256 signé par une clé du JWKS sans attribut alg est refusé (seul RS256 est admis)', async () => {
+      const pss = await generateKeyPair('PS256');
+      const pssJwk: JWK = { ...(await exportJWK(pss.publicKey)), kid: 'k1', use: 'sig' };
+      keySource.getKeys.mockImplementation(() => createLocalJWKSet({ keys: [pssJwk] }));
+      const flow = await start();
+      mockIdp(await sign({ nonce: flow.nonce }, { key: pss.privateKey, alg: 'PS256' }));
+      await expect(service.handleCallback('code', flow.state, flow.state)).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expectNoSideEffect();
+    });
+
+    it('jeton expiré depuis 30 s : accepté (tolérance d’horloge de 60 s)', async () => {
+      await login({}, { exp: Math.floor(Date.now() / 1000) - 30 });
+      expect(authService.completeLogin).toHaveBeenCalledTimes(1);
+    });
+
+    it('HS256 signé avec la clé PUBLIQUE de l’IdP comme secret (confusion de clé) : 401', async () => {
+      const flow = await start();
+      const spki = await exportSPKI(publicKey);
+      const hs = await new SignJWT({
+        tid: TENANT,
+        oid: 'o',
+        email: 'ada@acme.com',
+        nonce: flow.nonce,
+      })
+        .setProtectedHeader({ alg: 'HS256', kid: 'k1' })
+        .setIssuer(ISSUER)
+        .setAudience(CLIENT_ID)
+        .setIssuedAt()
+        .setExpirationTime('5m')
+        .sign(new TextEncoder().encode(spki));
+      mockIdp(hs);
+      await expect(service.handleCallback('code', flow.state, flow.state)).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expectNoSideEffect();
+    });
+
+    it('récupération des clés en échec (IdP injoignable, délai dépassé) : 401 générique, jamais 500', async () => {
+      const flow = await start();
+      mockIdp(await sign({ nonce: flow.nonce }));
+      keySource.getKeys.mockImplementation(() => async () => {
+        throw new Error('timeout');
+      });
+      const outcome = service.handleCallback('code', flow.state, flow.state);
+      await expect(outcome).rejects.toThrow(UnauthorizedException);
+      await expect(outcome).rejects.toThrow("Jeton d'identité invalide.");
       expectNoSideEffect();
     });
 

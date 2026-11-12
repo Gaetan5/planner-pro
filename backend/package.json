@@ -42,7 +42,7 @@
     "firebase-admin": "^13.5.0",
     "helmet": "^8.2.0",
     "ioredis": "5.4.1",
-    "jose": "4.15.9",
+    "jose": "6.2.17",
     "mariadb": "^3.5.4",
     "nodemailer": "^10.4.0",
     "redis": "4.7.1",
@@ -89,6 +89,7 @@
       "firestore-rules\\.spec\\.ts"
     ],
     "transform": {
+      "/node_modules/.+\\.js$": "<rootDir>/jest-esm-transform.js",
       "^.+\\.(t|j)s$": [
         "ts-jest",
         {
@@ -96,6 +97,9 @@
         }
       ]
     },
+    "transformIgnorePatterns": [
+      "/node_modules/(?!(\\.pnpm/jose@6\\.[^/]+/node_modules/|jose/))"
+    ],
     "collectCoverageFrom": [
       "src/**/*.(t|j)s",
       "tests/**/*.(t|j)s"

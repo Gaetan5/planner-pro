@@ -115,8 +115,8 @@ importers:
         specifier: 5.4.1
         version: 5.4.1
       jose:
-        specifier: 4.15.9
-        version: 4.15.9
+        specifier: 6.2.17
+        version: 6.2.17
       mariadb:
         specifier: '>=3.5.4 <4'
         version: 3.5.4
@@ -7186,10 +7186,10 @@ packages:
         integrity: sha512-1vUQX+IdDMVPj4k8kOxgUqlcK518yluMuGZwqlr44FS1ppZB/5GWh4rZG89erpOBOJjU/OBsnCVFfapsRz6nEA==,
       }
 
-  jose@6.2.13:
+  jose@6.2.17:
     resolution:
       {
-        integrity: sha512-7TIg10ZE1x82YediN+lcrPNvGMKge9yFHQD+Qho/b8y2adfugU3AsvvHfxV0fzyFllT6l9xCjf4RWY9g/Z9PJQ==,
+        integrity: sha512-wOuK9V1yujQFH5S0ZWmLcDZN7+IKh9bUCC2ZPCf2HDlol3WWHy+PPyNjEI75FXRLMp3vDKQcupP59xhVU95hcg==,
       }
 
   js-tokens@4.0.0:
@@ -12154,7 +12154,7 @@ snapshots:
       express: 5.3.0
       express-rate-limit: 8.7.1(express@5.3.0)
       hono: 4.12.27
-      jose: 6.2.13
+      jose: 6.2.17
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
       raw-body: 3.0.2
@@ -15638,7 +15638,7 @@ snapshots:
 
   jose@4.15.9: {}
 
-  jose@6.2.13: {}
+  jose@6.2.17: {}
 
   js-tokens@4.0.0: {}
 
