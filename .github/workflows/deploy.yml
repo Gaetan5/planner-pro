@@ -1,0 +1,104 @@
+name: Deploy production
+# Déploiement continu : déclenché après une CI verte sur main (ou à la main), puis ATTEND
+# l'approbation d'un relecteur de l'environnement GitHub « production ». Le travail réel est fait
+# SUR la VM par scripts/deploy-production.sh (sauvegarde, build, vérifications, retour automatique).
+# Aucune action tierce : SSH natif. Mise en place : docs/deployment-production.md, « Déploiement continu ».
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'SHA complet (40 caractères) à déployer ; vide = tête de main'
+        required: false
+        type: string
+
+# Un seul déploiement à la fois, jamais annulé en cours de route
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+# Pas de checkout : seule la lecture des exécutions de workflow est nécessaire (contrôle de la CI)
+permissions:
+  actions: read
+
+jobs:
+  deploy:
+    # workflow_run : seulement une CI réussie, issue d'une poussée sur main de ce dépôt (pas d'une PR)
+    # Interrupteur de mise en service : variable de dépôt DEPLOY_ENABLED=true (absente par défaut ;
+    # la supprimer coupe le CD immédiatement)
+    if: >-
+      vars.DEPLOY_ENABLED == 'true' && (
+      github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' ||
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository )
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # Approbation manuelle : relecteurs requis configurés sur l'environnement ; les secrets
+    # DEPLOY_* sont des secrets de cet environnement (inaccessibles avant approbation).
+    environment:
+      name: production
+      url: https://planner-pro.boukarou-os.com
+    steps:
+      - name: Déterminer le SHA à déployer
+        id: sha
+        env:
+          EVENT: ${{ github.event_name }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          INPUT_SHA: ${{ inputs.sha }}
+          REF_SHA: ${{ github.sha }}
+        run: |
+          if [ "$EVENT" = "workflow_run" ]; then sha="$RUN_SHA"; else sha="${INPUT_SHA:-$REF_SHA}"; fi
+          if ! printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "SHA invalide : 40 caractères hexadécimaux minuscules attendus." >&2
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Déploiement demandé : $sha" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Exiger une CI réussie pour ce SHA (déclenchement manuel)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SHA: ${{ steps.sha.outputs.sha }}
+        run: |
+          n=$(gh run list --workflow ci.yml --event push --commit "$SHA" --status success --json databaseId --jq length)
+          if [ "${n:-0}" -lt 1 ]; then
+            echo "Aucune exécution réussie de la CI pour $SHA : déploiement refusé." >&2
+            exit 1
+          fi
+
+      - name: Préparer SSH (clé dédiée, empreinte d'hôte épinglée)
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          umask 077
+          mkdir -p "$RUNNER_TEMP/ssh"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$RUNNER_TEMP/ssh/id"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$RUNNER_TEMP/ssh/known_hosts"
+
+      - name: Déployer sur la VM
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          SHA: ${{ steps.sha.outputs.sha }}
+        # La clé est liée à un command= côté VM : seule la commande « deploy <sha> » est acceptée.
+        run: |
+          ssh -T -F /dev/null -i "$RUNNER_TEMP/ssh/id" \
+            -o IdentitiesOnly=yes -o BatchMode=yes -o IdentityAgent=none -o ForwardAgent=no \
+            -o HostKeyAlgorithms=ssh-ed25519 \
+            -o UserKnownHostsFile="$RUNNER_TEMP/ssh/known_hosts" \
+            -o StrictHostKeyChecking=yes \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=40 \
+            "$DEPLOY_USER@$DEPLOY_HOST" "deploy $SHA"
+
+      - name: Nettoyage de la clé
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/ssh"

@@ -12,7 +12,7 @@ Environment=PROJECT_DIR=/opt/planner-pro
 Environment=BACKUP_DIR=/var/backups/planner-pro
 Environment=PASSPHRASE_FILE=/etc/planner-pro/backup-passphrase
 Environment=RETENTION_DAYS=30
-ExecStart=/opt/planner-pro/scripts/backup-production.sh
+ExecStart=/usr/local/lib/planner-pro/backup-production.sh
 UMask=0077
 NoNewPrivileges=true
 ProtectHome=true
