@@ -1,13 +1,8 @@
-import { INestApplication } from '@nestjs/common';
+import { INestApplication, LoggerService } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
-import * as cookieParser from 'cookie-parser';
 import { AppModule } from '../../../src/app.module';
-import { originCheckMiddleware } from '../../../src/auth/origin-guard';
-import { AppValidationPipe } from '../../../src/common/app-validation.pipe';
-import { registerBodyParsers } from '../../../src/common/body-parsers';
-import { noStoreMiddleware } from '../../../src/common/no-store.middleware';
-import { configureTrustProxy } from '../../../src/common/trust-proxy';
+import { configureHttpApp } from '../../../src/common/configure-http-app';
 
 /**
  * Environnement minimal d'une exécution e2e (A9). Les valeurs viennent de la CI ou de l'appel
@@ -33,25 +28,21 @@ export function prepareE2eEnvironment(): void {
 
 /**
  * Démarre l'application complète (AppModule : vraie base MySQL, vrai Redis, gardes globaux) sur un
- * port éphémère. La configuration HTTP reproduit `main.ts` (hors helmet et CORS, sans effet sur les
- * contrôles testés) avec un proxy de confiance : chaque exécution choisit son adresse
- * `X-Forwarded-For`, donc son propre compteur de limitation de débit (S24).
+ * port éphémère. La configuration HTTP est celle de `main.ts` (`configureHttpApp`, Helmet et CORS compris,
+ * A9-b0) avec un proxy de confiance : chaque exécution choisit son adresse `X-Forwarded-For`, donc
+ * son propre compteur de limitation de débit (S24). `logger` : journal Nest à capturer (table des
+ * routes) ; par défaut, aucun journal.
  */
 export async function startE2eApp(
-  options: { trustProxyHops?: string } = {},
+  options: { trustProxyHops?: string; logger?: LoggerService } = {},
 ): Promise<{ app: INestApplication; baseUrl: string }> {
   prepareE2eEnvironment();
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
   const app = moduleRef.createNestApplication<NestExpressApplication>({
-    logger: false,
+    logger: options.logger ?? false,
     rawBody: true,
   });
-  configureTrustProxy(app, { TRUST_PROXY_HOPS: options.trustProxyHops ?? '1' });
-  registerBodyParsers(app);
-  app.use(noStoreMiddleware());
-  app.useGlobalPipes(new AppValidationPipe());
-  app.use(cookieParser());
-  app.use(originCheckMiddleware());
+  configureHttpApp(app, { ...process.env, TRUST_PROXY_HOPS: options.trustProxyHops ?? '1' });
   await app.listen(0, '127.0.0.1');
   const address = app.getHttpServer().address() as { port: number };
   return { app, baseUrl: `http://127.0.0.1:${address.port}` };

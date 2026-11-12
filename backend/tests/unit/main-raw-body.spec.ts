@@ -13,7 +13,9 @@ describe('S21 : main.ts conserve le corps brut', () => {
   });
 
   it('les parseurs JSON sont enregistrés par app.useBodyParser (qui pose le rawBody)', () => {
-    expect(main).toContain('registerBodyParsers(app)');
+    expect(main).toContain('configureHttpApp(app)');
+    const wiring = readFileSync(join(__dirname, '../../src/common/configure-http-app.ts'), 'utf8');
+    expect(wiring).toContain('registerBodyParsers(app)');
     const parsers = readFileSync(join(__dirname, '../../src/common/body-parsers.ts'), 'utf8');
     expect(parsers).toContain("app.useBodyParser('json'");
   });

@@ -1,4 +1,4 @@
-import { INestApplication } from '@nestjs/common';
+import { INestApplication, LoggerService } from '@nestjs/common';
 import { PlatformRole, ProjectRole, WorkspaceRole } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import * as http from 'http';
@@ -53,6 +53,17 @@ export interface E2eSession {
   response: E2eResponse;
 }
 
+/**
+ * R4 (A9-b0) : `Retry-After` d'un 429 est un entier de secondes, au moins 1 et au plus `max`
+ * (60 pour les limiteurs par minute ; le verrouillage de compte peut aller jusqu'à 24 h).
+ */
+export function expectRetryAfter(res: E2eResponse, max = 60): void {
+  const raw = res.headers.get('retry-after');
+  expect([res.status, raw]).toEqual([429, raw]);
+  expect(raw).toMatch(/^[1-9]\d*$/);
+  expect(Number(raw)).toBeLessThanOrEqual(max);
+}
+
 /** Valeur d'un cookie posé par une réponse (nom exact), ou undefined. */
 export function cookieValue(res: E2eResponse, name: string): string | undefined {
   const line = res.setCookies.find((c) => c.startsWith(`${name}=`));
@@ -84,7 +95,9 @@ export class E2eWorld {
     this.redis = app.get(RedisService);
   }
 
-  static async start(options: { trustProxyHops?: string } = {}): Promise<E2eWorld> {
+  static async start(
+    options: { trustProxyHops?: string; logger?: LoggerService } = {},
+  ): Promise<E2eWorld> {
     const { app, baseUrl } = await startE2eApp(options);
     return new E2eWorld(app, baseUrl);
   }

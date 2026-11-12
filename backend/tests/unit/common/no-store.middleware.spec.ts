@@ -44,6 +44,12 @@ describe('O16 : noStoreMiddleware', () => {
 
   it('main.ts branche le middleware (test HTTP et production restent alignés)', () => {
     const main = readFileSync(join(__dirname, '../../../src/main.ts'), 'utf8');
-    expect(main).toContain('app.use(noStoreMiddleware())');
+    // A9-b0 : le câblage HTTP est dans configure-http-app.ts, appelé par main.ts
+    const wiring = readFileSync(
+      join(__dirname, '../../../src/common/configure-http-app.ts'),
+      'utf8',
+    );
+    expect(main).toContain('configureHttpApp(app)');
+    expect(wiring).toContain('app.use(noStoreMiddleware())');
   });
 });

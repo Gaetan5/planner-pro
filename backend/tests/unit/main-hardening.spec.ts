@@ -8,12 +8,15 @@ import { join } from 'path';
  */
 describe('S23/S24 : câblage de main.ts et du module racine', () => {
   const main = readFileSync(join(__dirname, '../../src/main.ts'), 'utf8');
+  // A9-b0 : le câblage HTTP vit dans configure-http-app.ts, appelé par main.ts et par le banc e2e
+  const wiring = readFileSync(join(__dirname, '../../src/common/configure-http-app.ts'), 'utf8');
   const appModule = readFileSync(join(__dirname, '../../src/app.module.ts'), 'utf8');
 
   it('main.ts règle trust proxy avant les analyseurs de corps et le middleware CORS/origine', () => {
-    const trust = main.indexOf('configureTrustProxy(app)');
-    const bodies = main.indexOf('registerBodyParsers(app)');
-    const origin = main.indexOf('originCheckMiddleware()');
+    expect(main).toContain('configureHttpApp(app)');
+    const trust = wiring.indexOf('configureTrustProxy(app');
+    const bodies = wiring.indexOf('registerBodyParsers(app)');
+    const origin = wiring.indexOf('originCheckMiddleware()');
     expect(trust).toBeGreaterThan(-1);
     expect(bodies).toBeGreaterThan(trust);
     expect(origin).toBeGreaterThan(bodies);
