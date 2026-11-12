@@ -5716,3 +5716,107 @@ Demande directe de l'utilisateur (déploiement continu), hors revue rNN. Aucune 
 ### Constats à passer en revue
 
 CD : `CORRIGÉ – À REVOIR`.
+
+## Revue architecte (r61) : lot CD
+
+Verdict global : **À REPRENDRE**. Rejeu : 87 vérifications confirmées (86 + ShellCheck rejoué séparément, 0 avertissement). Contre-mutations : wrapper (ancre, longueur) et reset du dépôt détectées ; filtre `workflow_run` et arguments du `sudo find` **non détectés**. Détail, preuves et procédure d'activation : `docs/security/rapport-audit.md`, « Revue r61 ».
+
+### CD — Déploiement continu avec approbation manuelle
+**Verdict : À REPRENDRE.**
+- À reprendre, dans cet ordre :
+  1. **CD-1** (Majeur) : à SHA identique, toujours créer un point de retour horodaté des images en cours ; ne déplacer `rollback-latest` que si `PREV_SHA != SHA`. Test : redéploiement échoué = `HEAD` inchangé, jamais C1.
+  2. **CD-3** (Majeur) : la sauvegarde exécutée par root ne doit plus être dans le clone (`/usr/local/lib/planner-pro/`), unité et documentation adaptées ; `git status --porcelain` capturé avec contrôle du code de retour dans les deux scripts, test à l'appui.
+  3. **CD-2** (Majeur) : documentation avec utilisateur dédié `deploy` (docker, sans sudo général), sudoers à son nom, réglages GitHub (ruleset, relecteur, branches de déploiement) rendus obligatoires, durcissement sshd.
+  4. **r61-m2** : section statique de test sur `deploy.yml` (M3 doit échouer). **r61-m3** : comparaison exacte des lignes `sudo` (M4 doit échouer). **r61-m4** : vérification de la CI pour `workflow_dispatch`. **r61-m1** : `vars.DEPLOY_ENABLED`. **r61-m5** : dry-run en lecture seule plus complet. **r61-m6** : journal du backend hors sortie SSH. **r61-m7** : SHA du retour validé comme ancêtre.
+  5. Facultatifs : r61-a1 (avertir si `scripts/` change), r61-a2 (wrapper), r61-a3 (options `ssh`).
+- Points validés : wrapper (injections, sauts de ligne, UTF-8, longueur), sudoers sans joker, `restrict`, filtrage du déclencheur `workflow_run` et SHA exact, valeurs `${{ }}` toujours passées par `env:`, ordre sauvegarde/étiquetage/merge/build/recréation, reset du dépôt après échec de build, verrou, retour ne touchant jamais la base ni les fichiers ignorés.
+- Écarts du fixeur : (1) seconde règle sudo : acceptée ; (2) `StopTimeout` en avertissement : accepté ; (3) vrai git dans les tests : accepté. Réponses aux sept questions : rapport, « Réponses aux questions du fixeur ».
+
+### Constats encore ouverts
+CD-1, CD-3, CD-2, r61-m2, r61-m3, r61-m4, r61-m1, r61-m5, r61-m6, r61-m7, r61-a1, r61-a2, r61-a3, puis A9-b4, A8, P2 (inchangés).
+
+## Lot CD-b (fixeur)
+
+Reprise du lot CD après la revue r61 (À REPRENDRE). Aucune migration, dépendance ni changement de schéma. Aucune connexion à la VM ni à GitHub, aucun secret ni réglage créé, rien commité.
+
+### CD-1 — Point de retour à SHA identique
+**Statut** : `CORRIGÉ – À REVOIR`. **Changement** : `scripts/deploy-production.sh` (`step_rollback_points`) crée toujours `rollback-<ts>` des images en cours et son fichier de commit ; `rollback-latest` et son fichier ne bougent que si le commit change ; l'auto-retour utilise le point horodaté. **Tests** : redéploiement raté de C2 : code 2, HEAD = C2, retour sur `rollback-<ts>`, `rollback-latest` toujours C1. **Contre-mutation** : `ROLLBACK_TAG="rollback-latest"` rétabli, 5 échecs.
+
+### CD-3 — Sauvegarde hors du clone, `git status` contrôlé
+**Statut** : `CORRIGÉ – À REVOIR`. **Changement** : `ops/systemd/planner-pro-backup.service` (`ExecStart=/usr/local/lib/planner-pro/backup-production.sh`) ; documentation (étape 3 des sauvegardes, migration d'une installation existante, `ls -l /opt/planner-pro/scripts/`) ; `require_clean_tree` (lib) utilisée par le déploiement (deux fois) et le retour manuel, code de retour de `git status` contrôlé. **Tests** : doublure `git status` en échec : refus code 1, aucune sauvegarde, retour manuel refusé ; garde sur l'unité (ExecStart, absence de `/opt/planner-pro/scripts`). **Contre-mutation** : contrôle du code de retour neutralisé, 5 échecs.
+
+### CD-2 — Compte dédié et réglages obligatoires (dépôt et documentation seulement)
+**Statut** : `CORRIGÉ – À REVOIR` pour le dépôt ; la mise en place VM/GitHub reste à faire par l'exploitant. **Changement** : `docs/deployment-production.md`, « Mise en place » réécrite : utilisateur `deploy` (groupe docker, sans sudo général), sudoers au nom de `deploy`, `sshd` durci, ruleset sur `main`, relecteur et branches limitées à `main` obligatoires, 2FA, option `REQUIRE_SIGNED_COMMITS=1` (`git verify-commit`, testée : commit non signé refusé), amorçage d'une VM sans scripts, contrôle à blanc. **Écart** : l'option de signature n'est pas activée par défaut (politique des commits de fusion GitHub à décider).
+
+### r61-m1 à m7, a1 à a3
+- m1 : `if: vars.DEPLOY_ENABLED == 'true' && (...)`. m4 : étape `gh run list --workflow ci.yml --event push --commit` avant SSH pour `workflow_dispatch`, `permissions: actions: read`. 
+- m2 : section statique de la suite sur `deploy.yml` (trois conditions `workflow_run`, interrupteur, `environment`, `StrictHostKeyChecking=yes`, `cancel-in-progress: false`, permissions sans écriture, aucun `pull_request`, aucune expression `${{ }}` dans un bloc `run`, actions épinglées). **M3 rejouée** : 3 échecs.
+- m3 : la doublure `sudo` émule sudoers (arguments exacts) et un test compare les lignes documentées aux appels. **M4 rejouée** (`-maxdepth 2`) : 41 échecs.
+- m5 : `--dry-run` fait `sudo -n -l`, le `find` réel, `check_containers`, `check_http` (sans redémarrage du proxy) et `check_proxy_ports` ; 4 cas en échec code 1 testés. Contre-mutation (contrôle `sudo -l` retiré) : 1 échec. Point d'attention : un backend ayant eu un redémarrage passé fait échouer `check_containers` en dry-run.
+- m6 : les 40 lignes du backend vont dans le fichier de journal seulement (mutation : 1 échec). m7 : SHA du fichier d'état validé (40 hex, `cat-file`, ancêtre de HEAD ou `origin/main`) avant tout retag et `reset --hard` (mutation : 1 échec).
+- a1 : avertissement si `scripts/` ou `ops/` changent. a2 : `LC_ALL=C`, surcharge du script réservée à `PLANNER_PRO_TEST=1` (testée). a3 : `ssh -T -F /dev/null`, `IdentityAgent=none`, `ForwardAgent=no`, `HostKeyAlgorithms=ssh-ed25519`.
+
+### Mesures du lot
+
+| Contrôle | Résultat |
+|---|---|
+| Tests des scripts (bash) | 135 réussis, 0 échec (ShellCheck inclus) |
+| ShellCheck (5 scripts), depuis la racine et depuis `scripts/` | 0 avertissement |
+| YAML des workflows | valides |
+| e2e, jest, build, vitest | non concernés, non relancés |
+| Environnement | aucun conteneur ni connexion ; fichiers restaurés par `\cp`, `cmp` identique |
+
+### Constats à passer en revue
+
+CD-1, CD-2 (dépôt/documentation), CD-3, r61-m1 à m7, r61-a1 à a3 : `CORRIGÉ – À REVOIR`.
+
+## Revue architecte (r62) : lot CD-b
+
+Verdict global : **À REPRENDRE** (tests seulement). Rejeu : 135 vérifications confirmées (134 + ShellCheck rejoué, 0 avertissement). Contre-mutations propres : N1/N2 (CD-1), N6, N7 détectées ; **N3/N4 (CI exigée au déclenchement manuel) et N5 (ascendance du SHA de retour) non détectées**. Détail, réponses et procédure d'activation : `docs/security/rapport-audit.md`, « Revue r62 ».
+
+- **CD-1** : VALIDÉ. **CD-3** : VALIDÉ. **CD-2** : VALIDÉ côté dépôt et documentation (mise en place VM/GitHub à faire selon la procédure).
+- **r61-m1, m2, m3, m5, m6, a1, a2, a3** : VALIDÉS.
+- **r61-m4** : À REPRENDRE : ajouter à la section statique de `deploy.yml` la garde de l'étape (événement `workflow_dispatch`, `gh run list`, `--workflow ci.yml`, `--status success`, `--commit "$SHA"`, permissions `actions: read` seules) ; N3 et N4 doivent échouer (**r62-m1**).
+- **r61-m7** : À REPRENDRE : tester le refus d'un SHA existant mais hors historique (état `rollback-latest` falsifié) pour le retour manuel et l'auto-retour ; N5 doit échouer (**r62-m2**).
+- **r62-m3** : en dry-run, `RestartCount > 0` en avertissement, pas en échec ; inchangé en déploiement réel.
+- Réponses : signature des commits désactivée à l'activation (la signature des fusions GitHub est celle de GitHub, sans valeur contre un compte compromis) ; chemin figé du wrapper accepté.
+
+### Constats encore ouverts
+r62-m1, r62-m2, r62-m3, puis A9-b4, A8, P2 (inchangés).
+
+## Lot CD-c (fixeur)
+
+Reprise de r62-m1, r62-m2, r62-m3. Aucune migration, dépendance ni schéma ; aucune connexion ; rien commité ; `rapport-audit.md` non touché.
+
+### r62-m1 — Garde de l'étape « CI réussie » (workflow_dispatch)
+**Statut** : `CORRIGÉ – À REVOIR`. **Changement** (tests seulement) : `scripts/tests/test-production-scripts.sh` vérifie dans `deploy.yml` la présence de l'étape avant l'étape SSH, sa condition exacte `github.event_name == 'workflow_dispatch'`, `gh run list`, `--workflow ci.yml`, `--status success`, `--commit "$SHA"`, `--event push`, l'absence de `continue-on-error`, l'absence de condition sur l'étape SSH (non sautable) et `permissions` = `actions: read` seul. Le bloc `run:` est de plus extrait du YAML et exécuté avec une doublure de `gh` qui n'annonce un succès que si les trois filtres sont présents : CI réussie, passe ; CI absente ou échouée, échec. **Contre-mutations** : N3 (`--status success` retiré) 2 échecs ; N4 (condition remplacée par `false`) 1 échec.
+
+### r62-m2 — Garde de l'ascendance du SHA de retour
+**Statut** : `CORRIGÉ – À REVOIR`. **Tests** : `rollback-latest` contient le SHA de la branche `side` (objet existant, hors historique de HEAD et d'`origin/main`) : refus code 1, HEAD inchangé, aucun `docker tag`, aucun `up`. **Contre-mutation** : N5 (clause d'ascendance neutralisée, tout SHA existant accepté) 5 échecs.
+
+### r62-m3 — RestartCount en dry-run
+**Statut** : `CORRIGÉ – À REVOIR`. **Changement** : `scripts/lib/production-common.sh` (`check_containers`) : en `DRY_RUN`, un `RestartCount` non nul est un avertissement ; `running`/`healthy` restent bloquants ; comportement inchangé en déploiement réel et en retour. **Tests** : dry-run avec `RestartCount=1` : code 0 et `WARN` ; déploiement réel : code 3 (le redémarrage persiste après la recréation et après le retour, HEAD restauré) ; retour manuel : code 3. **Contre-mutation** (avertissement redevenu bloquant) : 2 échecs.
+
+### Mesures du lot
+
+| Contrôle | Résultat |
+|---|---|
+| Tests des scripts (bash) | 160 réussis, 0 échec (ShellCheck inclus) |
+| ShellCheck (5 scripts) | 0 avertissement |
+| Autres suites | non concernées, non relancées |
+| Environnement | aucun conteneur ni connexion ; fichiers restaurés par `\cp`, `cmp` identique |
+
+### Constats à passer en revue
+
+r62-m1, r62-m2, r62-m3 : `CORRIGÉ – À REVOIR`.
+
+## Revue architecte (r63) : lot CD-c
+
+Verdict global : **VALIDÉ**. Rejeu : 160 vérifications confirmées (159 + ShellCheck, 0 avertissement). Contre-mutations propres : N3 (2 échecs), N4 (1), N5 (4), N8 `exit 0` du contrôle CI (2), N9 `RestartCount` toléré en réel (3) ; fichiers restaurés par `\cp`, `cmp` identique.
+
+- **r62-m1** : VALIDÉ. **r62-m2** : VALIDÉ. **r62-m3** : VALIDÉ. r61-m4 et r61-m7 clos.
+- Réponse à la question : contrôle de la CI laissé dans le YAML (pas de `checkout`), bloc `run:` extrait et exécuté avec doublure de `gh` : accepté.
+- Feu vert de commit en 4 commits (scripts + unité + `deploy.yml` ensemble, `ci.yml`, documentation de déploiement, docs de sécurité) et procédure d'activation : rapport, « Revue r63 ».
+
+### Constats encore ouverts
+Aucun pour le lot CD. Restent A9-b4, A8, P2 (inchangés).
