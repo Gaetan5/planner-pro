@@ -1,6 +1,6 @@
 # Intégration continue (A9)
 
-Workflow : `.github/workflows/ci.yml`. Déclencheurs : `pull_request` (toutes les branches) et `push` sur `main` et `security/**`. Node 20 et pnpm 10 (épinglé par `packageManager`) partout, `--frozen-lockfile` partout, actions GitHub épinglées par SHA complet.
+Workflow : `.github/workflows/ci.yml`. Déclencheurs : `pull_request` (toutes les branches) et `push` sur `main` et `security/**`. Node 22 et pnpm 10 (épinglé par `packageManager`) partout, `--frozen-lockfile` partout, actions GitHub épinglées par SHA complet.
 
 | Job                | Rôle                                                                                                                                                            | Échoue si                                                                                                                 |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |

@@ -5238,3 +5238,101 @@ Batterie rejouée sur `r55-mysql` et `r55-redis` (supprimés) : e2e 8 suites 388
 **Feu vert de commit** : 2 commits, voir le rapport (code et tests SCIM ensemble, puis docs). **Conditions de déploiement** : aucune migration ni variable, pas de changement de proxy ; sauvegarde `mysqldump` avant la migration N6 en attente. **SCIM activable en production après ce déploiement**, après test de bout en bout avec l'IdP réel sur un espace pilote et confirmation de `TRUST_PROXY_HOPS`.
 
 **Constats encore ouverts (à relancer vers `fixeur`)** : aucun bloquant. Suite : A9-b (NestJS 11), A8 (y inclure O-b et O-e), P2. Améliorations : r55-a1 (observer), r53-a1, r53-a2, O-f, O23, O-a, r48-a1, r48-a2. Environnement : conteneurs `r55-mysql` et `r55-redis` supprimés, rien commité ni poussé, aucune écriture en production.
+
+## Lot A9-b0 (fixeur)
+
+Revue de référence : spécification A9-b (architecte, 2026-11-11), sous-lot A9-b0 uniquement. Aucune migration, aucun changement de schéma, aucune version de NestJS, du throttler, de `jose` ni d'Express modifiée. Dépendance touchée : `@types/node` 20.3.1 vers 22.20.5 (backend, types seulement, tire `undici-types` 6.21.0). Lockfile régénéré par `pnpm install --lockfile-only` puis Prettier : 292 lignes de diff (renommage `@types/node`, `integrity`, quelques lignes `libc:` et un `deprecated:` ajoutés par pnpm 10.34.9), `--frozen-lockfile` valide. Environnement : conteneurs `a9b0-mysql` (8.0) et `a9b0-redis` (7), base `planner_pro_e2e`, supprimés à la fin ; aucune clé SSH, aucun serveur contacté.
+
+### A9-b0-1 — Câblage HTTP partagé et tests de caractérisation (R2, R4, R6, R9, R11)
+
+**Statut** : `CORRIGÉ – À REVOIR`
+
+**Changement**
+- Nouveau `backend/src/common/configure-http-app.ts` (`configureHttpApp(app, env)`) : proxy de confiance, analyseurs de corps, Helmet, no-store, `AppValidationPipe`, cookies, anti-CSRF, CORS, dans l'ordre exact de l'ancien `main.ts`, qui ne fait plus qu'appeler cette fonction. `tests/e2e/support/e2e-app.ts` l'appelle aussi : **les 388 e2e existants tournent désormais avec Helmet et CORS** (tous verts). `startE2eApp` et `E2eWorld.start` acceptent un `logger`.
+- Nouveau `tests/e2e/security/a9b0-routes.e2e-spec.ts` (2 tests) et `a9b0-routes.reference.txt` (148 lignes `Mapped {chemin, MÉTHODE} route`, triées) : table des routes (R1), plus contrôle qu'aucun chemin ne contient `* ? + ( ) [ ]`. Régénération : `A9B0_WRITE_ROUTES=1`.
+- Nouveau `tests/e2e/security/a9b0-http-characterization.e2e-spec.ts` (14 tests) et `a9b0-http-snapshot.reference.json` : R11 (12 en-têtes Helmet, pas de `X-Powered-By`, no-store sur `/auth`, `/admin` et le secret du webhook en 401 et sur `/Projects/.../Secret/`, CORS autorisé et refusé, instantané de 14 réponses : 200, 401, 404, no-store, SCIM sans clé, OPTIONS x2, webhook non signé et signé, JSON 1,2 Mo 413, JSON mal formé 400, 429 de connexion) ; R2 (livraison valide 201, 1,5 Mo 201, 2,5 Mo 413, signature altérée 401, 429 du pré-contrôle identique, sur `/projects/<id>/webhooks/github`, avec barre finale, et `/Projects/<id>/WEBHOOKS/GitHub/`) ; R6 (corps brut : signature du corps exact acceptée, signature du corps compact sur un corps ré-sérialisé refusée ; 413 au-delà de 1 Mo et accepté à 0,9 Mo ; JSON mal formé 400 ; POST sans corps 400 ; `application/scim+json` analysé) ; R9 (`?a[b]=1` 400). Variables d'environnement épinglées (CORS, FEATURE_*) car `ConfigModule` charge un `.env` local.
+- R4 : helper `expectRetryAfter(res, max)` (`e2e-world.ts`) : entier de secondes, >= 1, <= max. Appliqué aux 6 assertions existantes sur `Retry-After` (rate-limits x2, auth-session x3, SCIM x1) : **assertions renforcées, aucune affaiblie** (avant : `> 0` ou `toBeTruthy`).
+- Tests de garde modifiés : `main-hardening.spec.ts`, `main-raw-body.spec.ts`, `no-store.middleware.spec.ts` lisaient `main.ts` comme du texte ; ils lisent maintenant `configure-http-app.ts` pour l'ordre et le contenu, et vérifient que `main.ts` appelle `configureHttpApp(app)`. Mêmes assertions de fond.
+
+**Tests** : e2e 10 suites, 404/404 (388 + 16), `--detectOpenHandles` sans handle ouvert. Les tests sont verts sur NestJS 10 avant tout changement de version.
+
+**Contre-mutations** (fichier sauvegardé, restauré par `\cp`, `cmp` identique à chaque fois)
+| Mutation | Résultat |
+| --- | --- |
+| (a) `WEBHOOK_PATH` sans drapeau `i` | 2 échecs sur 30 (a9b0-http + webhook-scim) |
+| (b) `JSON_BODY_LIMIT` à 100kb | 2 échecs sur 30 |
+| (b) `JSON_BODY_LIMIT` à 10mb | 3 échecs sur 30 |
+| (c) `helmet()` retiré | 2 échecs sur 14 (test Helmet, instantané) |
+| (c') CORS `credentials: false` | 2 échecs sur 14 (CORS, instantané) |
+| (d) `Retry-After` retiré du filtre | 3 échecs sur 20 (auth-session) |
+| (d') `Retry-After` fixé à `'0'` | 3 échecs sur 20 |
+| route `github/authorize` renommée | 1 échec sur 2 (table des routes) |
+| `useBodyParser('raw', ...)` retiré | 1 échec sur 14 (1,5 Mo) |
+
+**Écarts par rapport à la spécification**
+1. Livraison valide : **201** (statut réel de la route), pas 200.
+2. `Retry-After` : borne 60 pour les limiteurs, mais **24 h** pour le verrouillage de compte (15 min, doublées, plafond 24 h) ; la spécification dit [1, 60] pour tous.
+3. R9 : `?a[b]=1` répond 400 avant et après, mais **le message diffère** : Express 4 (`qs`) imbrique la clé, Express 5 (analyseur simple) la laisse à plat. Je n'ai pas assertionné le texte ; le test qui distingue `extended` de `simple` reste à écrire en A9-b2 (contre-mutation d).
+4. CORS refusé : `Access-Control-Allow-Credentials: true` est présent sur toute réponse (cors 2.8), sans `Access-Control-Allow-Origin` ; figé par l'instantané, pas assertionné comme absent.
+5. R4 pour le 429 du pré-contrôle du webhook : il n'envoie pas de `Retry-After` (comportement actuel, `Connection: close`), non modifié.
+6. L'instantané est un test e2e avec fichier de référence (en-têtes triés, `Date`, `ETag`, `X-RateLimit-Reset` et `Retry-After` normalisés), pas un `curl -si` hors dépôt ; il est exécuté à chaque batterie.
+
+**Questions pour l'architecte** : 1) Le déplacement du câblage de `main.ts` vers `configure-http-app.ts` et la modification des trois tests de garde sont-ils acceptés ? 2) La borne 24 h pour le verrouillage est-elle acceptée ?
+
+### A9-b0-2 — Table des routes de référence
+
+**Statut** : `CORRIGÉ – À REVOIR`. Référence : `backend/tests/e2e/security/a9b0-routes.reference.txt` (148 routes, NestJS 10.4.22). Contre-vérification : l'image Node 22 démarrée avec le vrai `dist/main` journalise 148 lignes `Mapped`, **identiques** à la référence après tri `LC_ALL=C` (`diff` vide).
+
+### A9-b0-3 — Node 22
+
+**Statut** : `CORRIGÉ – À REVOIR`
+
+**Changement** : `FROM node:22-alpine` dans `backend/Dockerfile`, `frontend/Dockerfile`, `frontend/Dockerfile.prod` ; `node-version: 22` aux 4 emplacements de `.github/workflows/ci.yml` ; `docs/security/ci.md` ; `"engines": {"node": ">=22.12"}` dans `package.json` racine et `backend/package.json` ; `@types/node` 22.20.5 (backend ; `tsc -p tests` et `nest build` verts). `frontend/package.json` garde `@types/node` 20.19.41 (hors périmètre de la spécification).
+
+**Vérifications** : image `a9b0-backend` construite (`pnpm install --frozen-lockfile`, `prisma generate`, `nest build` sous Node 22) ; `node -v` = v22.23.5 ; `require('argon2')` et `require('@prisma/client')` fonctionnent ; l'application démarre (`NODE_ENV=development`, car la production exige `DATABASE_SSL=true`), `GET /features` 200 avec les en-têtes Helmet. Les deux images frontend se construisent (avertissements Docker préexistants : `JSONArgsRecommended`, `SecretsUsedInArgOrEnv`).
+
+**Observation** : `docker stop` sur le conteneur backend se termine en code 137 (SIGKILL après 15 s) : l'application n'appelle pas `enableShutdownHooks`, donc ignore SIGTERM (comportement préexistant, hors périmètre A9-b0). À traiter ou à accepter avec le contrôle « arrêt propre » de A9-b2.
+
+**Questions** : 1) `engines` `>=22.12` est exigé par la spécification ; pnpm n'est pas strict par défaut, aucun blocage constaté. 2) Faut-il aligner `@types/node` du frontend ?
+
+### Mesures du lot
+
+| Contrôle | Résultat |
+| --- | --- |
+| e2e `--runInBand --detectOpenHandles` | 10 suites, 404/404 (388 + 16), aucun handle ouvert |
+| jest unitaire (`env -u DATABASE_URL -u E2E_DATABASE_URL`) | 109 suites, 2 997/2 997 |
+| `nest build` | OK (Node 24 local et image Node 22) |
+| `tsc -p tests --noEmit` | OK |
+| ESLint | 0 erreur, 15 avertissements `no-explicit-any` préexistants |
+| Prettier (`src`, `tests`, lockfile, workflow, `package.json`) | propre |
+| vitest frontend | 34 fichiers, 296/296 |
+| `pnpm install --frozen-lockfile` | OK |
+| `pnpm audit --prod --audit-level=high` | 0 high, 15 avis (2 low, 13 moderate), identique à la baseline |
+| Images Docker | les trois images (`backend/Dockerfile`, `frontend/Dockerfile`, `frontend/Dockerfile.prod`) construites sous Node 22 ; backend démarré |
+| Environnement | conteneurs `a9b0-*` et images `a9b0-*` supprimés, rien commité ni poussé |
+
+### Constats à passer en revue
+A9-b0-1, A9-b0-2, A9-b0-3 : `CORRIGÉ – À REVOIR`.
+
+## Revue architecte (r56) : sous-lot A9-b0
+
+Revue du 2026-11-12, sur bases `r56-mysql` (8.0) et `r56-redis` (7) jetables, supprimées à la fin. Détail, vérifications et feu vert de commit dans `rapport-audit.md`, section « Revue r56 ».
+
+### A9-b0-1 : câblage HTTP partagé et tests de caractérisation
+**Verdict : VALIDÉ.** e2e 404/404 (`--runInBand --detectOpenHandles`, aucun handle ouvert), jest 2 997/2 997, vitest 296/296, `nest build`, `tsc -p tests`, ESLint (15 avertissements préexistants) et Prettier propres. Câblage équivalent à l'ancien `main.ts` ; tests de garde acceptés (ils ne sont qu'un complément d'ordre : un commentaire les trompe, l'e2e sur le câblage réel est le vrai filet). Contre-mutations propres : `WEBHOOK_PATH` sans `i`, plafond du webhook à 1 Mo, `helmet()` retiré, no-store retiré, `Retry-After` x1000, CORS `origin: true` : toutes détectées. **Non détectée** : retrait de `originCheckMiddleware` (r56-m1).
+Réponses : (1) déplacement et trois tests de garde acceptés ; (2) borne de 24 h acceptée, à resserrer à 900 s pour le premier palier (r56-a2) ; (3) `@types/node` du frontend sur 22 : oui, Amélioration (r56-a1) ; (4) journal non formaté : sans objet, Prettier ne s'applique pas aux `docs/`, ne pas reformater.
+Écarts : 201 de la livraison, texte de `?a[b]=1` non assertionné (A9-b2), `Allow-Credentials` sur CORS refusé (comportement de `cors` 2.8), 429 du pré-contrôle sans `Retry-After` (ne pas modifier), instantané en e2e, variables épinglées : tous acceptés.
+
+### A9-b0-2 : table des routes
+**Verdict : VALIDÉ.** 148 routes figées, contrôle de syntaxe Express 5.
+
+### A9-b0-3 : Node 22
+**Verdict : VALIDÉ**, conditions de déploiement dans le rapport (CI Node 22 verte, image reconstruite sans cache, connexion réelle après déploiement pour exercer `argon2`, étiquette de retour). Réserve : je n'ai pas rejoué les e2e sous Node 22 (image trop lente à tirer) ; la CI doit le faire avant déploiement. Reliquats de documentation : r56-a1.
+Observation `docker stop` (137) : **c'est O23**, reclassé Mineur. Cause précise : `CMD ["node", "dist/main"]` fait de Node le PID 1, qui ignore SIGTERM sans gestionnaire ; mesuré sur `node:22-alpine` (137 sans gestionnaire, 0 avec). À traiter **avant A9-b2** dans un sous-lot A9-b0b (pas dans A9-b0, qui reste sans changement de comportement ; pas en A9-b2, où Nest 11 inverse l'ordre des hooks de destruction) : `enableShutdownHooks()` dans `main.ts`, `quit()` borné à 2 s puis `disconnect()`, test de sortie propre (code 0 en moins de 5 s sur SIGTERM, y compris Redis arrêté) sur le point d'entrée compilé, mesure `docker stop`.
+
+### Constats encore ouverts
+1. **r56-m1** (Mineur) : test de comportement de l'anti-CSRF `originCheckMiddleware` (403 sans `Origin`, 403 `Origin` inconnue, passage `Origin` autorisée ou `Referer`, GET et chemins exemptés, figer la sensibilité à la casse de `/Projects/<id>/WEBHOOKS/GitHub/`) ; contre-mutations : ligne retirée, test remplacé par `true`.
+2. **O23** (reclassé Mineur) : voir ci-dessus ; A9-b0b.
+3. **r56-a1** (Amélioration) : commentaire `ci.yml:219`, `docs/DOSSIER_ARCHITECTURE_TECHNIQUE.md:110` et `:740` encore en Node 20 ; `@types/node` du frontend sur 22.
+4. **r56-a2** (Amélioration) : `expectRetryAfter(locked, 900)` pour le premier verrouillage.
+5. Ensuite : A9-b1 à A9-b4, A8 (O-b, O-e), P2 ; Améliorations r55-a1, r53-a1, r53-a2, O-f, O-a, r48-a1, r48-a2.
