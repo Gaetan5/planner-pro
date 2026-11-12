@@ -389,5 +389,18 @@ describe('A9-b0 e2e : caractérisation HTTP (en-têtes, limites de corps, webhoo
       const flat = await world.request('GET', '/auth/github/authorize?a=1');
       expect(flat.status).toBe(400);
     });
+
+    it("A9-b2 : analyseur de requête « simple » (Express 5) : la clé `a[b]` reste plate, pas d'objet imbriqué", async () => {
+      // « extended » (qs, défaut d'Express 4) lirait `{ a: { b: '1' } }` et le pipe nommerait la
+      // propriété `a` ; « simple » (défaut d'Express 5, surface réduite) la lit telle quelle.
+      const nested = await world.request('GET', '/auth/github/authorize?a[b]=1');
+      expect(nested.status).toBe(400);
+      const messages: string[] = [].concat(nested.body.message);
+      expect(messages).toContain('property a[b] should not exist');
+      expect(messages).not.toContain('property a should not exist');
+      const list = await world.request('GET', '/auth/github/authorize?a[]=1');
+      expect(list.status).toBe(400);
+      expect([].concat(list.body.message)).toContain('property a[] should not exist');
+    });
   });
 });

@@ -54,6 +54,37 @@ describe('S25 : versions corrigées des dépendances', () => {
     expect(outdated).toEqual([]);
   });
 
+  // A9-b2 : `body-parser` existe en deux majeures (1.x pour Express 4, outillage de développement ;
+  // 2.x pour Express 5, donc pour NestJS 11). Une surcharge globale `<2` forcerait la 1.x sous
+  // Express 5 et casserait `express.json` : chaque majeure a sa surcharge à sélecteur et son minimum.
+  const MINIMUMS_BY_MAJOR: Record<string, Record<number, string>> = {
+    'body-parser': { 1: '1.20.9', 2: '2.2.1' },
+  };
+
+  it.each(Object.entries(MINIMUMS_BY_MAJOR))(
+    '%s : chaque majeure présente est résolue au moins à son minimum corrigé',
+    (name, minimums) => {
+      const versions = lockedVersions(name);
+      expect(versions.length).toBeGreaterThan(0);
+      for (const version of versions) {
+        const major = Number(version.split('.')[0]);
+        expect(minimums[major]).toBeDefined();
+        expect(compare(version, minimums[major])).toBeGreaterThanOrEqual(0);
+      }
+      // Express 5 (NestJS 11) doit bien prendre la majeure 2
+      expect(versions.some((version) => version.startsWith('2.'))).toBe(true);
+    },
+  );
+
+  it('NestJS 11 s’exécute sur Express 5 (platform-express) et non sur la 4.x', () => {
+    const backend = JSON.parse(readFileSync(join(ROOT, 'backend/package.json'), 'utf8'));
+    expect(backend.dependencies['@nestjs/platform-express']).toMatch(/^11\./);
+    expect(lock).toMatch(/^ {2}'@nestjs\/platform-express@11\.[\d.]+':/m);
+    expect(lock).toMatch(
+      /^ {2}'@nestjs\/platform-express@11\.[\d.]+\([^\n]*\)':\n {4}dependencies:\n(?: {6}[^\n]+\n)*? {6}express: 5\.\d+\.\d+\n/m,
+    );
+  });
+
   const overridesFromWorkspace = (): Record<string, string> => {
     const section = workspace.split(/^overrides:\n/m)[1] ?? '';
     const fromYaml: Record<string, string> = {};
@@ -76,6 +107,15 @@ describe('S25 : versions corrigées des dépendances', () => {
     for (const range of Object.values(overridesFromWorkspace())) {
       expect(range).toMatch(/^>=[\d.]+ <\d+$/);
     }
+  });
+
+  it('body-parser n’a aucune surcharge globale : elles portent un sélecteur de majeure', () => {
+    const keys = Object.keys(overridesFromWorkspace()).filter((key) =>
+      key.startsWith('body-parser'),
+    );
+    expect(keys.sort()).toEqual(['body-parser@<2', 'body-parser@>=2']);
+    expect(overridesFromWorkspace()['body-parser@<2']).toMatch(/ <2$/);
+    expect(overridesFromWorkspace()['body-parser@>=2']).toMatch(/^>=2\./);
   });
 
   it('le fichier de verrouillage porte les mêmes surcharges', () => {
