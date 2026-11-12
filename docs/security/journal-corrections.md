@@ -5600,3 +5600,119 @@ Détail complet dans `rapport-audit.md`, « Revue r59 ». Conteneurs `r59-mysql`
 ### Constats encore ouverts
 
 Aucun nouveau. A9-b3, A9-b4 (r56-a1), A8, P2, puis les améliorations antérieures. A9-b2 se déploie séparément, après A9-b0 à A9-b1 observés 24 h.
+
+## Lot A9-b3 (fixeur)
+
+Revue de référence : r59 (sous-lot A9-b2 validé) et « Spécification A9-b » (partie A9-b3, risques R14 et R15). Constat traité : **A9-b3** (`jose` 6.2.17). **Aucune migration, aucun changement de schéma, aucune variable nouvelle, aucun changement de proxy.** Dépendance : `jose` 4.15.9 vers 6.2.17 (exact), seule en SSO OIDC. Travail sous Node 22.22.2, pnpm 10.34.9 (corepack). Bases MySQL 8.0 et Redis 7 jetables `a9b3-mysql` et `a9b3-redis`, supprimées à la fin. Aucune clé SSH, aucun serveur, aucune écriture en production, rien commité ni poussé.
+
+### A9-b3 — `jose` 6.2.17
+
+**Statut** : `CORRIGÉ – À REVOIR`
+
+**Cause confirmée** : `jose` 4 (CommonJS) est monté en 6, publié en ESM seul ; `src/auth/sso/oidc.ts:4` (`createRemoteJWKSet`, `JWTVerifyGetKey`) et `src/auth/sso/sso.service.ts:14` (`jwtVerify`) sont les seuls usages. Jest 29 ne charge pas le paquet (« Cannot use import statement outside a module ») : constaté avec la configuration inchangée, puis avec `transformIgnorePatterns` seul.
+
+**Changement** :
+
+- `backend/package.json` : `jose` **6.2.17**. `pnpm-lock.yaml` : `pnpm install` puis Prettier ; diff de **6 lignes de dépendance** (`jose@6.2.17` remplace `jose@6.2.13`, tiré par le SDK MCP de `firebase-tools`, et `importers.backend`). `jose@4.15.9` reste dans le lockfile, tiré par `jwks-rsa` (via `firebase-admin`) : sans lien avec le SSO. `pnpm install --frozen-lockfile` : « Already up to date ».
+- **Aucun changement de code applicatif** : `nest build` et `tsc` passent ; `createRemoteJWKSet(..., { timeoutDuration: 5000 })` et `jwtVerify(..., { issuer, audience, algorithms: ['RS256'], clockTolerance: 60 })` sont inchangés (mêmes options en 6).
+- **Jest (unitaire et `jest-e2e.json`)** : `transformIgnorePatterns: ["/node_modules/(?!(\\.pnpm/jose@6\\.[^/]+/node_modules/|jose/))"]` (chemin réel pnpm `node_modules/.pnpm/jose@6.x/node_modules/jose/`, et `node_modules/jose` direct ; `jose@4` n'est pas transformé) et une entrée `transform` `"/node_modules/.+\\.js$": "<rootDir>/jest-esm-transform.js"` placée avant l'entrée `ts-jest`. Le nouveau fichier `backend/jest-esm-transform.js` traduit le **vrai** paquet en CommonJS avec `typescript.transpileModule` (clé de cache = source + version de TypeScript). Aucun `jest.mock('jose')`, aucun `moduleNameMapper`.
+- `tests/unit/auth/sso-oidc.spec.ts` : `KeyLike` (supprimé en `jose` 6) remplacé par `CryptoKey` ; l'aide `sign` accepte `kid` et `omitIat`.
+
+**Écart par rapport à la spécification (point 2)** : la spécification propose `ts-jest` avec `allowJs`. Essayé et **écarté**, deux causes mesurées : (1) le service de langage de `ts-jest` 29.2.5 n'émet pas les fichiers JavaScript de `node_modules` (« Unable to process ... falling back to original file content », donc le fichier reste en ESM) ; (2) deux entrées `ts-jest` d'une même configuration Jest partagent la première configuration (cache par configuration Jest), impossible de donner `allowJs` ou `isolatedModules` à `jose` seul sans retirer le contrôle de types des tests. D'où le transformateur dédié, sans doublure du paquet. Il est placé dans `backend/` et non dans `tests/support/` car `.gitignore` ignore `backend/tests/**/*.js`. **À valider par l'architecte** (voir questions).
+
+**Tests** (jest 3 023 vers 3 039, +16 ; aucun e2e ajouté, les 424 chargent l'application complète donc `jose` 6) :
+
+- `tests/unit/auth/sso-oidc.spec.ts` (+9, 87 tests ; le service réel avec JWKS local) : expiré depuis 10 min (au-delà de 60 s) refusé ; expiré depuis 30 s accepté (tolérance) ; `iat` manquant ; `nonce` absent ; `nonce` non textuel ; `kid` inconnu du JWKS ; **HS256 signé avec la clé publique SPKI de l'IdP** ; **PS256 signé par une clé du JWKS sans attribut `alg`** (la liste blanche `['RS256']` est le seul garde, un IdP réel n'annonce pas toujours `alg`) ; récupération des clés en échec : 401 « Jeton d'identité invalide. », jamais 500. Les cas existants (signature d'une autre clé, `iss`, `iss` d'un autre tenant, `aud`, `nonce` différent, jeton expiré, HS256, `alg: none`) sont conservés.
+- `tests/unit/auth/oidc-key-source.spec.ts` (nouveau, +7 ; `OidcKeySource` et le vrai `createRemoteJWKSet` contre un serveur HTTP local) : JWKS en 200 vérifié ; un résolveur par URI ; **redirection 302 du JWKS refusée et la cible jamais appelée** ; réponse 500 ou contenu qui n'est pas un JWKS ; port fermé ; serveur muet : abandon entre 4,5 et 9 s (`timeoutDuration` 5 s) ; `kid` inconnu.
+
+**Contre-mutations** (fichier sauvegardé, restauré par `\cp`, `cmp` identique à chaque fois ; 94 tests des deux suites SSO) :
+
+| Mutation                                                                             | Échecs                                                                                          |
+| ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| (a) retrait de `algorithms: ['RS256']`                                               | 1 (PS256)                                                                                       |
+| (a') `algorithms: ['RS256','PS256']`                                                 | 1                                                                                               |
+| (b) retrait de `issuer`                                                              | 2                                                                                               |
+| (b) retrait de `audience`                                                            | 2                                                                                               |
+| (c) vérification du `nonce` désactivée (`if (false)`)                                | 3                                                                                               |
+| (e) `clockTolerance: 3600`                                                           | 1 (expiré depuis 10 min)                                                                        |
+| (f) retrait de la vérification `exp`/`iat`                                           | 1                                                                                               |
+| `timeoutDuration: 20000`                                                             | 1                                                                                               |
+| (d) `transformIgnorePatterns: ["/node_modules/"]` (transformation de `jose` retirée) | 2 suites en échec (« Test Suites: 2 failed », 0 test exécuté) : les suites ne sont pas ignorées |
+
+Remarque (a) : avec seulement `RS256` dans le JWKS de test (attribut `alg` présent), le retrait de `algorithms` n'était **pas** détecté (93/93 verts) ; `jose` déduit l'algorithme de la clé. Le test PS256 sans `alg` comble ce trou. `alg: none` et HS256 restent refusés par `jose` lui-même quelle que soit la liste (tests conservés).
+
+**Constats sur `jose` 6** : `createRemoteJWKSet` utilise `fetch` avec `redirect: 'manual'` : une redirection du JWKS est refusée (testé, plus strict qu'en 4) ; `http://` est accepté par la bibliothèque (le JWKS provient toujours d'un point d'accès fixé dans le code, `oidcEndpoints`, jamais du client).
+
+**Image de production** : `backend/Dockerfile` construite (Node **22.23.5**), `docker run --rm <image> node -e "const j=require('jose'); console.log(typeof j.jwtVerify, typeof j.createRemoteJWKSet)"` affiche `function function`, version `6.2.17`, **aucun avertissement** (pas d'`ExperimentalWarning`). Image démarrée sur les bases jetables : 7 lignes de journal sur les routes SSO, `GET /features` 200, aucun avertissement ni erreur, `docker stop` en 0,18 s, code de sortie 0. Image supprimée.
+
+**Non fait (hors poste)** : connexion SSO de bout en bout sur un IdP réel (Google ou Azure, critère 5 de la spécification) : aucun accès depuis ce poste. À faire avant le déploiement de ce sous-lot : succès, nonce rejoué, mauvais tenant.
+
+**Questions pour l'architecte** : 1) Accepter le transformateur dédié `backend/jest-esm-transform.js` à la place de `ts-jest` + `allowJs` (écart ci-dessus, motifs mesurés) ? 2) `jose@4.15.9` subsiste via `jwks-rsa` (`firebase-admin`) : accepté sans action ? 3) L'essai IdP réel reste une condition de déploiement.
+
+### Mesures du lot
+
+| Contrôle                                                                                              | Résultat                                                                                                                     |
+| ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| e2e `--runInBand --detectOpenHandles`                                                                 | 13 suites, 424/424, aucun handle ouvert (rejoué deux fois, dont après le déplacement du transformateur)                      |
+| jest unitaire (`env -u DATABASE_URL -u E2E_DATABASE_URL`)                                             | 114 suites, 3 039/3 039 (3 023 + 16)                                                                                         |
+| `nest build`                                                                                          | OK                                                                                                                           |
+| `tsc -p tests --noEmit`                                                                               | OK                                                                                                                           |
+| ESLint                                                                                                | 0 erreur, 15 avertissements `no-explicit-any` préexistants                                                                   |
+| Prettier (`src`, `tests`, `package.json`, `jest-e2e.json`, `jest-esm-transform.js`, `pnpm-lock.yaml`) | propre                                                                                                                       |
+| vitest frontend                                                                                       | 34 fichiers, 296/296                                                                                                         |
+| `pnpm install --frozen-lockfile`                                                                      | OK (« Already up to date »)                                                                                                  |
+| `pnpm audit --prod --audit-level=high`                                                                | code 0, 0 high, 14 avis moderate/low (identique à la base r59)                                                               |
+| Image backend                                                                                         | construite (Node 22.23.5), `jose` chargé (`function function`, 6.2.17), démarrage et arrêt propres (code 0), image supprimée |
+| Environnement                                                                                         | conteneurs `a9b3-*` supprimés, aucune image résiduelle, rien commité ni poussé                                               |
+
+### Constats à passer en revue
+
+A9-b3 : `CORRIGÉ – À REVOIR`.
+
+## Revue architecte (r60) : lot A9-b3
+
+Détail complet dans `rapport-audit.md`, « Revue r60 ». Conteneurs `r60-mysql`, `r60-redis`, `r60-node`, supprimés ; Node 22.23.5 ; rien en production, rien commité.
+
+### A9-b3 : `jose` 6.2.17
+
+**Verdict : VALIDÉ.** e2e 424/424, jest 3 039/3 039, build, `tsc`, ESLint, Prettier, `--frozen-lockfile` et audit (0 high) conformes aux annonces. `dist/` se charge en CommonJS sous Node 22 sans Jest (`require(esm)` natif, aucun avertissement) et vérifie un jeton contre un JWKS local ; redirection 302 refusée, cache et réarmement de 30 s identiques à `jose` 4. Toute erreur de `jwtVerify` reste un 401 générique, sans lecture du code d'erreur. Transformateur dédié accepté (portée limitée à `jose` 6, garde prouvée). Contre-mutations propres : retrait de `algorithms` (1 échec, test PS256), `algorithms` élargie, `timeoutDuration`, `nonce`, `clockTolerance`, `audience`, et retrait de la transformation (suite en échec).
+
+### Constats encore ouverts
+
+Aucun nouveau. A9-b4 (r56-a1), A8, P2, puis les améliorations antérieures. A9-b3 se déploie seul, après A9-b2 observé 24 h, avec un essai SSO réel (succès, nonce rejoué, mauvais tenant).
+
+## Lot CD (fixeur)
+
+Demande directe de l'utilisateur (déploiement continu), hors revue rNN. Aucune migration, dépendance ni changement de schéma. Aucun déploiement, aucune connexion, aucun secret ni environnement GitHub créé ; rien commité.
+
+### CD — Déploiement continu avec approbation manuelle
+
+**Statut** : `CORRIGÉ – À REVOIR`
+
+**Changement** :
+- `scripts/deploy-production.sh` (déploiement sur la VM : prérequis dont ports 80/443 tenus par docker-proxy, sauvegarde vérifiée, points de retour, `merge --ff-only`, build, recréation forcée du backend, vérifications, retour automatique, codes 0/1/2/3/4/64), `scripts/rollback-production.sh`, `scripts/deploy-ssh-wrapper.sh` (commande forcée `deploy|dry-run <sha 40 hex>`), `scripts/lib/production-common.sh`.
+- Redémarrage unique de `ekose-nginx-1` sur 502 persistant, puis contrôle `docker port` (80/443), dans le déploiement, son retour automatique et `rollback-production.sh`.
+- `.github/workflows/deploy.yml` (workflow_run CI réussie sur push main, workflow_dispatch avec `sha`, environnement `production`, concurrency sans annulation, SSH avec empreinte épinglée, aucune action tierce) ; job `deploy-scripts` ajouté à `.github/workflows/ci.yml` (ShellCheck et tests).
+- `docs/deployment-production.md`, section « Déploiement continu » (mise en place, sudoers, authorized_keys, retour arrière, restauration, recommandation `resolver 127.0.0.11` côté ekose).
+
+**Tests** : `scripts/tests/test-production-scripts.sh` (doublures de docker, sudo, systemctl, ss, curl ; vrai git sur dépôts temporaires) : 87 vérifications, 0 échec ; ShellCheck sans avertissement sur les 5 scripts. Couvre dry-run, nominal, idempotence, SHA hors main / malformé / non descendant, arbre sale, nginx d'hôte, absence de docker-proxy, disque, sauvegarde en échec ou ancienne, échec de build, échec de vérification (retour automatique, codes 2 et 3), verrou, rotation des points de retour, 502 avec redémarrage unique du proxy, rollback manuel, wrapper.
+
+**Contre-mutations** (fichier restauré par `\cp`, `cmp` identique) : retrait du contrôle ancêtre de origin/main (4 échecs), retrait de `--force-recreate` (2), redémarrage du proxy désactivé (5), appel de sauvegarde supprimé (31), regex du wrapper élargie (7).
+
+**Écart par rapport à la demande** : (1) la vérification du fichier de sauvegarde passe par `sudo -n find` à arguments exacts (le répertoire est en 0700 root), d'où une seconde règle sudoers. (2) `StopTimeout` ≠ 15 est un avertissement et non un échec (un retour n'y changerait rien). (3) Le test utilise le vrai git plutôt qu'une doublure.
+
+**Questions pour l'architecte** : acceptable que `rollback` fasse `git reset --hard` sur le clone de la VM (arbre vérifié propre) ? Lecture en production de la valeur de `StopTimeout` et de l'emplacement des journaux (`~/.local/state/planner-pro`) à confirmer.
+
+### Mesures du lot
+
+| Contrôle | Résultat |
+|---|---|
+| Tests des scripts (bash) | 87 réussis, 0 échec |
+| ShellCheck (5 scripts) | 0 avertissement |
+| YAML des workflows | valides (analyse locale) |
+| e2e, jest, build, vitest backend/frontend | non concernés, non relancés |
+| Environnement | aucun conteneur ni connexion ; répertoires temporaires supprimés |
+
+### Constats à passer en revue
+
+CD : `CORRIGÉ – À REVOIR`.

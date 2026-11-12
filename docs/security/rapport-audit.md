@@ -8,7 +8,7 @@
 | Périmètre | `backend/` (NestJS 10, Prisma 7 / adaptateur MariaDB, MySQL 8, Socket.IO, Redis), `frontend/` (React 18 / Vite), `docker-compose*.yml`, `.github/workflows/ci.yml`, `firestore.rules` |
 | Méthode | Revue de code manuelle ligne par ligne, `pnpm audit --prod`, exécution de la suite Jest backend (32 suites, 185 tests, tous verts : **aucun ne couvre les scénarios d'attaque ci-dessous**) |
 | Statut | **Source de vérité** pour l'agent `fixeur`. Les identifiants sont stables : ne jamais renuméroter, ajouter les nouveaux constats à la suite. |
-| Révision | r59 (2026-11-12) : sous-lot A9-b2 (NestJS 11.2.9, Express 5.2.1, surcharge `body-parser` par majeure ; r58-a1) VALIDÉ, feu vert de commit, déploiement séparé après A9-b0 à A9-b1 observés 24 h ; aucun nouveau constat ; ouverts A9-b3, A9-b4 (r56-a1), A8, P2. Avant : r58 (2026-11-12) : sous-lot A9-b1 (throttler 6, config 4, jwt 11 sur NestJS 10 ; r57-m1, r57-a1, r57-a2) VALIDÉ, feu vert de commit ; ouverts r58-m1 (Prettier du fichier des exceptions d'audit, à corriger avant le commit docs) et r58-a1 ; puis A9-b2 à A9-b4, A8, P2. Avant : r57 (2026-11-12) : sous-lot A9-b0b (arrêt propre O23, test anti-CSRF r56-m1) VALIDÉ, feu vert de commit ; ouverts r57-m1 (tests de garde manquants) avant A9-b2, r57-a1, r57-a2 ; puis A9-b1 à A9-b4, A8, P2. Avant : r56 (2026-11-12) : sous-lot A9-b0 (caractérisation, table des routes, Node 22) VALIDÉ, feu vert de commit ; ouverts r56-m1 et O23 (reclassé Mineur) dans un sous-lot A9-b0b avant A9-b2, r56-a1, r56-a2 ; puis A9-b1 à A9-b4, A8, P2. Avant : r55 (2026-11-11) + « Spécification A9-b (architecte) » (2026-11-11) : lot P7-e (r54-m1, r54-a1) VALIDÉ, ouvert r55-a1. SCIM activable en production après déploiement de ce lot (conditions dans « Revue r55 »). Voir la section « Revue r55 » à la fin. |
+| Révision | r60 (2026-11-12) : sous-lot A9-b3 (`jose` 6.2.17, transformateur Jest dédié) VALIDÉ, feu vert de commit, déploiement séparé après A9-b2 observé 24 h, essai IdP réel requis ; aucun nouveau constat ; ouverts A9-b4 (r56-a1), A8, P2. Avant : r59 (2026-11-12) : sous-lot A9-b2 (NestJS 11.2.9, Express 5.2.1, surcharge `body-parser` par majeure ; r58-a1) VALIDÉ, feu vert de commit, déploiement séparé après A9-b0 à A9-b1 observés 24 h ; aucun nouveau constat ; ouverts A9-b3, A9-b4 (r56-a1), A8, P2. Avant : r58 (2026-11-12) : sous-lot A9-b1 (throttler 6, config 4, jwt 11 sur NestJS 10 ; r57-m1, r57-a1, r57-a2) VALIDÉ, feu vert de commit ; ouverts r58-m1 (Prettier du fichier des exceptions d'audit, à corriger avant le commit docs) et r58-a1 ; puis A9-b2 à A9-b4, A8, P2. Avant : r57 (2026-11-12) : sous-lot A9-b0b (arrêt propre O23, test anti-CSRF r56-m1) VALIDÉ, feu vert de commit ; ouverts r57-m1 (tests de garde manquants) avant A9-b2, r57-a1, r57-a2 ; puis A9-b1 à A9-b4, A8, P2. Avant : r56 (2026-11-12) : sous-lot A9-b0 (caractérisation, table des routes, Node 22) VALIDÉ, feu vert de commit ; ouverts r56-m1 et O23 (reclassé Mineur) dans un sous-lot A9-b0b avant A9-b2, r56-a1, r56-a2 ; puis A9-b1 à A9-b4, A8, P2. Avant : r55 (2026-11-11) + « Spécification A9-b (architecte) » (2026-11-11) : lot P7-e (r54-m1, r54-a1) VALIDÉ, ouvert r55-a1. SCIM activable en production après déploiement de ce lot (conditions dans « Revue r55 »). Voir la section « Revue r55 » à la fin. |
 
 > Note de reconstruction : le plan de référence S1–S21 / A1–A9 / P1–P8 n'avait jamais été enregistré. La numérotation ci-dessous a été reconstruite en respectant le découpage par phase. Chaque constat a été **revérifié dans le code actuel** ; les anciens documents (`docs/audit_roadmap_phases.md`, `docs/etat_des_lieux.md`, `docs/manifeste_actions_restantes.md`) contiennent des affirmations fausses, signalées en section 1.3.
 
@@ -6408,3 +6408,56 @@ Justification : c'est la seule montée majeure du framework HTTP et du serveur W
 3. Reliquats antérieurs : r44-a3, r42-a1, parcours manuel avant `CSP_MODE=enforce`, S30, recensement S19/S20, S26, A5 à A7, P5, P8, O10 à O15, O17.
 4. Actions d'exploitation : `mysqldump` avant migration, comparaison du schéma de production, vérifications GitHub requises, `TRUST_PROXY_HOPS` (O-c), Redeliver et IdP SCIM réels après A9-b2.
 5. Clos par cette revue : A9-b2, r58-a1 (VALIDÉS).
+
+## Revue r60 (architecte) : sous-lot A9-b3 (`jose` 6.2.17, transformateur Jest dédié) : VALIDÉ, aucun nouveau constat
+
+| Constat | Verdict |
+| --- | --- |
+| A9-b3 (`jose` 4.15.9 vers 6.2.17, SSO OIDC seul) | **VALIDÉ** : code applicatif inchangé, `dist/` chargé en CommonJS sous Node 22 sans Jest, 6 contre-mutations détectées |
+
+### Vérifications indépendantes (MySQL 8.0, Redis 7 et Node 22.23.5 jetables `r60-mysql`, `r60-redis`, `r60-node`, supprimés ; copie du working tree, `pnpm install --frozen-lockfile` OK)
+- e2e `--runInBand --detectOpenHandles` : 13 suites, **424/424**. Jest unitaire (`env -u DATABASE_URL -u E2E_DATABASE_URL`) : 114 suites, **3 039/3 039**. `nest build` OK, `tsc -p tests --noEmit` OK, ESLint 0 erreur, Prettier propre (transformateur, `package.json`, `jest-e2e.json`, tests SSO), `pnpm audit --prod --audit-level=high` : code 0, 0 high (2 low, 12 moderate). Le lockfile ne contient plus `jose@6.2.13` ; `jose@4.15.9` reste (`jwks-rsa`), `jose@6.2.17` est celui du backend. Les comptes du journal sont exacts. Vitest non rejoué (frontend non touché).
+- **Production réelle sans Jest** (point de vigilance principal) : `dist/` compilé, `node --throw-deprecation` : `require('jose')` charge 6.2.17 (`require(esm)` natif de Node 22), `require('dist/auth/sso/oidc')` et `sso.service` se chargent, aucun avertissement. `engines` exige déjà `>=22.12` (racine et backend), et les deux Dockerfile sont en `node:22-alpine` : la contrainte est portée. Le transformateur ne masque donc rien : il ne sert qu'à Jest 29 (CommonJS).
+- **Banc `OidcKeySource` de `dist/` contre un JWKS HTTP local** (script jetable hors dépôt) : jeton valide accepté ; deuxième vérification servie par le cache (1 seule requête) ; **rotation de clé : `kid` nouveau refusé (`ERR_JWKS_NO_MATCHING_KEY`) dans les 30 s qui suivent la première récupération, accepté après 31 s** (2e requête) ; `kid` inconnu refusé sans nouvelle requête pendant le délai de réarmement ; **redirection 302 refusée** (`ERR_JOSE_GENERIC`). Comportement de cache et de rotation identique à `jose` 4 (délai de réarmement de 30 s), aucun risque nouveau.
+- **Mapping d'erreur** : `sso.service.ts:430` capture toute exception de `jwtVerify` et renvoie `UnauthorizedException("Jeton d'identité invalide.")` ; les codes `jose` 6 (`ERR_JWKS_NO_MATCHING_KEY`, `ERR_JOSE_GENERIC`, `ERR_JWT_EXPIRED`, etc.) ne sont ni lus ni exposés : aucune dépendance au code d'erreur, aucun 500, aucun message de bibliothèque vers le client.
+- **Portée du transformateur** : l'expression de `transformIgnorePatterns` testée sur cinq chemins : `jose@6.*` transformé, `jose@4.15.9`, `zod` et un autre paquet sous `jose@6` ignorés. Seul `jose` 6 est donc traduit ; aucune doublure, aucun `jest.mock('jose')`. Le chemin `.pnpm/jose@6.x/node_modules/` est celui de la CI (même disposition pnpm, `pnpm install --frozen-lockfile` dans les jobs `build` et `e2e`, qui exécutent la même configuration Jest ; le job `build` lance `pnpm --filter backend test`).
+- **Contre-mutations propres** (sauvegarde, `\cp`, `cmp` identique à chaque fois ; 94 tests des deux suites SSO, 94/94 au départ) :
+  1. Retrait de `algorithms: ['RS256']` : **1 échec** (test PS256 sans `alg` dans le JWKS).
+  2. `algorithms: ['RS256','PS256']` : **1 échec**.
+  3. `timeoutDuration: 20000` : **1 échec** (serveur muet).
+  4. Vérification du `nonce` retirée (`safeEqual` supprimé) : **1 échec**.
+  5. `clockTolerance: 3600` : **échec** du test « expiré depuis 10 min ». Retrait d'`audience` : **2 échecs**.
+  6. Contournement de la garde : `transformIgnorePatterns: ["/node_modules/"]` (transformation de `jose` retirée) : `oidc-key-source.spec.ts` **échoue** (« Cannot use import statement outside a module », 0 test exécuté) : la garde de configuration est bien vivante, un retrait n'est jamais silencieux.
+
+### Relecture ciblée
+- **`algorithms: ['RS256']` est le seul garde contre une confusion d'algorithme** quand le JWKS n'annonce pas `alg` : le fixeur a vu juste en le prouvant par un test (PS256 signé avec une clé sans `alg`), et sa remarque est confirmée par ma mutation 1 : sans ce test, le retrait de la liste blanche passait inaperçu. Bon test.
+- **Transformateur** : `transpileModule` avec diagnostics en erreur, clé de cache sur le fichier lui-même, la version de TypeScript, le nom et la source. Placé dans `backend/` car `.gitignore` ignore `backend/tests/**/*.js` : acceptable. Une future `jose` 7 ne serait pas transformée par le motif `6\.` : l'échec serait bruyant (même erreur d'import), pas silencieux.
+- `http://` accepté par `jose` 6 : les points d'accès JWKS sont fixés dans `oidcEndpoints`, jamais fournis par le client ou par un administrateur de workspace. Sans objet.
+
+### Constats
+Aucun nouveau constat.
+
+### Réponses aux questions du fixeur
+1. **Transformateur dédié : accepté.** Les deux motifs de l'écart (aucune émission des `.js` de `node_modules` par le service de langage de `ts-jest`, configuration `ts-jest` partagée entre entrées) sont plausibles, la solution est plus petite que la spécification, sans doublure, et gardée par un test qui échoue si elle disparaît (mutation 6). L'écart à la spécification (point 2) est accepté ; la remédiation est considérée comme satisfaite.
+2. **`jose@4.15.9` via `jwks-rsa` (`firebase-admin`) : sans action.** Le chemin SSO n'utilise pas ce paquet, il est ignoré par le motif Jest, et aucun avis `high` n'est ouvert. Réévaluer à la prochaine montée de `firebase-admin`.
+3. **SSO de bout en bout sur un IdP réel : condition de déploiement**, pas de commit (voir ci-dessous).
+
+### Feu vert de commit (chemins explicites, jamais `git add -A`, ni `.claude/`, ni `.env*`) : 2 commits, dans cet ordre
+1. `feat(backend): montée de jose à 6.2.17 pour le SSO OIDC, transformateur Jest dédié, tests de la liste blanche d'algorithmes et du JWKS (A9-b3)` : `backend/package.json`, `pnpm-lock.yaml`, `backend/jest-e2e.json`, `backend/jest-esm-transform.js`, `backend/tests/unit/auth/sso-oidc.spec.ts`, `backend/tests/unit/auth/oidc-key-source.spec.ts`. Commit atomique : sans le transformateur et la configuration Jest, la montée casse toute la batterie, et inversement.
+2. `docs(security): revue r60 du sous-lot A9-b3` : `docs/security/rapport-audit.md`, `docs/security/journal-corrections.md`, en dernier.
+Chaque commit passe isolément. Aucune mention d'outil d'assistance ni `Co-Authored-By`.
+
+### Conditions de déploiement : A9-b3 se déploie **seul, après A9-b2** (donc après A9-b0, A9-b0b, A9-b1 puis A9-b2, chacun observé 24 h)
+Ordre : A9-b0 à A9-b1 ensemble, 24 h ; A9-b2 seul, 24 h ; A9-b3 seul. Justification : A9-b3 touche l'authentification SSO, qu'aucun test automatique ne valide face à un IdP réel ; l'isoler rend toute régression de connexion SSO imputable sans ambiguïté, et son rollback n'embarque ni Nest 11 ni l'arrêt propre.
+1. **Prérequis** : A9-b2 en production et stable 24 h ; CI verte sur **tous** les jobs sous Node 22 (en particulier `build` et `e2e`, qui exécutent le transformateur avec les chemins pnpm de la CI, et `pnpm audit`) ; commits de r60 poussés ; aucune migration (sauvegarde `mysqldump` par précaution seulement).
+2. **Avant** : étiqueter l'image backend en cours (`planner-backend:pre-a9b3`) ; reconstruire `--no-cache`. Aucune variable, aucun changement de `ekose-nginx-1`, `docker-compose.prod.yml` inchangé.
+3. **Vérifications après déploiement** : journal de démarrage sans avertissement `ExperimentalWarning` ni erreur d'import ; `GET /features` 200 ; **SSO sur un IdP réel (Google ou Azure) : connexion réussie, nonce rejoué refusé en 401, jeton d'un autre tenant refusé** ; compte existant ; arrêt propre (`docker stop` en code 0). Surveiller les 401 « Jeton d'identité invalide. » sur 24 h.
+4. **Rollback** : remettre l'image `pre-a9b3` (aucune donnée ni format modifié) ; `git revert` du commit 1 si besoin.
+5. **Connu et accepté** : après la première récupération du JWKS d'un IdP, une clé nouvellement publiée n'est reconnue qu'après 30 s (délai de réarmement de `jose`, identique à `jose` 4) ; `jose@4.15.9` conservé pour `jwks-rsa` ; vérification de l'IdP réel faite seulement en production.
+
+### Ordre des constats ouverts (fin de r60)
+1. **A9-b4** (documentation, y compris r56-a1, plus la mention du transformateur Jest et de `jose` 6), puis **A8** (y inclure O-b et O-e), puis **P2**.
+2. Améliorations : r56-a1, r56-a2, r55-a1, r53-a1, r53-a2, O-f, O-a, r48-a1, r48-a2.
+3. Reliquats antérieurs : r44-a3, r42-a1, parcours manuel avant `CSP_MODE=enforce`, S30, recensement S19/S20, S26, A5 à A7, P5, P8, O10 à O15, O17.
+4. Actions d'exploitation : `mysqldump` avant migration, comparaison du schéma de production, vérifications GitHub requises, `TRUST_PROXY_HOPS` (O-c), Redeliver et IdP SCIM réels après A9-b2, SSO réel après A9-b3.
+5. Clos par cette revue : A9-b3 (VALIDÉ).
