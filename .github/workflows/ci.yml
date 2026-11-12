@@ -46,6 +46,20 @@ jobs:
             exit 1
           fi
 
+  # CD : shellcheck et tests (avec doublures, sans connexion) des scripts de déploiement de production.
+  deploy-scripts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Shellcheck
+        run: >-
+          shellcheck -x scripts/deploy-production.sh scripts/rollback-production.sh
+          scripts/deploy-ssh-wrapper.sh scripts/lib/production-common.sh
+          scripts/tests/test-production-scripts.sh
+      - name: Tests des scripts de déploiement
+        run: bash scripts/tests/test-production-scripts.sh
+
   # A9 : avis de sécurité des dépendances de production (seuil : high). Les avis restants, de
   # gravité moindre, sont justifiés dans docs/security/audit-exceptions.md. Lit le lockfile seul.
   audit:
