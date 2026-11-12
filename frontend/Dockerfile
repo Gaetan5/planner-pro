@@ -1,4 +1,4 @@
-FROM node:20-alpine
+FROM node:22-alpine
 
 # Installer pnpm globalement
 RUN npm install -g pnpm@10.34.9
