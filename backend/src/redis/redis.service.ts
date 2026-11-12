@@ -1,5 +1,6 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import Redis from 'ioredis';
+import { quitWithin } from '../common/bounded-quit';
 
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
@@ -35,11 +36,8 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     client.removeAllListeners('error');
     // Écouteur neutre : une erreur de fermeture ne doit pas devenir une exception non gérée
     client.on('error', () => undefined);
-    try {
-      await client.quit();
-    } catch {
-      client.disconnect();
-    }
+    // Borné (O23) : un `quit()` pendant une panne de Redis peut attendre indéfiniment la reconnexion
+    await quitWithin(client);
   }
 
   /**

@@ -18,6 +18,7 @@ import { AiService } from '../projects/ai.service';
 import { ProjectPermissionsService } from '../projects/project-permissions.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SessionService } from '../auth/session.service';
+import { quitWithin } from '../common/bounded-quit';
 import { authenticateSocket, stopSessionWatch } from '../auth/ws-auth';
 import { RealtimeService, taskRoom, userRoom } from '../realtime/realtime.service';
 
@@ -96,14 +97,9 @@ export class TrackingGateway
     this.adapterClients = [];
     await Promise.all(
       clients.map(async (client) => {
-        // Un client jamais connecté, déjà fermé ou en échec n'a rien à libérer : l'arrêt ne doit pas échouer
-        try {
-          if (client.isOpen) await client.quit();
-        } catch {
-          await Promise.resolve()
-            .then(() => client.disconnect())
-            .catch(() => undefined);
-        }
+        // Un client jamais connecté, déjà fermé ou en échec n'a rien à libérer : l'arrêt ne doit pas échouer.
+        // `quit()` borné (O23) : en panne de Redis, le client reconnecte et `quit()` n'aboutirait jamais.
+        await quitWithin(client);
       }),
     );
   }
