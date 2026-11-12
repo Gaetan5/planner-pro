@@ -348,11 +348,13 @@ vers un stockage hors VM avec accès dédié et rétention indépendante.
    sudo chmod 600 /etc/planner-pro/backup-passphrase
    ```
 
-3. Installer le script et les unités systemd du dépôt :
+3. Installer le script **hors du clone Git** et les unités systemd du dépôt (le script s'exécute en
+   root : il ne doit pas vivre dans un arbre réécrit par le déploiement) :
 
    ```sh
+   sudo install -d -o root -g root -m 755 /usr/local/lib/planner-pro
    sudo install -o root -g root -m 700 scripts/backup-production.sh \
-     /opt/planner-pro/scripts/backup-production.sh
+     /usr/local/lib/planner-pro/backup-production.sh
    sudo install -o root -g root -m 600 ops/systemd/planner-pro-backup.service \
      /etc/systemd/system/planner-pro-backup.service
    sudo install -o root -g root -m 644 ops/systemd/planner-pro-backup.timer \
@@ -361,6 +363,9 @@ vers un stockage hors VM avec accès dédié et rétention indépendante.
    sudo systemctl daemon-reload
    sudo systemctl enable --now planner-pro-backup.timer
    ```
+
+   Installation existante (copie dans `/opt/planner-pro/scripts/`) : voir « Déploiement continu »,
+   étape 2 (déplacement de la copie root et unité mise à jour).
 
 4. Lancer une première sauvegarde, puis vérifier son état et le contenu chiffré :
 
@@ -385,6 +390,252 @@ vers un stockage hors VM avec accès dédié et rétention indépendante.
 6. Transférer les fichiers `.sql.gz.gpg` vers un stockage chiffré hors de la VM et
    surveiller la réussite des transferts. La rétention locale de 30 jours ne remplace
    pas une copie hors site ni un test de restauration.
+
+## Déploiement continu
+
+Un push sur `main` lance la CI ; si elle réussit, le workflow `.github/workflows/deploy.yml`
+ouvre un job `deploy` qui **attend l'approbation d'un relecteur** de l'environnement GitHub
+`production`. Après approbation, le job se connecte en SSH à la VM avec une clé dédiée, qui
+ne peut lancer que `deploy <sha>`, et exécute `scripts/deploy-production.sh <sha>` sur la VM.
+Le workflow peut aussi être lancé à la main (`workflow_dispatch`, entrée `sha` facultative : par
+défaut la tête de `main`) ; une étape vérifie qu'une exécution réussie de la CI existe pour ce SHA et
+l'approbation reste requise. Le job est ignoré tant que la variable de dépôt `DEPLOY_ENABLED` n'est pas
+`true`. Il n'utilise aucune action tierce.
+
+### Fonctionnement du déploiement (`scripts/deploy-production.sh [--dry-run] <sha>`)
+
+Exécuté sur la VM, `set -euo pipefail`, un seul à la fois (verrou `flock`, partagé avec le retour
+arrière), journal horodaté dans `~/.local/state/planner-pro/logs/deploy-*.log` (30 conservés). La
+déconnexion SSH n'interrompt pas un déploiement commencé. Le SHA doit comporter 40 caractères
+hexadécimaux, être un ancêtre de `origin/main` (ou égal) et prolonger le commit déjà déployé.
+
+1. Prérequis : espace disque (5 Go par défaut, `MIN_FREE_KB`), Docker actif, `.env.production`
+   présent, arbre Git propre sur `main`, et ports 80/443 publiés par un conteneur Docker
+   (`docker-proxy`), service `nginx` de l'hôte inactif (incident du 2026-11-11 : refus avec une
+   ligne `ALERTE`, le job échoue donc et GitHub notifie).
+2. Sauvegarde : `sudo systemctl start planner-pro-backup.service`, puis un fichier
+   `*.sql.gz.gpg` de moins de 10 min doit exister dans `/var/backups/planner-pro`. Sinon, arrêt
+   avant toute modification.
+3. Points de retour : les images en cours reçoivent `planner-pro-production-{backend,frontend}:rollback-<AAAAMMJJTHHMMSSZ>`
+   et `:rollback-latest` (les 5 dernières sont gardées, `KEEP_ROLLBACKS`) ; le commit correspondant
+   est noté dans `~/.local/state/planner-pro/rollback-points/`. Un point horodaté est créé à chaque
+   déploiement, y compris pour le même SHA (le retour automatique revient à ce qui tournait) ;
+   `rollback-latest` ne bouge que si le commit change.
+4. `git fetch` puis `git merge --ff-only <sha>`.
+5. `docker compose build`, puis `up -d db cache`, recréation forcée du backend seul
+   (`--force-recreate --no-deps`, pour appliquer `stop_grace_period`), puis `up -d`.
+6. Vérifications, avec réessais bornés (24 × 5 s) : conteneurs `running`/`healthy` sans
+   redémarrage pour backend et frontend, journaux du backend (« All migrations have been
+   successfully applied » ou « No pending migrations », aucune erreur Prisma), `node -v`, puis
+   `GET /features` = 200, `POST /projects` sans jeton = 401 et `GET /` = 200 sur les domaines
+   publics. Un `StopTimeout` différent de 15 s est signalé en avertissement.
+7. En cas d'échec après la recréation : remise des images `rollback-*` et du commit précédent,
+   code de sortie 2 (retour réussi) ou 3 (retour lui-même en échec : intervenir à la main).
+   Un échec du build ou du `merge` restaure seulement le dépôt (code 1, conteneurs intacts).
+8. Résumé final (résultat, SHA, durée, fichier de sauvegarde, point de retour) et code de sortie :
+   0 réussi, 1 refus ou échec avant changement, 2 échec avec retour automatique, 3 échec critique,
+   4 verrou pris.
+
+`--dry-run` exécute les contrôles en lecture seule (prérequis, `git fetch`, validation du SHA, droits
+sudo exacts, `find` sur les sauvegardes, conteneurs, accès HTTP depuis la VM, ports du proxy) et affiche
+les commandes qui modifieraient quelque chose sans les lancer. Les dernières lignes du journal du
+backend après un échec ne sont écrites que dans le journal de la VM, pas dans la sortie SSH.
+
+**Migrations.** Une migration Prisma déjà appliquée ne peut pas être annulée automatiquement. Si le
+déploiement échoue après leur application, le retour remet les anciennes images sur un schéma plus
+récent : le résumé le signale (`ATTENTION`) et indique le fichier de sauvegarde à restaurer si les
+anciennes images ne fonctionnent pas avec ce schéma. Livrer les migrations de façon rétro-compatible
+(ajouter avant de retirer) reste la protection principale.
+
+**Proxy public (`ekose-nginx-1`).** Ce conteneur d'un autre projet garde en cache les IP des
+conteneurs résolues à son démarrage : après la recréation du backend ou du frontend, il répond 502
+(constaté au déploiement de 75ac73e) ; un `reload` ne suffit pas. Si les contrôles publics donnent
+502 alors que les conteneurs sont sains, le script fait **une seule fois** `docker restart ekose-nginx-1`
+(seule action permise sur ce conteneur, aucune modification de sa configuration), puis vérifie par
+`docker port` qu'il publie bien 80 et 443. Ce redémarrage coupe brièvement tous les sites servis par
+ce proxy. Recommandation durable, côté dépôt ekose (à faire séparément) : dans la configuration
+Nginx, utiliser `resolver 127.0.0.11 valid=10s;` et passer l'amont par une variable
+(`set $planner_api http://backend:3001; proxy_pass $planner_api;`) pour que Nginx résolve le nom à
+chaque requête ; le redémarrage automatique devient alors inutile.
+
+**Limite connue.** Le script exécuté est celui du commit *déjà* présent sur la VM : une modification de
+`scripts/deploy-production.sh` ne s'applique qu'au déploiement suivant celui qui l'apporte.
+
+### Retour arrière manuel (`scripts/rollback-production.sh`)
+
+```sh
+cd /opt/planner-pro
+scripts/rollback-production.sh --list                       # points de retour et commits associés
+scripts/rollback-production.sh --dry-run rollback-latest    # affiche le plan
+scripts/rollback-production.sh rollback-latest              # ou rollback-20261112T101500Z
+```
+
+Le script remet les images de l'étiquette en service (`up -d --force-recreate --no-deps --no-build
+backend frontend`), ramène le dépôt au commit enregistré pour ce point (sauf `--keep-code`), vérifie
+les conteneurs et les domaines (avec le même redémarrage unique du proxy en cas de 502). **Il ne
+touche jamais à la base.** Il prend le même verrou que le déploiement. Depuis SSH avec la clé de
+déploiement ce script n'est pas accessible (commande forcée) : le lancer sous le compte de déploiement
+(`sudo -iu deploy`), jamais en root (le verrou et les journaux dépendent de `$HOME`).
+
+### Restaurer une sauvegarde (base incompatible avec les anciennes images)
+
+À faire seulement après un retour arrière qui ne suffit pas, en connaissance de la perte des écritures
+faites depuis la sauvegarde. Les fichiers sont dans `/var/backups/planner-pro` (root, `0600`) ;
+le résumé du déploiement donne le nom du fichier créé juste avant.
+
+```sh
+cd /opt/planner-pro
+docker compose --env-file .env.production -f docker-compose.prod.yml stop backend
+sudo gpg --batch --pinentry-mode loopback --passphrase-file /etc/planner-pro/backup-passphrase \
+  --decrypt /var/backups/planner-pro/planner-pro-<horodatage>.sql.gz.gpg | gunzip |
+  docker compose --env-file .env.production -f docker-compose.prod.yml exec -T db \
+    sh -ec 'export MYSQL_PWD="$MYSQL_PASSWORD"; exec mysql --user="$MYSQL_USER"'
+scripts/rollback-production.sh rollback-latest   # images et code cohérents avec ce schéma
+```
+
+Le dump contient `--databases` (recréation des tables) et la table `_prisma_migrations`, qui revient
+donc à l'état d'avant. Contrôler ensuite les journaux du backend (« No pending migrations »).
+
+### Mise en place (une seule fois)
+
+Rien de ceci n'est exécuté par le dépôt ; chaque étape se fait à la main, dans cet ordre. Le CD ne
+s'active (variable `DEPLOY_ENABLED`) qu'à la fin.
+
+**Modèle de confiance (à lire).** Le script lance du code du dépôt (scripts, `Dockerfile`,
+`docker-compose.prod.yml`) avec les droits du compte de déploiement, qui est dans le groupe `docker`
+(équivalent root sur la VM). Quiconque peut pousser sur `main` **et** approuver l'environnement
+`production` obtient donc un accès root à la VM (base, sauvegardes, proxy voisin). Les mesures 1 à 4
+ci-dessous réduisent ce risque ; **elles sont obligatoires**, pas facultatives.
+
+**1. Utilisateur dédié `deploy`** (jamais `ubuntu`, qui reste le compte d'administration et qui a souvent
+un `NOPASSWD:ALL` par défaut sur les images Oracle) :
+
+```sh
+sudo adduser --disabled-password --gecos '' deploy
+sudo usermod -aG docker deploy            # pas d'autre groupe, pas de sudo général
+sudo chown -R deploy:deploy /opt/planner-pro
+sudo setfacl -m u:deploy:r /opt/planner-pro/.env.production   # ou chown deploy: + chmod 600
+sudo -u deploy git -C /opt/planner-pro status                  # doit répondre sans erreur
+```
+
+La clé de déploiement GitHub (lecture seule) du dépôt doit se trouver dans `~deploy/.ssh` (avec le
+`known_hosts` de GitHub) et non plus dans celui d'`ubuntu`. Vérifier plus loin que
+`sudo -l -U deploy` n'affiche **que** les deux règles de l'étape 3.
+
+**2. Sauvegarde hors du clone Git.** Le script de sauvegarde s'exécute en root : sa copie ne doit
+jamais vivre dans un arbre que le déploiement réécrit (sinon un commit pourrait faire exécuter en root
+un fichier appartenant au compte de déploiement). Installer la copie root, adapter l'unité, contrôler :
+
+```sh
+sudo install -d -o root -g root -m 755 /usr/local/lib/planner-pro
+sudo install -o root -g root -m 700 /opt/planner-pro/scripts/backup-production.sh \
+  /usr/local/lib/planner-pro/backup-production.sh
+sudo install -o root -g root -m 600 /opt/planner-pro/ops/systemd/planner-pro-backup.service \
+  /etc/systemd/system/planner-pro-backup.service
+sudo rm -f /opt/planner-pro/scripts/backup-production.sh.root   # ancienne copie root du clone, s'il y en a une
+sudo systemctl daemon-reload
+sudo systemctl start planner-pro-backup.service
+sudo find /var/backups/planner-pro -maxdepth 1 -type f -mmin -5 -printf '%f\n'   # fichier .sql.gz.gpg frais
+ls -l /opt/planner-pro/scripts/        # aucun fichier appartenant à root
+```
+
+Migration d'une installation existante : si l'ancienne copie `root:root 0700` de
+`backup-production.sh` se trouve dans `/opt/planner-pro/scripts/`, la déplacer (`sudo mv`) vers
+`/usr/local/lib/planner-pro/` **avant** de rendre le clone au compte `deploy` ; sinon `git` ne pourra
+plus écrire ce fichier. Réinstaller la copie root à chaque évolution de `backup-production.sh`
+(elle n'est plus mise à jour par le déploiement, c'est voulu).
+
+**3. Règles sudo minimales** (`sudo visudo -f /etc/sudoers.d/planner-pro-deploy`, mode `0440`) :
+
+```text
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl start planner-pro-backup.service
+deploy ALL=(root) NOPASSWD: /usr/bin/find /var/backups/planner-pro -maxdepth 1 -type f -mmin -10
+```
+
+La première lance la sauvegarde ; la seconde (arguments exacts, aucun joker, aucun `-exec`) permet de
+vérifier le fichier récent dans `/var/backups/planner-pro` (`0700` root). Ces lignes sont verrouillées
+par les tests (`scripts/tests/test-production-scripts.sh`) : le script doit appeler sudo exactement ainsi.
+Contrôle : `sudo -l -U deploy` ne montre que ces deux lignes.
+
+**4. Clé SSH dédiée et sshd durci.** Sur un poste de confiance :
+
+```sh
+ssh-keygen -t ed25519 -N '' -C 'planner-pro-deploy' -f ./planner-pro-deploy
+```
+
+Le contenu de `planner-pro-deploy` ira dans le secret `DEPLOY_SSH_KEY`, puis le fichier est détruit
+du poste. Dans `~deploy/.ssh/authorized_keys` (ligne unique) :
+
+```text
+command="/opt/planner-pro/scripts/deploy-ssh-wrapper.sh",restrict,no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ssh-ed25519 AAAA… planner-pro-deploy
+```
+
+`restrict` désactive déjà forwardings, pty et `~/.ssh/rc` ; les options explicites sont gardées pour
+la lisibilité. Le wrapper accepte uniquement `deploy <40 hex>` et `dry-run <40 hex>`. Durcissement de
+`sshd` (`/etc/ssh/sshd_config.d/10-planner-pro.conf`, puis `sudo sshd -t && sudo systemctl reload ssh`) :
+
+```text
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin no
+AllowUsers ubuntu deploy
+```
+
+Garder une session ouverte pendant le rechargement. Le pare-feu Oracle ne peut pas se limiter aux IP de
+GitHub (plages larges) : la clé unique à commande forcée est le contrôle. Le redémarrage de
+`ekose-nginx-1` est fait par le script avec les droits Docker de `deploy` : ni sudo ni commande SSH en plus.
+
+**5. Empreinte de l'hôte.** Relever la clé publique de la VM depuis un poste de confiance et comparer
+l'empreinte avec celle affichée sur la VM (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`) :
+
+```sh
+ssh-keyscan -t ed25519 <ip-ou-nom-de-la-vm>
+```
+
+La ligne obtenue (`<hôte> ssh-ed25519 AAAA…`) est le secret `DEPLOY_KNOWN_HOSTS`. Le workflow utilise
+`StrictHostKeyChecking=yes` avec ce seul fichier : si la clé d'hôte change, le déploiement échoue.
+
+**6. GitHub : réglages OBLIGATOIRES** (Settings du dépôt) :
+
+- *Rules → Rulesets* sur `main` : pull request obligatoire, CI verte requise (tous les jobs), force-push
+  et suppression interdits. Le CD déploie tout ce qui arrive sur `main`.
+- *Environments → `production`* : *Required reviewers* (au moins une personne ; cocher
+  *Prevent self-review* s'il existe un second relecteur) ; *Deployment branches* limitées à `main`.
+- Secrets de **cet environnement** (lisibles seulement après approbation) : `DEPLOY_SSH_KEY`, `DEPLOY_HOST`,
+  `DEPLOY_USER` (valeur `deploy`) et `DEPLOY_KNOWN_HOSTS`.
+- Authentification à deux facteurs sur tous les comptes qui peuvent pousser ou approuver.
+- **Interrupteur** : tant que la variable de dépôt `DEPLOY_ENABLED` n'est pas `true`, le job de
+  déploiement est ignoré (aucune approbation en attente). La créer en dernier ; la supprimer coupe le CD
+  immédiatement.
+
+**7. Option : commits signés.** Pour qu'un jeton GitHub volé ne suffise pas à déployer, exiger sur la VM
+une signature vérifiable par une clé de confiance hors dépôt : `git config --global gpg.format ssh` et
+`gpg.ssh.allowedSignersFile ~deploy/.config/git/allowed_signers` (propriétaire `deploy`, clés des
+mainteneurs), puis `REQUIRE_SIGNED_COMMITS=1` dans l'environnement du script (par exemple
+`SetEnv`/`environment=` côté wrapper ou export dans `~deploy/.profile`). Le script exécute alors
+`git verify-commit <sha>` et refuse un commit non signé. Un commit de fusion créé par l'interface GitHub
+est signé par GitHub, non par un mainteneur : décider de la politique (squash signé localement) avant
+d'activer l'option.
+
+**8. Amorçage (une VM qui n'a pas encore les scripts).** Tant que `scripts/deploy-production.sh` n'est pas
+dans le clone de la VM, le wrapper ne peut pas fonctionner. Copier les scripts du commit voulu dans
+`~deploy/cd-bootstrap/scripts/` (hors du clone, propriétaire `deploy`, `chmod -R go-w`), via
+`git archive <sha> scripts | tar -x -C ~deploy/cd-bootstrap` depuis un poste. Le script sait travailler
+depuis ce dossier (`PROJECT_DIR=/opt/planner-pro` par défaut). Lancer à la main, sous `deploy`, le premier
+déploiement, en regardant la sortie ; une fois `scripts/` présent dans le clone, le wrapper est utilisable.
+
+**9. Contrôle à blanc** avant d'activer `DEPLOY_ENABLED` : sur la VM, sous `deploy`,
+`scripts/deploy-production.sh --dry-run $(git rev-parse origin/main)`. Il vérifie en lecture seule :
+prérequis, SHA, droits sudo exacts (`sudo -n -l`), `find` sur `/var/backups`, état des conteneurs,
+accès HTTP aux domaines depuis la VM et ports du proxy. Puis depuis un poste :
+`ssh -i planner-pro-deploy deploy@<vm> "dry-run <sha>"` (la clé ne permet que cela ; tests négatifs :
+`ssh … id`, `ssh … "deploy xyz"`, `ssh -N -L …` et `scp` doivent être refusés). Enfin créer
+`DEPLOY_ENABLED=true` et lancer le workflow à la main (`workflow_dispatch`, `sha` vide) pour un
+déploiement de bout en bout du même SHA (redéploiement idempotent).
+
+Les tests des scripts (doublures de `docker`, `systemctl`, `sudo`, `ss`, `curl`, sans connexion) se
+lancent par `bash scripts/tests/test-production-scripts.sh` et tournent dans le job CI `deploy-scripts`
+avec ShellCheck.
 
 ## Connexion simulée (développement uniquement)
 
