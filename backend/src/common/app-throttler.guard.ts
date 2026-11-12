@@ -7,6 +7,8 @@ export const SCIM_KEY_LIMIT = 300;
 /** Requêtes par minute et par adresse IP sur une route SCIM : large, car des IdP partagent leurs IP sortantes (S11-b). */
 export const SCIM_IP_LIMIT = 3000;
 export const SCIM_WINDOW_MS = 60000;
+/** Nom du limiteur par clé SCIM auprès du stockage (distinct du limiteur global `default`). */
+export const SCIM_KEY_THROTTLER_NAME = 'scim-key';
 /** Message du 429 (r47-m2) : affiché tel quel par les clients, donc en français ; `Retry-After` indique le délai. */
 export const THROTTLE_MESSAGE = 'Trop de requêtes. Réessayez dans quelques instants.';
 
@@ -52,9 +54,16 @@ export class ScimKeyThrottlerGuard extends ThrottlerGuard {
       throw new ThrottlerException(THROTTLE_MESSAGE);
     }
     const key = createHash('sha256').update(`scim-key:${req.scimApiKeyId}`).digest('hex');
-    const { totalHits, timeToExpire } = await this.storageService.increment(key, SCIM_WINDOW_MS);
-    if (totalHits > SCIM_KEY_LIMIT) {
-      res.header('Retry-After', timeToExpire);
+    // Throttler 6 : le stockage décide du blocage ; le garde ne compare plus `totalHits` lui-même
+    const { isBlocked, timeToBlockExpire } = await this.storageService.increment(
+      key,
+      SCIM_WINDOW_MS,
+      SCIM_KEY_LIMIT,
+      SCIM_WINDOW_MS,
+      SCIM_KEY_THROTTLER_NAME,
+    );
+    if (isBlocked) {
+      res.header('Retry-After', Math.max(1, Math.ceil(timeToBlockExpire)));
       throw new ThrottlerException(THROTTLE_MESSAGE);
     }
     return true;
