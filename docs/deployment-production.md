@@ -644,7 +644,7 @@ le push de `d13ae2b`).
 
 | Étape | État |
 | --- | --- |
-| Production déployée | `75ac73e` (A9-b0 à A9-b1, Node 22) depuis le 2026-11-12 03:27 UTC, à la main ; images de retour `pre-a9b`, sauvegarde `planner-pro-20261112T032333Z.sql.gz.gpg` ; observation de 24 h en cours |
+| Production déployée | `8f42464` (A9-b2 : NestJS 11.2.9, Express 5.2.1) depuis le 2026-11-12 05:52 UTC, par `deploy-production.sh` depuis la copie d'amorçage (185 s, code 0) ; point de retour `rollback-20261112T054915Z` (= `75ac73e`), sauvegarde `planner-pro-20261112T054914Z.sql.gz.gpg` ; vérifié : 148 routes, aucune migration en attente, `StopTimeout` 15, 5 domaines, 401 sans jeton, 429 avec `Retry-After` à la 6e connexion erronée, Socket.IO 200, webhook identique en casse mixte, aucun 502. Avant : `75ac73e` (A9-b0 à A9-b1, Node 22) du 2026-11-12 03:27 UTC, images `pre-a9b`. Plan resserré décidé par le propriétaire le 2026-11-12 : observation de quelques heures entre sous-lots au lieu de 24 h ; mot de passe vérifié sous Node 22 (403 « adresse non vérifiée » rendu après le contrôle du mot de passe) |
 | Nginx de l'hôte | arrêté et désactivé le 2026-11-12 (`systemctl disable nginx`) : après le redémarrage de la VM, il avait pris le port 80 et coupé tous les sites ; `ekose-nginx-1` recréé par `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --no-deps --force-recreate nginx` dans `/opt/ekose` |
 | 1. Utilisateur `deploy` | fait le 2026-11-12 : groupe `docker` seulement, clé GitHub en lecture dans `~deploy/.ssh`, clone `/opt/planner-pro` et `.env.production` (0600) appartenant à `deploy` |
 | 2. Sauvegarde hors du clone | faite le 2026-11-12 : `/usr/local/lib/planner-pro/backup-production.sh` (root, 0700), unité mise à jour ; sauvegarde de contrôle `planner-pro-20261112T050838Z.sql.gz.gpg` |
@@ -656,7 +656,7 @@ le push de `d13ae2b`).
 | 6. Ruleset `protection-main` | actif : suppression et force-push interdits. **Écart** : pull request obligatoire et CI requise **non activées** (décision du propriétaire en attente : elles interdisent la poussée directe sur `main`) |
 | 6. Double authentification | à vérifier sur le compte propriétaire |
 | 8. Amorçage, 9. Contrôle à blanc | copie d'amorçage dans `~deploy/cd-bootstrap/scripts` (depuis `origin/main`) ; dry-run vers `8f42464` (A9-b2) réussi le 2026-11-12 05:09 UTC (code 0) |
-| Déploiements suivants | A9-b2 seul, 24 h d'observation, puis A9-b3 seul, puis la tête de `main` ; ensuite `DEPLOY_ENABLED=true` |
+| Déploiements suivants | A9-b3 seul (après quelques heures d'observation d'A9-b2), puis la tête de `main` ; ensuite `DEPLOY_ENABLED=true` |
 
 ## Connexion simulée (développement uniquement)
 
