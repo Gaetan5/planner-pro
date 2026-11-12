@@ -1,4 +1,4 @@
-import { E2eWorld } from '../support/e2e-world';
+import { E2eWorld, expectRetryAfter } from '../support/e2e-world';
 
 /**
  * P7 / limiteurs (S24) : 429 du limiteur global et des routes publiques (message français,
@@ -30,8 +30,7 @@ describe('P7 e2e : limiteurs de débit', () => {
     const limited = await world.request('GET', '/projects/workspaces', { ip });
     expect(limited.status).toBe(429);
     expect(limited.body.message).toBe(TOO_MANY);
-    expect(Number(limited.headers.get('retry-after'))).toBeGreaterThan(0);
-    expect(Number(limited.headers.get('retry-after'))).toBeLessThanOrEqual(60);
+    expectRetryAfter(limited, 60);
     // Une autre adresse n'est pas touchée
     expect((await world.request('GET', '/projects/workspaces')).status).toBe(401);
   });
@@ -50,7 +49,7 @@ describe('P7 e2e : limiteurs de débit', () => {
       body: { email: 'autre@e2e.example' },
     });
     expect(limited.body.message).toBe(TOO_MANY);
-    expect(limited.headers.get('retry-after')).toBeTruthy();
+    expectRetryAfter(limited, 60);
   });
 
   it('inscription et connexion : 5 par minute et par adresse', async () => {

@@ -1,6 +1,13 @@
 import { createHash } from 'crypto';
 import { generateTotpCode } from '../../../src/auth/totp.util';
-import { E2E_PASSWORD, E2eUser, E2eWorld, cookieLine, cookieValue } from '../support/e2e-world';
+import {
+  E2E_PASSWORD,
+  E2eUser,
+  E2eWorld,
+  cookieLine,
+  cookieValue,
+  expectRetryAfter,
+} from '../support/e2e-world';
 
 /**
  * P7 / authentification et session : verrouillage de compte, rotation et réutilisation du jeton de
@@ -40,7 +47,7 @@ describe('P7 e2e : authentification et session', () => {
       expect(locked.body.message).toBe(
         'Trop de tentatives échouées : compte temporairement verrouillé, réessayez plus tard.',
       );
-      expect(Number(locked.headers.get('retry-after'))).toBeGreaterThan(0);
+      expectRetryAfter(locked, 24 * 3600);
       expect(locked.setCookies).toEqual([]);
     });
 
@@ -63,7 +70,7 @@ describe('P7 e2e : authentification et session', () => {
       });
       expect(sixth.status).toBe(429);
       expect(sixth.body.message).toBe('Trop de tentatives échouées : réessayez dans une minute.');
-      expect(Number(sixth.headers.get('retry-after'))).toBeGreaterThan(0);
+      expectRetryAfter(sixth, 60);
     });
   });
 
@@ -308,7 +315,7 @@ describe('P7 e2e : authentification et session', () => {
       );
       expect(limited.status).toBe(429);
       expect(limited.body.message).toMatch(/Trop de tentatives/);
-      expect(Number(limited.headers.get('retry-after'))).toBeGreaterThan(0);
+      expectRetryAfter(limited, 60);
       expect(limited.setCookies).toEqual([]);
     });
   });

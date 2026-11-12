@@ -1,6 +1,6 @@
 import { createHash, createHmac, randomUUID } from 'crypto';
 import { encrypt } from '../../../src/auth/encryption.util';
-import { E2eUser, E2eWorld } from '../support/e2e-world';
+import { E2eUser, E2eWorld, expectRetryAfter } from '../support/e2e-world';
 
 /**
  * P7 / webhook GitHub (S21) et SCIM (S11) : signature absente, invalide ou calculée sur un autre
@@ -433,7 +433,7 @@ describe('P7 e2e : webhook GitHub et SCIM', () => {
       expect(limited.body.schemas).toEqual(['urn:ietf:params:scim:api:messages:2.0:Error']);
       expect(limited.body.status).toBe('429');
       expect(limited.body.detail).toBe('Trop de requêtes. Réessayez dans quelques instants.');
-      expect(Number(limited.headers.get('retry-after'))).toBeGreaterThan(0);
+      expectRetryAfter(limited, 60);
       // Une autre clé n'est pas affectée
       expect(
         (await scim('GET', '/scim/v2/Users?count=1', tokenA, undefined, world.nextIp())).status,

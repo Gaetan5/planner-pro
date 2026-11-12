@@ -1,0 +1,412 @@
+{
+  "GET /features": {
+    "status": 200,
+    "headers": {
+      "access-control-allow-credentials": "true",
+      "connection": "keep-alive",
+      "content-length": "47",
+      "content-security-policy": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests",
+      "content-type": "application/json; charset=utf-8",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "date": "<date>",
+      "etag": "<etag>",
+      "keep-alive": "timeout=5",
+      "origin-agent-cluster": "?1",
+      "referrer-policy": "no-referrer",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "vary": "Origin",
+      "x-content-type-options": "nosniff",
+      "x-dns-prefetch-control": "off",
+      "x-download-options": "noopen",
+      "x-frame-options": "SAMEORIGIN",
+      "x-permitted-cross-domain-policies": "none",
+      "x-ratelimit-limit": "60",
+      "x-ratelimit-remaining": "59",
+      "x-ratelimit-reset": "<n>",
+      "x-xss-protection": "0"
+    },
+    "body": {
+      "sso": false,
+      "scim": true,
+      "impersonation": false
+    }
+  },
+  "GET /projects/workspaces sans jeton": {
+    "status": 401,
+    "headers": {
+      "access-control-allow-credentials": "true",
+      "connection": "keep-alive",
+      "content-length": "88",
+      "content-security-policy": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests",
+      "content-type": "application/json; charset=utf-8",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "date": "<date>",
+      "etag": "<etag>",
+      "keep-alive": "timeout=5",
+      "origin-agent-cluster": "?1",
+      "referrer-policy": "no-referrer",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "vary": "Origin",
+      "x-content-type-options": "nosniff",
+      "x-dns-prefetch-control": "off",
+      "x-download-options": "noopen",
+      "x-frame-options": "SAMEORIGIN",
+      "x-permitted-cross-domain-policies": "none",
+      "x-ratelimit-limit": "60",
+      "x-ratelimit-remaining": "59",
+      "x-ratelimit-reset": "<n>",
+      "x-xss-protection": "0"
+    },
+    "body": {
+      "message": "Token d'authentification manquant.",
+      "error": "Unauthorized",
+      "statusCode": 401
+    }
+  },
+  "GET route inconnue": {
+    "status": 404,
+    "headers": {
+      "access-control-allow-credentials": "true",
+      "connection": "keep-alive",
+      "content-length": "77",
+      "content-security-policy": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests",
+      "content-type": "application/json; charset=utf-8",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "date": "<date>",
+      "etag": "<etag>",
+      "keep-alive": "timeout=5",
+      "origin-agent-cluster": "?1",
+      "referrer-policy": "no-referrer",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "vary": "Origin",
+      "x-content-type-options": "nosniff",
+      "x-dns-prefetch-control": "off",
+      "x-download-options": "noopen",
+      "x-frame-options": "SAMEORIGIN",
+      "x-permitted-cross-domain-policies": "none",
+      "x-xss-protection": "0"
+    },
+    "body": {
+      "message": "Cannot GET /route-inconnue",
+      "error": "Not Found",
+      "statusCode": 404
+    }
+  },
+  "GET /auth/sessions sans jeton": {
+    "status": 401,
+    "headers": {
+      "access-control-allow-credentials": "true",
+      "cache-control": "no-store",
+      "connection": "keep-alive",
+      "content-length": "88",
+      "content-security-policy": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests",
+      "content-type": "application/json; charset=utf-8",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "date": "<date>",
+      "etag": "<etag>",
+      "keep-alive": "timeout=5",
+      "origin-agent-cluster": "?1",
+      "pragma": "no-cache",
+      "referrer-policy": "no-referrer",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "vary": "Origin",
+      "x-content-type-options": "nosniff",
+      "x-dns-prefetch-control": "off",
+      "x-download-options": "noopen",
+      "x-frame-options": "SAMEORIGIN",
+      "x-permitted-cross-domain-policies": "none",
+      "x-ratelimit-limit": "60",
+      "x-ratelimit-remaining": "59",
+      "x-ratelimit-reset": "<n>",
+      "x-xss-protection": "0"
+    },
+    "body": {
+      "message": "Token d'authentification manquant.",
+      "error": "Unauthorized",
+      "statusCode": 401
+    }
+  },
+  "GET /admin/health sans jeton": {
+    "status": 401,
+    "headers": {
+      "access-control-allow-credentials": "true",
+      "cache-control": "no-store",
+      "connection": "keep-alive",
+      "content-length": "88",
+      "content-security-policy": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests",
+      "content-type": "application/json; charset=utf-8",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "date": "<date>",
+      "etag": "<etag>",
+      "keep-alive": "timeout=5",
+      "origin-agent-cluster": "?1",
+      "pragma": "no-cache",
+      "referrer-policy": "no-referrer",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "vary": "Origin",
+      "x-content-type-options": "nosniff",
+      "x-dns-prefetch-control": "off",
+      "x-download-options": "noopen",
+      "x-frame-options": "SAMEORIGIN",
+      "x-permitted-cross-domain-policies": "none",
+      "x-ratelimit-limit": "60",
+      "x-ratelimit-remaining": "59",
+      "x-ratelimit-reset": "<n>",
+      "x-xss-protection": "0"
+    },
+    "body": {
+      "message": "Token d'authentification manquant.",
+      "error": "Unauthorized",
+      "statusCode": 401
+    }
+  },
+  "POST secret du webhook sans jeton": {
+    "status": 401,
+    "headers": {
+      "access-control-allow-credentials": "true",
+      "cache-control": "no-store",
+      "connection": "keep-alive",
+      "content-length": "88",
+      "content-security-policy": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests",
+      "content-type": "application/json; charset=utf-8",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "date": "<date>",
+      "etag": "<etag>",
+      "keep-alive": "timeout=5",
+      "origin-agent-cluster": "?1",
+      "pragma": "no-cache",
+      "referrer-policy": "no-referrer",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "vary": "Origin",
+      "x-content-type-options": "nosniff",
+      "x-dns-prefetch-control": "off",
+      "x-download-options": "noopen",
+      "x-frame-options": "SAMEORIGIN",
+      "x-permitted-cross-domain-policies": "none",
+      "x-ratelimit-limit": "60",
+      "x-ratelimit-remaining": "59",
+      "x-ratelimit-reset": "<n>",
+      "x-xss-protection": "0"
+    },
+    "body": {
+      "message": "Token d'authentification manquant.",
+      "error": "Unauthorized",
+      "statusCode": 401
+    }
+  },
+  "OPTIONS origine autorisée": {
+    "status": 204,
+    "headers": {
+      "access-control-allow-credentials": "true",
+      "access-control-allow-methods": "GET,HEAD,PUT,PATCH,POST,DELETE",
+      "access-control-allow-origin": "http://localhost:3000",
+      "cache-control": "no-store",
+      "connection": "keep-alive",
+      "content-length": "0",
+      "content-security-policy": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "date": "<date>",
+      "keep-alive": "timeout=5",
+      "origin-agent-cluster": "?1",
+      "pragma": "no-cache",
+      "referrer-policy": "no-referrer",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "vary": "Origin, Access-Control-Request-Headers",
+      "x-content-type-options": "nosniff",
+      "x-dns-prefetch-control": "off",
+      "x-download-options": "noopen",
+      "x-frame-options": "SAMEORIGIN",
+      "x-permitted-cross-domain-policies": "none",
+      "x-xss-protection": "0"
+    }
+  },
+  "OPTIONS origine inconnue": {
+    "status": 204,
+    "headers": {
+      "access-control-allow-credentials": "true",
+      "access-control-allow-methods": "GET,HEAD,PUT,PATCH,POST,DELETE",
+      "cache-control": "no-store",
+      "connection": "keep-alive",
+      "content-length": "0",
+      "content-security-policy": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "date": "<date>",
+      "keep-alive": "timeout=5",
+      "origin-agent-cluster": "?1",
+      "pragma": "no-cache",
+      "referrer-policy": "no-referrer",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "vary": "Origin, Access-Control-Request-Headers",
+      "x-content-type-options": "nosniff",
+      "x-dns-prefetch-control": "off",
+      "x-download-options": "noopen",
+      "x-frame-options": "SAMEORIGIN",
+      "x-permitted-cross-domain-policies": "none",
+      "x-xss-protection": "0"
+    }
+  },
+  "GET SCIM sans clé": {
+    "status": 401,
+    "headers": {
+      "access-control-allow-credentials": "true",
+      "connection": "keep-alive",
+      "content-length": "123",
+      "content-security-policy": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests",
+      "content-type": "application/scim+json; charset=utf-8",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "date": "<date>",
+      "etag": "<etag>",
+      "keep-alive": "timeout=5",
+      "origin-agent-cluster": "?1",
+      "referrer-policy": "no-referrer",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "vary": "Origin",
+      "x-content-type-options": "nosniff",
+      "x-dns-prefetch-control": "off",
+      "x-download-options": "noopen",
+      "x-frame-options": "SAMEORIGIN",
+      "x-permitted-cross-domain-policies": "none",
+      "x-ratelimit-limit": "3000",
+      "x-ratelimit-remaining": "2999",
+      "x-ratelimit-reset": "<n>",
+      "x-xss-protection": "0"
+    },
+    "body": {
+      "schemas": ["urn:ietf:params:scim:api:messages:2.0:Error"],
+      "status": "401",
+      "detail": "Authentification Bearer SCIM requise."
+    }
+  },
+  "webhook non signé": {
+    "status": 401,
+    "headers": {
+      "access-control-allow-credentials": "true",
+      "connection": "keep-alive",
+      "content-length": "70",
+      "content-security-policy": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests",
+      "content-type": "application/json; charset=utf-8",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "date": "<date>",
+      "etag": "<etag>",
+      "keep-alive": "timeout=5",
+      "origin-agent-cluster": "?1",
+      "referrer-policy": "no-referrer",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "vary": "Origin",
+      "x-content-type-options": "nosniff",
+      "x-dns-prefetch-control": "off",
+      "x-download-options": "noopen",
+      "x-frame-options": "SAMEORIGIN",
+      "x-permitted-cross-domain-policies": "none",
+      "x-xss-protection": "0"
+    },
+    "body": {
+      "message": "Webhook refusé.",
+      "error": "Unauthorized",
+      "statusCode": 401
+    }
+  },
+  "webhook signé": {
+    "status": 201,
+    "headers": {
+      "access-control-allow-credentials": "true",
+      "connection": "keep-alive",
+      "content-length": "20",
+      "content-security-policy": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests",
+      "content-type": "application/json; charset=utf-8",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "date": "<date>",
+      "etag": "<etag>",
+      "keep-alive": "timeout=5",
+      "origin-agent-cluster": "?1",
+      "referrer-policy": "no-referrer",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "vary": "Origin",
+      "x-content-type-options": "nosniff",
+      "x-dns-prefetch-control": "off",
+      "x-download-options": "noopen",
+      "x-frame-options": "SAMEORIGIN",
+      "x-permitted-cross-domain-policies": "none",
+      "x-xss-protection": "0"
+    },
+    "body": {
+      "closedTaskIds": []
+    }
+  },
+  "JSON de 1,2 Mo": {
+    "status": 413,
+    "headers": {
+      "connection": "keep-alive",
+      "content-length": "55",
+      "content-type": "application/json; charset=utf-8",
+      "date": "<date>",
+      "etag": "<etag>",
+      "keep-alive": "timeout=5",
+      "x-powered-by": "Express"
+    },
+    "body": {
+      "statusCode": 413,
+      "message": "request entity too large"
+    }
+  },
+  "JSON mal formé": {
+    "status": 400,
+    "headers": {
+      "connection": "keep-alive",
+      "content-length": "81",
+      "content-type": "application/json; charset=utf-8",
+      "date": "<date>",
+      "etag": "<etag>",
+      "keep-alive": "timeout=5",
+      "x-powered-by": "Express"
+    },
+    "body": {
+      "message": "Unexpected end of JSON input",
+      "error": "Bad Request",
+      "statusCode": 400
+    }
+  },
+  "POST /auth/login, 6e échec : 429": {
+    "status": 429,
+    "headers": {
+      "access-control-allow-credentials": "true",
+      "cache-control": "no-store",
+      "connection": "keep-alive",
+      "content-length": "84",
+      "content-security-policy": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests",
+      "content-type": "application/json; charset=utf-8",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "date": "<date>",
+      "etag": "<etag>",
+      "keep-alive": "timeout=5",
+      "origin-agent-cluster": "?1",
+      "pragma": "no-cache",
+      "referrer-policy": "no-referrer",
+      "retry-after": "<n>",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "vary": "Origin",
+      "x-content-type-options": "nosniff",
+      "x-dns-prefetch-control": "off",
+      "x-download-options": "noopen",
+      "x-frame-options": "SAMEORIGIN",
+      "x-permitted-cross-domain-policies": "none",
+      "x-xss-protection": "0"
+    },
+    "body": {
+      "statusCode": 429,
+      "message": "Trop de requêtes. Réessayez dans quelques instants."
+    }
+  }
+}
