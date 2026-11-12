@@ -8,7 +8,7 @@
 | Périmètre | `backend/` (NestJS 10, Prisma 7 / adaptateur MariaDB, MySQL 8, Socket.IO, Redis), `frontend/` (React 18 / Vite), `docker-compose*.yml`, `.github/workflows/ci.yml`, `firestore.rules` |
 | Méthode | Revue de code manuelle ligne par ligne, `pnpm audit --prod`, exécution de la suite Jest backend (32 suites, 185 tests, tous verts : **aucun ne couvre les scénarios d'attaque ci-dessous**) |
 | Statut | **Source de vérité** pour l'agent `fixeur`. Les identifiants sont stables : ne jamais renuméroter, ajouter les nouveaux constats à la suite. |
-| Révision | r56 (2026-11-12) : sous-lot A9-b0 (caractérisation, table des routes, Node 22) VALIDÉ, feu vert de commit ; ouverts r56-m1 et O23 (reclassé Mineur) dans un sous-lot A9-b0b avant A9-b2, r56-a1, r56-a2 ; puis A9-b1 à A9-b4, A8, P2. Avant : r55 (2026-11-11) + « Spécification A9-b (architecte) » (2026-11-11) : lot P7-e (r54-m1, r54-a1) VALIDÉ, ouvert r55-a1. SCIM activable en production après déploiement de ce lot (conditions dans « Revue r55 »). Voir la section « Revue r55 » à la fin. |
+| Révision | r57 (2026-11-12) : sous-lot A9-b0b (arrêt propre O23, test anti-CSRF r56-m1) VALIDÉ, feu vert de commit ; ouverts r57-m1 (tests de garde manquants) avant A9-b2, r57-a1, r57-a2 ; puis A9-b1 à A9-b4, A8, P2. Avant : r56 (2026-11-12) : sous-lot A9-b0 (caractérisation, table des routes, Node 22) VALIDÉ, feu vert de commit ; ouverts r56-m1 et O23 (reclassé Mineur) dans un sous-lot A9-b0b avant A9-b2, r56-a1, r56-a2 ; puis A9-b1 à A9-b4, A8, P2. Avant : r55 (2026-11-11) + « Spécification A9-b (architecte) » (2026-11-11) : lot P7-e (r54-m1, r54-a1) VALIDÉ, ouvert r55-a1. SCIM activable en production après déploiement de ce lot (conditions dans « Revue r55 »). Voir la section « Revue r55 » à la fin. |
 
 > Note de reconstruction : le plan de référence S1–S21 / A1–A9 / P1–P8 n'avait jamais été enregistré. La numérotation ci-dessous a été reconstruite en respectant le découpage par phase. Chaque constat a été **revérifié dans le code actuel** ; les anciens documents (`docs/audit_roadmap_phases.md`, `docs/etat_des_lieux.md`, `docs/manifeste_actions_restantes.md`) contiennent des affirmations fausses, signalées en section 1.3.
 
@@ -6218,3 +6218,76 @@ Chaque commit passe isolément (le 1 ne dépend que du code existant ; l'instant
 4. Reliquats antérieurs : r44-a3, r42-a1, parcours manuel avant `CSP_MODE=enforce`, S30, recensement S19/S20, S26, A5 à A7, P5, P8, O10 à O15, O17.
 5. Actions d'exploitation : sauvegarde avant migration, comparaison complète du schéma de production, vérifications GitHub requises, confirmation de `TRUST_PROXY_HOPS` de production (O-c), valeur du délai d'arrêt du conteneur backend (O23).
 6. Clos par cette revue : A9-b0-1, A9-b0-2, A9-b0-3 (VALIDÉS).
+
+
+---
+
+## Revue r57 (architecte) : sous-lot A9-b0b (arrêt propre sur SIGTERM, test anti-CSRF par Origin) : VALIDÉ, un Mineur et deux Améliorations (non bloquants)
+
+**Verdict global : VALIDÉ, feu vert de commit.** O23 est réellement corrigé (le processus réel `dist/main` sort en code 0 sur SIGTERM en 0,1 à 0,2 s, WebSocket et adaptateur Redis fermés, Redis coupé borné à 2 s) et r56-m1 est couvert par un vrai test de comportement. Les gardes du test O23 laissent toutefois survivre quatre mutations (double signal, délai de 8 s, sortie explicite, branchement de `RedisService`) : r57-m1, à solder avant A9-b2.
+
+| Point | Verdict |
+| --- | --- |
+| O23 (`installShutdownSignals`, `quitWithin`, test `o23-sigterm`, build dans le job e2e) | **VALIDÉ** : écart de moyen accepté (réponse 1) ; garde incomplète, voir r57-m1 |
+| r56-m1 (`origin-csrf.e2e-spec.ts`, 15 tests) | **VALIDÉ** : 7 contre-mutations propres sur 7 détectées |
+
+### Vérifications indépendantes (MySQL 8.0 et Redis 7 jetables `r57-mysql` et `r57-redis`, supprimés ; Node 24.16 local)
+- e2e `--runInBand --detectOpenHandles` : 12 suites, **421/421**. Jest unitaire (`env -u DATABASE_URL -u E2E_DATABASE_URL`) : 110 suites, **3 001/3 001**. `nest build` OK, `tsc -p tests --noEmit` OK, ESLint 0 erreur (15 avertissements préexistants), Prettier propre (`src`, `tests`, `ci.yml`), vitest 34 fichiers, **296/296**. Conforme aux chiffres annoncés.
+- **Comportement du processus réel** (`node dist/main.js`, sondes jetables hors dépôt) : SIGTERM nu : sortie 0 en 217 ms ; **SIGTERM, SIGINT puis SIGTERM à 50 et 100 ms : un seul message « arrêt en cours », un seul `close()`, sortie 0 en 188 ms** ; connexion HTTP keep-alive inactive : sortie 0 en 66 ms ; **client Socket.IO connecté : déconnecté puis sortie 0 en 78 ms** ; **requête en vol jamais terminée (corps incomplet) : `close()` attend, puis sortie en code 1 à 8,06 s** (filet), jamais de SIGKILL tant que le délai d'arrêt du conteneur dépasse 8 s. Le serveur Socket.IO ne envoie pas de paquet de déconnexion à l'arrêt (`io.close()` ferme les transports) : le client voit une coupure de transport et se reconnecte, donc pas de régression de reconnexion côté navigateur (la déconnexion « io server disconnect » observée avec mon client sans cookie vient du refus d'authentification du passerelle, identique avec SIGKILL).
+- **Contre-mutations O23** (sauvegarde, `\cp`, `cmp` identique, reconstruction à chaque fois) :
+  1. `installShutdownSignals(app)` remplacé par `app.enableShutdownHooks()` : détectée (2 échecs sur 2, signal au lieu du code 0).
+  2. `quit()` du gateway sans borne : détectée (cas Redis injoignable, 10,7 s).
+  3. Borne de `quitWithin` portée à 600 000 ms : détectée (1 échec sur 2).
+  4. `process.exit(0)` retiré : **NON détectée** (le processus sort seul une fois tout fermé).
+  5. `quit()` de `RedisService` sans borne : **NON détectée** (e2e vert ; la reconnexion d'ioredis fait échouer `quit()` assez vite dans ce scénario).
+  6. Garde du double signal (`if (closing) return`) retirée : **NON détectée**.
+  7. Filet de 8 s retiré : **NON détectée**.
+- **Contre-mutations r56-m1** : retrait de `app.use(originCheckMiddleware())` (confirmé par le fixeur : 10 échecs sur 15) ; `PATCH` retiré de la liste des méthodes : 1 échec ; le `Referer` prime sur l'`Origin` : 1 échec ; origine vide acceptée : 9 échecs ; `__Host-accessToken` retiré des noms de cookies : échecs ; `__Secure-refreshToken` retiré : échecs ; exemptions webhook/SCIM élargies (journal du fixeur, relues dans le test) : détectées. Aucune mutation survivante. Restauration vérifiée par `cmp` pour chaque fichier.
+- Non rejoué : `docker stop` sur l'image Node 22 (mesures du fixeur : 0,3 s, et 2,3 s avec Redis arrêté, code 0, crédibles au vu de mes mesures du processus réel) ; le job CI `e2e` (Node 22) doit le confirmer.
+
+### Relecture ciblée
+- `shutdown-signals.ts` : `closing` empêche le double `close()` ; `process.exit(0)` seulement après `app.close()` (donc après `onModuleDestroy` : Prisma, Redis, adaptateur) ; échec du `close()` ou 8 s : code 1 ; le minuteur est `unref()`. Correct. Pas de `enableShutdownHooks()` en parallèle : ne **jamais** le rajouter à côté (NestJS se renverrait le signal, 143, et un second `close()` s'ajouterait).
+- `quitWithin` : course `quit()` contre 2 s puis `disconnect()`, ne lève jamais, minuteur nettoyé. Correct. Le plafond total de l'arrêt reste 8 s (deux clients de l'adaptateur et le client Redis se ferment en parallèle ou en série, au plus 2 s chacun).
+- Requêtes en vol : `app.close()` arrête d'accepter les connexions, ferme les connexions inactives et **attend la fin des requêtes actives** (jusqu'à 8 s) ; au-delà, sortie en code 1 et la requête est coupée. C'est le bon comportement, il n'était pas documenté : r57-a1.
+- Redémarrage : `docker-compose.prod.yml` utilise `restart: unless-stopped` et `docker-compose.yml` `always` ; ces deux politiques redémarrent après toute sortie, code 0 compris, sauf arrêt demandé par `docker stop`, ce qui est voulu. Avec `on-failure`, un code 0 ne redémarrerait pas : ne pas changer de politique sans le savoir.
+- Nest 11 (A9-b2) : `app.close()` exécute les mêmes crochets, dans l'ordre inverse. Notre gestionnaire ne dépend pas de `enableShutdownHooks()`, donc l'inversion ne change que l'ordre de destruction (Redis, passerelle, Prisma) ; `o22-shutdown` et `o23-sigterm` sont les références à rejouer à ce moment.
+
+### Constats
+**r57-m1 (Mineur) : les gardes de l'arrêt laissent survivre quatre mutations.** Voir contre-mutations 4 à 7. Remédiation attendue, avant A9-b2 (qui inverse l'ordre des hooks) :
+1. Test e2e (ou unitaire de `installShutdownSignals` avec une fausse application et un `process.exit` espionné) : **SIGTERM puis SIGINT rapprochés ne provoquent qu'un seul `close()`** ; contre-mutation : retirer `if (closing) return`.
+2. Test du **filet de 8 s** : une connexion HTTP au corps incomplet maintenue ouverte ; attendre une sortie en code 1 entre 7 et 10 s (ou, en unitaire, `jest.useFakeTimers` sur `SHUTDOWN_DEADLINE_MS`) ; contre-mutation : retirer le minuteur, ou le porter à 600 000 ms. 
+3. `process.exit(0)` explicite : espion unitaire (`exit` appelé avec 0 après `close()` résolu, avec 1 après rejet) ; contre-mutation : `() => undefined`.
+4. Branchement de `RedisService.onModuleDestroy` sur `quitWithin` : test unitaire avec un faux client dont `quit()` ne se résout jamais (fausses minuteries) : `disconnect()` est appelé après 2 s ; contre-mutation : `await client.quit()` direct.
+
+**r57-a1 (Amélioration) : documenter le comportement d'arrêt.** Dans `docs/security/ci.md` ou la documentation d'exploitation : SIGTERM/SIGINT, `close()` attend les requêtes en vol jusqu'à 8 s puis code 1, `quit()` Redis borné à 2 s, WebSocket coupés (les clients se reconnectent), exigence **`stop_grace_period` du conteneur backend > 8 s** (défaut 10 s ; ne pas le réduire), pas de `enableShutdownHooks()` à côté, `init: true` non nécessaire.
+
+**r57-a2 (Amélioration) : le test O23 lance `dist/main.js` sans vérifier sa fraîcheur.** En local, un `dist` périmé donne un résultat trompeur (la CI le reconstruit, donc sans risque en CI). Option : comparer `mtime` de `dist/main.js` à `src/main.ts` et `src/common/shutdown-signals.ts`, ou documenter « `pnpm build` avant `jest-e2e` » dans `docs/security/ci.md` (ligne 24).
+
+### Réponses aux questions du fixeur
+1. **`installShutdownSignals` à la place de `enableShutdownHooks()` : accepté.** Sous NestJS 10, `enableShutdownHooks()` se renvoie le signal (code 143) ; mon critère était le code 0, que la remédiation d'origine ne tenait pas : l'écart est justifié et la remédiation de O23 est amendée en ce sens. Nest 11 : sans effet sur ce choix (voir relecture) ; l'ordre inversé des crochets se vérifie avec `o22` et `o23`. 
+2. **Build dans le job e2e : accepté.** L'étape précède les tests ; le coût est de quelques secondes. Ne pas la déplacer après les tests.
+3. **`init: true` : non nécessaire, d'accord.** Node installe lui-même le gestionnaire ; `init` ne ferait qu'ajouter la récolte des zombies, sans objet ici.
+4. **Écart sur logout (204 public)** : accepté, `refresh` couvre le passage ; aucun changement de remédiation.
+
+### Feu vert de commit (chemins explicites, jamais `git add -A`, ni `.claude/`, ni `.env*`) : 4 commits, dans cet ordre
+1. `feat(backend): arrêt propre sur SIGTERM et SIGINT, fermeture bornée des clients Redis (O23)` : `backend/src/common/shutdown-signals.ts`, `backend/src/common/bounded-quit.ts`, `backend/src/main.ts`, `backend/src/redis/redis.service.ts`, `backend/src/tracking/tracking.gateway.ts`, `backend/tests/unit/common/bounded-quit.spec.ts`.
+2. `test(security): sortie en code 0 du processus réel sur SIGTERM, build dans le job e2e (O23)` : `backend/tests/e2e/security/o23-sigterm.e2e-spec.ts`, `.github/workflows/ci.yml`.
+3. `test(security): anti-CSRF par Origin sur l'application câblée (r56-m1)` : `backend/tests/e2e/security/origin-csrf.e2e-spec.ts`.
+4. `docs(security): revue r57, sous-lot A9-b0b (O23, r56-m1)` : `docs/security/rapport-audit.md`, `docs/security/journal-corrections.md`, en dernier.
+Chaque commit passe isolément (le 2 suppose le 1 et exige `dist` construit, ce que fait la CI ; le 3 ne dépend que du code existant). Aucune mention d'outil d'assistance ni `Co-Authored-By`. Le commit `.github/workflows/ci.yml` d'A9-b0 (Node 22) est déjà en historique : le fichier ne porte ici que l'étape de build.
+
+### Conditions de déploiement : A9-b0 (Node 22) et A9-b0b (arrêt propre) ensemble
+1. **Prérequis** : CI verte sur **tous** les jobs sous Node 22, y compris `e2e` (qui construit désormais `dist` et lance `o23-sigterm`) et `frontend-headers` ; c'est la première exécution complète en Node 22 (je n'ai pas rejoué sous Node 22). Commits 1 à 4 de r56 et de r57 poussés ; migration N6 et P7-b à P7-e déjà en production ; **`mysqldump` complet avant** (conditions de r53 inchangées, A9-b0/b0b n'ajoutent aucune migration).
+2. **Avant** : étiqueter les images backend et frontend en cours (`planner-backend:pre-a9b-0`) ; reconstruire **sans cache de couches** (`--no-cache`) pour tirer `node:22-alpine` et reconstruire `argon2` et Prisma sous Node 22. Contrôler le `stop_grace_period` du service backend : doit être **absent (10 s) ou > 8 s**. Aucune variable nouvelle, aucune dépendance runtime nouvelle, aucun changement de proxy (`ekose-nginx-1` inchangé ; en cas d'intervention, `docker restart` et non `reload`). Politique de redémarrage : garder `unless-stopped` (prod) / `always`.
+3. **Déploiement** : hors pointe. **Le déploiement qui remplace l'ancienne image dure encore le délai d'arrêt et finit en 137** (l'ancien processus ignore SIGTERM) et coupe les requêtes en vol ; l'arrêt propre ne joue qu'à partir du déploiement suivant. Les clients WebSocket sont coupés et se reconnectent.
+4. **Vérifications après déploiement** : `docker exec <backend> node -v` affiche v22.x ; journaux de démarrage sans erreur (table de 148 routes) ; `GET /features` 200 avec les en-têtes Helmet ; **une connexion réelle avec un compte existant** (vérification d'un hash argon2 existant sous Node 22 Alpine) ; WebSocket opérationnel. Sur la préproduction, ou à la prochaine redéploiement : `docker stop` (ou `docker compose stop backend`) dure **moins de 3 s** et `docker inspect -f '{{.State.ExitCode}}' <backend>` renvoie **0** ; les journaux montrent « SIGTERM reçu : arrêt en cours. » ; le conteneur est redémarré par la politique au `up`. Une sortie en 137 ou en code 1 est un signal d'alarme (requête en vol bloquante, ou Redis).
+5. **Rollback** : remettre l'image étiquetée `pre-a9b-0` ; aucune donnée ni format de session modifié, aucune migration.
+6. **Connu et accepté** : r57-m1 (gardes à compléter avant A9-b2), r57-a1, r57-a2 ouverts, sans risque d'exploitation ; une requête en vol de plus de 8 s est coupée à l'arrêt (code 1, redémarrage automatique) ; O23 est soldé côté code, sa preuve en exploitation viendra au deuxième déploiement ; la valeur du `stop_grace_period` de production n'est pas vérifiée.
+
+### Ordre des constats ouverts (fin de r57)
+1. **r57-m1** (tests de garde de l'arrêt) : avant A9-b2, peut être traité dans A9-b1 ; r57-a1, r57-a2 en passant.
+2. **A9-b1** (throttler 6, config 4, jwt 11 sur NestJS 10), **A9-b2** (NestJS 11, Express 5 ; rejouer `o22` et `o23`), **A9-b3** (`jose` 6), **A9-b4** (documentation, y compris r56-a1), puis **A8** (y inclure O-b et O-e), puis **P2**.
+3. Améliorations : r57-a1, r57-a2, r56-a1, r56-a2, r55-a1, r53-a1, r53-a2, O-f, O-a, r48-a1, r48-a2.
+4. Reliquats antérieurs : r44-a3, r42-a1, parcours manuel avant `CSP_MODE=enforce`, S30, recensement S19/S20, S26, A5 à A7, P5, P8, O10 à O15, O17.
+5. Actions d'exploitation : sauvegarde avant migration, comparaison complète du schéma de production, vérifications GitHub requises, confirmation de `TRUST_PROXY_HOPS` de production (O-c), valeur du `stop_grace_period` du conteneur backend (O23, doit rester > 8 s).
+6. Clos par cette revue : O23 et r56-m1 (VALIDÉS).

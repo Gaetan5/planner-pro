@@ -5336,3 +5336,86 @@ Observation `docker stop` (137) : **c'est O23**, reclassé Mineur. Cause précis
 3. **r56-a1** (Amélioration) : commentaire `ci.yml:219`, `docs/DOSSIER_ARCHITECTURE_TECHNIQUE.md:110` et `:740` encore en Node 20 ; `@types/node` du frontend sur 22.
 4. **r56-a2** (Amélioration) : `expectRetryAfter(locked, 900)` pour le premier verrouillage.
 5. Ensuite : A9-b1 à A9-b4, A8 (O-b, O-e), P2 ; Améliorations r55-a1, r53-a1, r53-a2, O-f, O-a, r48-a1, r48-a2.
+
+## Lot A9-b0b (fixeur)
+
+Revue de référence : r56 (sous-lot A9-b0 validé), constats **r56-m1** et **O23** (reclassé Mineur). Aucune migration, aucune dépendance, aucun changement de schéma. Bases MySQL 8.0 et Redis 7 jetables `a9b0b-mysql` et `a9b0b-redis` (réseau et image `a9b0b-*`), supprimés à la fin. Aucune connexion à un serveur, aucune écriture en production, rien commité.
+
+Relecture de `backend/src/common/configure-http-app.ts` (réécrit par l'architecte, commité en 7c432b8) : conforme à l'intention d'origine (proxy de confiance, analyseurs, Helmet, no-store, pipe, cookies, `originCheckMiddleware()`, CORS, dans cet ordre). Non modifié.
+
+### O23 — Arrêt propre sur SIGTERM (Node en PID 1)
+
+**Statut** : `À VALIDER PAR L'ARCHITECTE` (écart de moyen : voir ci-dessous) ; critères du rapport atteints.
+
+**Cause confirmée** : `main.ts` n'installait aucun gestionnaire de signal ; Node étant le PID 1 (`CMD ["node", "dist/main"]`), SIGTERM est ignoré et `docker stop` finit en SIGKILL (137).
+
+**Écart par rapport au rapport** : la remédiation demandait `app.enableShutdownHooks()`. Essayé en premier : le test échoue avec `code: null, signal: 'SIGTERM'`. NestJS 10 exécute les crochets puis se renvoie le signal (`node_modules/@nestjs/core/nest-application-context.js:203`, `process.kill(process.pid, signal)`), donc le processus meurt par signal (143 sous Docker) et non en code 0, ce que le rapport exige. J'ai donc remplacé l'appel par `installShutdownSignals(app)` : écouteurs SIGTERM et SIGINT qui appellent `app.close()` (mêmes crochets `onModuleDestroy`), puis `process.exit(0)` ; en cas d'erreur `exit(1)` ; filet à 8 s (`exit(1)`, non bloquant pour la boucle d'événements). Installé dans `main.ts` et non dans `configureHttpApp` (pas d'empilement d'écouteurs dans les tests). Si l'architecte préfère `enableShutdownHooks()` et accepte 143, c'est un retour d'une ligne, mais le critère « code 0 » ne serait plus tenu.
+
+**Changement** :
+- `backend/src/common/shutdown-signals.ts` (nouveau) ; `backend/src/main.ts` (appel après `configureHttpApp`).
+- `backend/src/common/bounded-quit.ts` (nouveau) : `quitWithin(client, 2000)` = course `quit()` contre 2 s, puis `disconnect()` ; ne lève jamais (y compris `quit` absent ou `disconnect` en échec).
+- `backend/src/redis/redis.service.ts` (`onModuleDestroy`) et `backend/src/tracking/tracking.gateway.ts` (clients pub/sub de l'adaptateur) utilisent `quitWithin`.
+- `.github/workflows/ci.yml` (job `e2e`) : étape `pnpm --filter backend build` avant les tests (le test lance `dist/main`).
+
+**Tests** :
+- `backend/tests/e2e/security/o23-sigterm.e2e-spec.ts` (2 tests) : lance `node dist/main` (vraie base, vrai Redis via un relais TCP du test), envoie SIGTERM, exige `code 0` sans signal en moins de 5 s ; second cas : le relais est coupé (Redis injoignable, clients en reconnexion) avant SIGTERM. Le test échoue explicitement si `dist/main.js` est absent. Cohérent avec `o22-shutdown.e2e-spec.ts` (inchangé, vert).
+- `backend/tests/unit/common/bounded-quit.spec.ts` (4 tests).
+- Un test existant (`task-room-revocation.spec.ts`) a révélé que des doublures de client sans `quit` existent : `quitWithin` les tolère (comportement d'origine conservé).
+
+**Mesure `docker stop`** (image `a9b0b-backend` construite depuis `backend/Dockerfile`, Node 22) : Redis disponible : 0,3 s, code 0 ; Redis arrêté avant le stop : 2,3 s (borne de 2 s de `quit()`), code 0. Avant : 137 après le délai d'arrêt (mesure du lot A9-b0).
+
+**Contre-mutations** (sauvegarde, `\cp`, `cmp` identique) :
+1. `installShutdownSignals(app)` retiré de `main.ts` (reconstruction) : 2 échecs sur 2.
+2. Borne portée à 600 000 ms dans `bounded-quit.ts` (reconstruction) : 1 échec sur 2 (cas Redis injoignable), le cas nominal reste vert.
+
+**Questions pour l'architecte** : 1) Accepter `installShutdownSignals` au lieu de `enableShutdownHooks()` (raison ci-dessus) ? 2) Nest 11 (A9-b2) inversera l'ordre des hooks : ce test sert de référence. 3) `init: true` côté ekose reste une option complémentaire, non nécessaire ici.
+
+### r56-m1 — Test de comportement de l'anti-CSRF par Origin
+
+**Statut** : `CORRIGÉ – À REVOIR`
+
+**Changement** : `backend/tests/e2e/security/origin-csrf.e2e-spec.ts` (nouveau, 15 tests, application câblée par `configureHttpApp`, `CORS_ORIGINS` épinglée). Aucun code applicatif modifié.
+
+**Couverture** : 403 avec le message `Origine de la requête non autorisée.` sans `Origin` ni `Referer` (POST, PUT, PATCH, DELETE) ; `Origin` inconnue (même avec `Referer` autorisé : l'`Origin` prime) ; `Referer` inconnu ou illisible ; passage avec `Origin` autorisée (refresh 401, logout 204) et avec `Referer` autorisé sans `Origin` ; cookies `accessToken`, `__Host-accessToken`, `__Secure-refreshToken` ; GET avec cookie sans `Origin` non bloqué ; cookie étranger ou Bearer non concernés ; chemins exemptés (`/projects/<id>/webhooks/github` avec et sans barre finale, `/scim/v2…`) non bloqués ; exemptions étroites (`…/webhooks/github/secret`, `/scim/v2x/Users`, `/scimv2/Users` : 403) ; **figé** : `/Projects/<id>/WEBHOOKS/GitHub/`, `/Projects/<id>/webhooks/github` et `/SCIM/v2/Users` avec cookie et sans `Origin` : 403 (exemption sensible à la casse, échec fermé).
+
+**Contre-mutations** (sauvegarde, `\cp`, `cmp` identique) :
+1. `app.use(originCheckMiddleware())` retiré de `configure-http-app.ts` : 10 échecs sur 15.
+2. `candidate && …includes(candidate)` remplacé par `true` : 10 échecs sur 15.
+3. Drapeau `i` ajouté à l'exemption du webhook : 1 échec (figé de la casse).
+4. Exemption SCIM élargie (`/^\/scim\/v2/`) : 1 échec.
+
+**Écart par rapport au rapport** : les passages utilisent `POST /auth/refresh` (401 attendu) ; `POST /auth/logout` est public et répond 204 avec un cookie invalide (le rapport attendait 401 pour logout). Sans conséquence.
+
+### Mesures du lot
+
+| Contrôle | Résultat |
+| --- | --- |
+| e2e `--runInBand --detectOpenHandles` | 12 suites, 421/421 (404 + 15 + 2), aucun handle ouvert |
+| jest unitaire (`env -u DATABASE_URL -u E2E_DATABASE_URL`) | 110 suites, 3 001/3 001 (2 997 + 4) |
+| `nest build` | OK |
+| `tsc -p tests --noEmit` | OK |
+| ESLint | 0 erreur, 15 avertissements `no-explicit-any` préexistants |
+| Prettier (`src`, `tests`, `ci.yml`) | propre |
+| vitest frontend | 34 fichiers, 296/296 |
+| Environnement | conteneurs, réseau et image `a9b0b-*` supprimés, aucun processus `dist/main` résiduel, rien commité ni poussé |
+
+Note : les chemins hostiles de ce lot n'ajoutent pas de route ; le catalogue Q-2 et la table des routes (148) sont inchangés.
+
+### Constats à passer en revue
+O23 : `À VALIDER PAR L'ARCHITECTE` (écart `installShutdownSignals`). r56-m1 : `CORRIGÉ – À REVOIR`.
+
+
+## Revue architecte (r57) : lot A9-b0b
+
+Environnement : `r57-mysql` (MySQL 8.0) et `r57-redis` (Redis 7), supprimés ; rien en production, rien commité. Détail dans `rapport-audit.md`, « Revue r57 ».
+
+### O23 — VALIDÉ
+Relu et rejoué : e2e 421/421, jest 3 001/3 001, vitest 296/296, build, tsc, ESLint, Prettier. Processus réel : SIGTERM 0 en 217 ms, double signal (SIGTERM, SIGINT, SIGTERM) un seul `close()` et sortie 0, WebSocket fermé et sortie 0 en 78 ms, requête en vol non terminée : code 1 à 8,06 s. Contre-mutations détectées : `enableShutdownHooks()` à la place (2 échecs), `quit()` du gateway sans borne, borne à 600 000 ms. **Non détectées** : `process.exit(0)` retiré, `RedisService` sans borne, garde du double signal retirée, filet de 8 s retiré : voir r57-m1. L'écart `installShutdownSignals` est accepté (NestJS 10 se renvoie le signal, 143). Build dans le job e2e accepté.
+
+### r56-m1 — VALIDÉ
+15 tests relus. Mes contre-mutations toutes détectées : middleware retiré (10 échecs), `PATCH` retiré, `Referer` prioritaire, origine vide acceptée, noms de cookies `__Host-` et `__Secure-` retirés.
+
+### Constats encore ouverts
+- **r57-m1 (Mineur)** : tests de garde manquants (double signal, filet 8 s, `exit(0)`, branchement de `RedisService`), avant A9-b2.
+- **r57-a1** : documenter l'arrêt (requêtes en vol jusqu'à 8 s puis code 1, `stop_grace_period` > 8 s). **r57-a2** : fraîcheur de `dist` dans le test O23.
+- Verdict global : **VALIDÉ**, feu vert de commit en 4 commits (voir le rapport).
