@@ -1,5 +1,5 @@
 import { ChildProcess, spawn } from 'child_process';
-import { existsSync } from 'fs';
+import { existsSync, statSync } from 'fs';
 import { createServer, AddressInfo, Server, Socket } from 'net';
 import { join } from 'path';
 import { prepareE2eEnvironment } from '../support/e2e-app';
@@ -14,6 +14,14 @@ import { prepareE2eEnvironment } from '../support/e2e-app';
  */
 const MAIN = join(__dirname, '../../../dist/main.js');
 const MAX_STOP_MS = 5000;
+/** Sources dont dépend l'arrêt : si l'une est plus récente que `dist/main.js`, la compilation est périmée (r57-a2). */
+const WATCHED_SOURCES = [
+  'src/main.ts',
+  'src/common/shutdown-signals.ts',
+  'src/common/bounded-quit.ts',
+  'src/redis/redis.service.ts',
+  'src/tracking/tracking.gateway.ts',
+].map((file) => join(__dirname, '../../..', file));
 
 /** Relais TCP vers Redis, que le test peut couper pour simuler une panne sans toucher au vrai Redis. */
 class RedisProxy {
@@ -118,6 +126,14 @@ describe('O23 e2e : arrêt du processus réel sur SIGTERM', () => {
     prepareE2eEnvironment();
     if (!existsSync(MAIN)) {
       throw new Error('dist/main.js absent : lancer `pnpm build` avant ce test (O23).');
+    }
+    // r57-a2 : un `dist` périmé donnerait un résultat trompeur (on testerait l'ancien code)
+    const builtAt = statSync(MAIN).mtimeMs;
+    const stale = WATCHED_SOURCES.filter((file) => statSync(file).mtimeMs > builtAt);
+    if (stale.length > 0) {
+      throw new Error(
+        `dist/main.js est antérieur à ${stale.join(', ')} : relancer \`pnpm build\` avant ce test (O23).`,
+      );
     }
   });
   beforeEach(async () => {
