@@ -300,6 +300,34 @@ Prisma. Le démarrage exécute `prisma migrate deploy` avant l’API ; il n’al
 le schéma par introspection ou synchronisation implicite. Sauvegarder MySQL avant
 chaque changement de schéma et contrôler les logs après le redémarrage.
 
+## Arrêt propre du backend
+
+Le point d'entrée (`backend/src/main.ts`, `installShutdownSignals`) traite `SIGTERM` et `SIGINT` :
+
+- `app.close()` cesse d'accepter des connexions, ferme les connexions inactives et **attend la fin
+  des requêtes en cours**, puis exécute les crochets de destruction (Prisma, Redis, adaptateur
+  Socket.IO) et le processus sort en **code 0**. Un arrêt sans requête bloquée dure moins de 3 s.
+- Une requête encore en vol au bout de **8 s** n'est plus attendue : le processus sort en **code 1**
+  et la requête est coupée. Un échec de `close()` donne aussi le code 1.
+- La fermeture de chaque client Redis (`quit()`) est bornée à 2 s, puis la connexion est coupée de
+  force : une panne de Redis ne bloque pas l'arrêt.
+- Les clients WebSocket sont déconnectés et se reconnectent d'eux-mêmes.
+- Un second signal pendant l'arrêt est ignoré (un seul `close()`).
+
+Exigences d'exploitation :
+
+- **`stop_grace_period` du service backend supérieur à 8 s.** La valeur par défaut de Docker (10 s)
+  convient : ne pas la réduire, sinon `docker stop` finit en SIGKILL (137) avant le filet de 8 s.
+- Ne pas appeler `app.enableShutdownHooks()` en plus : NestJS se renverrait le signal (code 143) et
+  un second `close()` s'ajouterait.
+- `init: true` n'est pas nécessaire (Node installe lui-même le gestionnaire de signal).
+- Garder `restart: unless-stopped` : un code 0 ou 1 de sortie est suivi d'un redémarrage, sauf arrêt
+  demandé par `docker stop`. Avec `on-failure`, un code 0 ne redémarrerait pas.
+- Contrôle après un déploiement : `docker compose stop backend` en moins de 3 s et
+  `docker inspect -f '{{.State.ExitCode}}' <conteneur>` renvoie `0` ; les journaux contiennent
+  « SIGTERM reçu : arrêt en cours. ». Une sortie en 137 ou en code 1 est un signal d'alarme
+  (requête bloquante ou Redis).
+
 ## Sauvegardes de production
 
 Les sauvegardes locales protègent contre certaines erreurs logiques, mais pas contre

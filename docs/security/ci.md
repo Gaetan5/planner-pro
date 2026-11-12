@@ -25,4 +25,6 @@ E2E_DATABASE_URL=$DATABASE_URL REDIS_HOST=127.0.0.1 REDIS_PORT=36379 pnpm exec j
 docker rm -f pp-mysql pp-redis
 ```
 
+Le test `o23-sigterm` lance `dist/main.js` : faire `pnpm --filter backend build` avant `jest-e2e` (il échoue si `dist` est absent ou plus ancien que `main.ts`, `shutdown-signals.ts`, `bounded-quit.ts`, `redis.service.ts` ou `tracking.gateway.ts`).
+
 Les tests e2e se placent dans `backend/tests/e2e/**/*.e2e-spec.ts` (le `jest` par défaut, `pnpm test`, ne les exécute pas). `tests/e2e/support/e2e-app.ts` démarre l'`AppModule` réel.

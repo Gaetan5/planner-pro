@@ -5419,3 +5419,95 @@ Relu et rejoué : e2e 421/421, jest 3 001/3 001, vitest 296/296, build, tsc, ESL
 - **r57-m1 (Mineur)** : tests de garde manquants (double signal, filet 8 s, `exit(0)`, branchement de `RedisService`), avant A9-b2.
 - **r57-a1** : documenter l'arrêt (requêtes en vol jusqu'à 8 s puis code 1, `stop_grace_period` > 8 s). **r57-a2** : fraîcheur de `dist` dans le test O23.
 - Verdict global : **VALIDÉ**, feu vert de commit en 4 commits (voir le rapport).
+
+
+## Lot A9-b1 (fixeur)
+
+Revue de référence : r57 (sous-lot A9-b0b validé) et « Spécification A9-b » (partie A9-b1). Constats traités : **r57-m1**, **r57-a1**, **r57-a2**, puis **A9-b1** (`@nestjs/throttler` 6.7.1, `@nestjs/config` 4.0.4, `@nestjs/jwt` 11.0.2, toujours sur NestJS 10.4.22). **Aucune migration, aucun changement de schéma, aucune variable nouvelle, aucun changement de proxy.** Dépendances : trois montées (justification : spécification A9-b ; `@nestjs/config` 4 retire `uuid`). Bases MySQL 8.0 et Redis 7 jetables `a9b1-mysql` et `a9b1-redis`, supprimées à la fin. Aucune clé SSH, aucun serveur, aucune écriture en production, rien commité.
+
+### r57-m1 — Gardes de l'arrêt (4 contre-mutations survivantes)
+
+**Statut** : `CORRIGÉ – À REVOIR`
+
+**Changement** : deux fichiers de tests, aucun code applicatif modifié.
+- `backend/tests/unit/common/shutdown-signals.spec.ts` (5 tests) : `process.on` espionné (aucun vrai gestionnaire dans Jest), `process.exit` remplacé, minuteries simulées. SIGTERM, SIGINT, SIGTERM rapprochés : un seul `close()` ; `exit(0)` seulement après résolution de `close()` ; `close()` rejeté : `exit(1)` ; `close()` qui ne se termine jamais : pas de sortie à 7 999 ms, `exit(1)` à 8 000 ms.
+- `backend/tests/unit/redis/redis.service.spec.ts` (3 tests) : faux client dont `quit()` ne répond jamais : `disconnect()` absent à 1 999 ms, appelé une fois à 2 000 ms, et `onModuleDestroy` se termine ; `quit()` abouti : pas de `disconnect()` ; sans client : aucune exception.
+
+**Contre-mutations** (sauvegarde, `\cp`, `cmp` identique ; 8 tests) :
+1. `if (closing) return;` retiré : 1 échec.
+2. Minuteur de 8 s retiré : 1 échec ; porté à 600 000 ms : 1 échec.
+3. `process.exit(0)` remplacé par `() => undefined` : 1 échec ; branche d'erreur sans `exit(1)` : 1 échec.
+4. `await quitWithin(client)` remplacé par `await client.quit()` : 1 échec.
+
+**Écart par rapport au rapport** : choix des tests unitaires (option autorisée par la revue) plutôt que d'un e2e de 8 s.
+
+### r57-a1 — Documentation de l'arrêt
+
+**Statut** : `CORRIGÉ – À REVOIR`
+
+**Changement** : nouvelle section « Arrêt propre du backend » dans `docs/deployment-production.md` (SIGTERM/SIGINT, requêtes en vol attendues jusqu'à 8 s puis code 1, `quit()` Redis borné à 2 s, WebSocket coupés, `stop_grace_period` > 8 s (défaut 10 s, ne pas le réduire), pas de `enableShutdownHooks()`, `init: true` inutile, politique `unless-stopped`, contrôle après déploiement). Constat : aucun `stop_grace_period` dans `docker-compose.yml` ni `docker-compose.prod.yml` (défaut Docker 10 s). La valeur effective du conteneur de production n'est pas vérifiée (aucun accès).
+
+### r57-a2 — Fraîcheur de `dist` dans le test O23
+
+**Statut** : `CORRIGÉ – À REVOIR`
+
+**Changement** : `backend/tests/e2e/security/o23-sigterm.e2e-spec.ts` (`beforeAll`) : échec explicite si `dist/main.js` est plus ancien que `src/main.ts`, `shutdown-signals.ts`, `bounded-quit.ts`, `redis.service.ts` ou `tracking.gateway.ts`. `docs/security/ci.md` : « `pnpm --filter backend build` avant `jest-e2e` ». **Vérifié** : `touch src/common/bounded-quit.ts` fait échouer le test avec le message attendu ; après `touch dist/main.js`, 2/2.
+
+### A9-b1 — `@nestjs/throttler` 6.7.1, `@nestjs/config` 4.0.4, `@nestjs/jwt` 11.0.2
+
+**Statut** : `CORRIGÉ – À REVOIR`
+
+**Cause confirmée** : en 6.x, `ThrottlerGuard` lit `isBlocked` et `timeToBlockExpire` renvoyés par le stockage, il ne compare plus `totalHits` à la limite ; l'ancien `RedisThrottlerStorage` aurait donc rendu le limiteur muet.
+
+**Changement** :
+- `backend/package.json` (3 versions exactes) et `pnpm-lock.yaml` : `pnpm install --ignore-scripts` puis Prettier sur le lockfile ; diff final **77 ajouts, 27 suppressions** (pas de diff de mise en forme). `pnpm install --frozen-lockfile --offline` : « Already up to date ». Nouveaux paquets transitoires : `dotenv` 17.4.1, `dotenv-expand` 12.0.3, `@types/jsonwebtoken` 9.0.10, `@types/ms` 2.1.0, `jsonwebtoken` 9.0.3. `pnpm why uuid -r` : plus de chemin par `@nestjs/config` (reste via `gaxios`, `google-gax`, `firebase-tools`).
+- `backend/src/common/redis-throttler.storage.ts` : `increment(key, ttl, limit, blockDuration, throttlerName)` ; retour `{totalHits, timeToExpire, isBlocked: hits > limit, timeToBlockExpire: isBlocked ? timeToExpire : 0}`. **Fenêtre fixe conservée** : `blockDuration` ignoré, `Retry-After` = temps restant de la fenêtre. Les cinq arguments sont transmis au repli `ThrottlerStorageService` (disjoncteur et `catch`) ; l'écart de sémantique du repli (fenêtre glissante, blocage de `blockDuration` à partir du dépassement, panne de Redis uniquement) est documenté dans le commentaire de la classe.
+- `backend/src/common/app-throttler.guard.ts` : `ScimKeyThrottlerGuard` appelle le stockage avec cinq arguments (limiteur `scim-key`, limite 300, fenêtre 60 s), décide sur `isBlocked`, pose `Retry-After` = `max(1, ceil(timeToBlockExpire))`, lève `ThrottlerException(THROTTLE_MESSAGE)`. Refus sans `scimApiKeyId` inchangé. `AppThrottlerGuard` (`getTracker`, `getErrorMessage`) et `ThrottlerModule.forRootAsync` inchangés (compilent tels quels ; `getTracker(req)` reste compatible).
+- `docs/security/audit-exceptions.md` : ligne `uuid` mise à jour (plus `@nestjs/config`).
+
+**Tests** : `redis-throttler.storage.spec.ts` mis à jour pour la nouvelle signature, **aucun cas retiré**, 5 ajoutés (limit-ième appel non bloqué, limit+1-ième bloqué ; `timeToBlockExpire` 0 puis entier dans [1, 60] et 1 en fin de fenêtre ; `blockDuration` d'une heure sans effet et fenêtre suivante remise à zéro ; repli qui bloque ; arguments transmis au repli). Nouveau `tests/unit/common/scim-key-throttler.guard.spec.ts` (5 tests : clé absente, arguments exacts dont la clé hachée, `isBlocked` vrai : message français et `Retry-After` entier, délai nul : 1, `isBlocked` faux fait foi même avec `totalHits` 1 300). `scim-throttler.spec.ts` et `throttling-proxy.spec.ts` passent sans modification (ils n'appellent pas le stockage directement ; le premier couvre déjà le 429 SCIM par clé de bout en bout).
+
+**Critères** : e2e `rate-limits` (7/7) et SCIM inchangés ; **instantané a9b0 identique, sans régénération** (y compris `x-ratelimit-limit/remaining/reset` : le rapport prévoyait un changement des noms ou valeurs, il n'a pas lieu avec cette configuration à limiteur unique `default`) ; table des routes inchangée (148) ; seuils (3, 5, 10, 15, 20, 30, 60, 300, 3 000) et `Retry-After` inchangés.
+
+**Contre-mutations** (sauvegarde, `\cp`, `cmp` identique ; unité = 4 fichiers de 40 tests, e2e = `rate-limits`, 7 tests) :
+- (a) `isBlocked` toujours faux dans le stockage : unité 9 échecs, e2e 6 échecs sur 7.
+- (b) `timeToBlockExpire` toujours 0 : unité 1 échec, e2e 2 échecs.
+- (c) `ScimKeyThrottlerGuard` qui ignore `isBlocked` : unité 3 échecs (dont le test HTTP SCIM par clé) ; l'e2e `rate-limits` ne couvre pas SCIM (attendu).
+- (d) garde SCIM sur `totalHits > limite` et stockage à `isBlocked` faux : unité 10 échecs (le test du stockage l'attrape).
+
+**Écart par rapport au rapport** : le repli mémoire reçoit `blockDuration` = fenêtre (valeur par défaut du garde) : blocage depuis le dépassement et non depuis le début de fenêtre. Documenté, panne de Redis uniquement. Aucun autre écart.
+
+**Observations** : `pnpm audit --prod --audit-level=high` : code 0, 15 avis (2 low, 13 moderate), 0 high. Le démarrage de `dist/main.js` (`.env` local présent, non lu) n'affiche aucune bannière `dotenv`. Le `JwtModule`/`JwtService` compile sans changement sous `@nestjs/jwt` 11 (jetons d'accès, de rafraîchissement et ticket MFA couverts par les suites existantes). Installation faite avec Node 20.20.2 local (`engines` >= 22.12 : simple avertissement).
+
+**Questions pour l'architecte** : 1) Confirmer que l'identité de l'instantané (en-têtes `X-RateLimit-*` inclus) est le bon résultat plutôt qu'un manque de couverture du 429 : le test `rate-limits` vérifie le `Retry-After` du 429 de bout en bout. 2) Les clés de limitation sont désormais hachées en SHA-256 par la bibliothèque : les compteurs Redis existants (`throttle:<ancienne clé>`) ne sont plus lus et expirent d'eux-mêmes en 60 s ; remise à zéro des compteurs au déploiement acceptée (déjà notée en §8).
+
+### Mesures du lot
+
+| Contrôle | Résultat |
+| --- | --- |
+| e2e `--runInBand --detectOpenHandles` | 12 suites, 421/421, aucun handle ouvert (même nombre qu'en r57 : les ajouts sont des tests unitaires) |
+| jest unitaire (`env -u DATABASE_URL -u E2E_DATABASE_URL`) | 113 suites, 3 019/3 019 (3 001 + 18) |
+| `nest build` | OK |
+| `tsc -p tests --noEmit` | OK |
+| ESLint | 0 erreur, 15 avertissements `no-explicit-any` préexistants |
+| Prettier (`src`, `tests`, `pnpm-lock.yaml`, `ci.yml`, docs modifiées) | propre |
+| vitest frontend | 34 fichiers, 296/296 |
+| `pnpm install --frozen-lockfile` | OK (« Already up to date ») |
+| `pnpm audit --prod --audit-level=high` | code 0, 0 high, 15 avis moderate/low |
+| Environnement | conteneurs `a9b1-*` supprimés, aucun processus `dist/main` résiduel, rien commité ni poussé |
+
+### Constats à passer en revue
+r57-m1, r57-a1, r57-a2, A9-b1 : `CORRIGÉ – À REVOIR`.
+
+## Revue architecte (r58) : lot A9-b1
+
+Détail complet dans `rapport-audit.md`, « Revue r58 ». Conteneurs `r58-mysql` et `r58-redis`, supprimés ; rien en production, rien commité.
+
+- **r57-m1** : `VALIDÉ`. Contre-mutations rejouées (délai de 8 s doublé, `client.quit()` direct) détectées.
+- **r57-a1** : `VALIDÉ`. Marge de 2 s sous le défaut Docker : voir r58-a1.
+- **r57-a2** : `VALIDÉ`.
+- **A9-b1** : `VALIDÉ`. e2e 421/421, jest 3 019/3 019, build, tsc, ESLint conformes. Charge concurrente : login 5/95, MFA 5/95, global 60/140, SCIM 300/100, identique avec Redis arrêté (repli mémoire). Sept contre-mutations détectées. Correction de ton journal : la mutation (c) est détectée aussi par l'e2e `webhook-scim`.
+- **Réponses** : instantané identique correct (limiteur unique `default`, suffixe vide) ; remise à zéro des compteurs acceptée.
+
+Constats encore ouverts : **r58-m1** (`prettier --write docs/security/audit-exceptions.md` avant le commit docs ; le journal annonçait Prettier propre), **r58-a1** (`stop_grace_period: 15s` explicite en production, avec A9-b2). Feu vert de commit en 4 commits donné dans le rapport. Déploiement : A9-b1 peut partir avec A9-b0 et A9-b0b.
+
