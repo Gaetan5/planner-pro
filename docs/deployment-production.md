@@ -316,8 +316,10 @@ Le point d'entrée (`backend/src/main.ts`, `installShutdownSignals`) traite `SIG
 
 Exigences d'exploitation :
 
-- **`stop_grace_period` du service backend supérieur à 8 s.** La valeur par défaut de Docker (10 s)
-  convient : ne pas la réduire, sinon `docker stop` finit en SIGKILL (137) avant le filet de 8 s.
+- **`stop_grace_period` du service backend supérieur à 8 s.** `docker-compose.prod.yml` le déclare
+  explicitement à `15s` (r58-a1) : ne pas le réduire, sinon `docker stop` finit en SIGKILL (137)
+  avant le filet de 8 s. Vérifier après déploiement :
+  `docker inspect -f '{{.Config.StopTimeout}}' <conteneur>` renvoie `15`.
 - Ne pas appeler `app.enableShutdownHooks()` en plus : NestJS se renverrait le signal (code 143) et
   un second `close()` s'ajouterait.
 - `init: true` n'est pas nécessaire (Node installe lui-même le gestionnaire de signal).

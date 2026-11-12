@@ -5511,3 +5511,92 @@ Détail complet dans `rapport-audit.md`, « Revue r58 ». Conteneurs `r58-mysql`
 
 Constats encore ouverts : **r58-m1** (`prettier --write docs/security/audit-exceptions.md` avant le commit docs ; le journal annonçait Prettier propre), **r58-a1** (`stop_grace_period: 15s` explicite en production, avec A9-b2). Feu vert de commit en 4 commits donné dans le rapport. Déploiement : A9-b1 peut partir avec A9-b0 et A9-b0b.
 
+## Lot A9-b2 (fixeur)
+
+Revue de référence : r58 (sous-lot A9-b1 validé) et « Spécification A9-b » (partie A9-b2). Constats traités : **A9-b2** (NestJS 11.2.9, Express 5.2.1, surcharge `body-parser`) et **r58-a1** (`stop_grace_period`). **Aucune migration, aucun changement de schéma, aucune variable nouvelle, aucun changement de proxy.** Dépendances : montée majeure de NestJS (justification : spécification A9-b, avis GHSA-36xv-jgw5-4q75 sur `@nestjs/core` corrigé à partir de 11.1.18). `jose` n'est pas touché (A9-b3). Travail sous Node 22.22.2 (nvm), pnpm 10.34.9. Bases MySQL 8.0 et Redis 7 jetables `a9b2-mysql` et `a9b2-redis`, supprimées à la fin. Aucune clé SSH, aucun serveur, aucune écriture en production, rien commité ni poussé.
+
+### A9-b2 — NestJS 11.2.9, Express 5.2.1
+
+**Statut** : `CORRIGÉ – À REVOIR`
+
+**Cause confirmée** : `@nestjs/core` 10.4.22 porte l'avis GHSA-36xv-jgw5-4q75 ; la surcharge globale `body-parser: '>=1.20.9 <2'` (`pnpm-workspace.yaml`) aurait forcé la 1.x sous Express 5 (vérifié sur une copie : `pnpm install --lockfile-only` avec la surcharge globale résout `express@5.2.1` avec `body-parser: 1.20.9`).
+
+**Changement** :
+
+- `backend/package.json` : `@nestjs/common`, `core`, `platform-express`, `platform-socket.io`, `websockets`, `testing` 11.2.9 ; `@nestjs/cli` 11.0.24 ; `@nestjs/schematics` 11.1.0 ; `@types/express` 5.0.6 ; `reflect-metadata` 0.2.2 ; `rxjs` 7.8.2 (épinglages exacts conservés). `@types/node` 22.20.5 inchangé (compile).
+- `pnpm-workspace.yaml` : `body-parser` remplacé par deux surcharges à sélecteur, `'body-parser@<2': '>=1.20.9 <2'` et `'body-parser@>=2': '>=2.2.1 <3'`.
+- `pnpm-lock.yaml` : `pnpm install --ignore-scripts` puis Prettier ; diff final **511 ajouts, 727 suppressions** (changement de dépendances, pas de reformatage). `pnpm install --frozen-lockfile --offline` : « Already up to date ». `pnpm why express body-parser path-to-regexp -r` : Express **5.2.1** et `body-parser` **2.4.0** pour `@nestjs/platform-express` 11.2.9 (`path-to-regexp` 8.4.2) ; `firebase-tools` (dev) garde Express 4.22.1 et `body-parser` 1.20.9 ; le SDK MCP de `firebase-tools` tire `express` 5.3.0 avec `body-parser` 2.4.0.
+- **Aucun changement de code applicatif** : `nest build` et `tsc -p tests --noEmit` passent sans erreur (aucune route à `*`, `?`, `(`, aucun `forRoutes`, aucune écriture de `req.query`, aucun `req.param()`, `res.redirect('back')` ni `@Sse`, relevé par recherche dans `backend/src`). Le défaut du query parser passe d'« extended » (Express 4) à « simple » (Express 5) : **non modifié** (pas d'`app.set('query parser', 'extended')`).
+- `docs/security/audit-exceptions.md` : ligne `@nestjs/core` retirée, ligne `fast-xml-parser` ajoutée (voir observations), paragraphe `body-parser` mis à jour, date de revue 2026-11-12.
+
+**Tests** :
+
+- `tests/unit/dependency-overrides.spec.ts` : 22 tests (20 avant ; aucun retiré ni assoupli). Ajoutés : minimum par majeure de `body-parser` (1.x ≥ 1.20.9, 2.x ≥ 2.2.1, la 2.x doit exister) ; `@nestjs/platform-express` 11 déclaré, verrouillé, et dépendant d'`express` 5.x dans le lockfile ; aucune surcharge globale `body-parser` (exactement `body-parser@<2` et `body-parser@>=2`). Les tests existants (« bornées par une version majeure », « le lockfile porte les mêmes surcharges », minimum `body-parser` 1.20.9) passent tels quels avec les clés à sélecteur.
+- `tests/e2e/security/a9b0-http-characterization.e2e-spec.ts` : +1 test (R9) : `?a[b]=1` et `?a[]=1` renvoient 400 avec les messages `property a[b] should not exist` / `property a[] should not exist` et **pas** `property a should not exist` (l'analyseur « extended » nommerait `a`). Le test R9 existant est inchangé.
+- `tests/e2e/security/a9b2-realtime-two-instances.e2e-spec.ts` (nouveau, 2 tests) : deux instances complètes sur le même Redis ; sans jeton, déconnexion sans `active-timer-state` ; événement émis sur A reçu par un client (socket.io-client 4.7.5) connecté à B, et inversement.
+- Les caractérisations d'A9-b0 / A9-b0b rejouées **sans aucune modification** : table des routes (148), instantané HTTP, webhook en trois formes de chemin, `rawBody`, 413/400, `scim+json`, anti-CSRF `Origin`, `o22-shutdown`, `o23-sigterm` (processus réel `dist/main`, SIGTERM, code 0), `rate-limits`, SCIM, `abuse-no-5xx`.
+
+**Table des routes** : `a9b0-routes.reference.txt` **identique** (148 lignes, fichier non régénéré, test vert). **Instantané HTTP** : `a9b0-http-snapshot.reference.json` **identique** (non régénéré, test vert) : en-têtes Helmet, 401, 404, 429 et `Retry-After`, `X-RateLimit-*`, 413, 400, no-store, CORS (y compris `Access-Control-Allow-Credentials: true` sur le CORS refusé, point 4 de r56 : inchangé avec `cors` 2.8.6). Aucune différence à justifier.
+
+**Contre-mutations** (sauvegarde, `\cp`, `cmp` identique à chaque fois) :
+
+- (a) surcharge `body-parser` remise globale `>=1.20.9 <2` : `dependency-overrides.spec.ts` 2 échecs (aucune surcharge globale ; lockfile sans les mêmes surcharges) ; `pnpm install --frozen-lockfile` : `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH` ; sur copie en `--lockfile-only`, Express 5.2.1 résout `body-parser` 1.20.9. Le démarrage de l'application n'a pas été relancé avec cette installation fautive (non installée).
+- (b) `useBodyParser('raw', …)` retiré : e2e `a9b0-http-characterization` + `webhook-scim`, 1 échec (corps brut / HMAC).
+- (c) `app.set('trust proxy', …)` retiré : e2e `rate-limits`, `a9b0-http`, `webhook-scim`, **10 échecs**.
+- (d) `app.set('query parser', 'extended')` ajouté : le test R9 d'A9-b0 reste vert (comme prévu, il ne détecte pas) ; le **nouveau** test échoue (1 échec : reçu `property a should not exist`). Mutation refaite après ajout du test : détectée.
+- (e) `app.use(helmet())` avant `registerBodyParsers` : 1 échec ; JSON avant le brut : 1 échec (`a9b0-http` + `webhook-scim`).
+- (f) adaptateur Redis retiré de la passerelle (`server.adapter(...)`) : nouveau test deux instances, 1 échec.
+
+**Essais manuels (spécification §7)** : image `backend/Dockerfile` (Node 22 Alpine) construite et lancée (hors production, base et Redis jetables) : `GET /features` 200 avec les en-têtes Helmet ; `docker stop` en **0,17 s**, code de sortie **0**, journal « SIGTERM reçu : arrêt en cours. ». Arrêt propre : `o22` et `o23` verts (aucun handle ouvert). WebSocket à deux instances : voir le test ci-dessus. Webhook réel (GitHub « Redeliver »), client SCIM d'IdP, deux `X-Forwarded-For` forgés en chaîne : **non faits** à la main (aucun accès GitHub ni IdP depuis ce poste) ; couverts par `webhook-scim` / `a9b0-http` (trois formes de chemin, signature, HMAC sur octets reçus, 413), les e2e SCIM et `tests/http/throttling-proxy.spec.ts` (« une adresse falsifiée à gauche de celle du proxy est ignorée »).
+
+**Écart par rapport au rapport** : (1) `@types/node` n'est pas modifié (déjà 22.20.5). (2) Pas d'essai du démarrage avec la surcharge fautive (voir (a)). (3) L'analyseur de requête passe à « simple » : conséquence attendue d'Express 5 (la spécification demande de ne pas l'annuler), figée par le nouveau test.
+
+### r58-a1 — `stop_grace_period` explicite
+
+**Statut** : `CORRIGÉ – À REVOIR`
+
+**Changement** : `docker-compose.prod.yml` : `stop_grace_period: 15s` pour le service `backend` (commentaire renvoyant à O23). `docs/deployment-production.md` : exigence mise à jour et contrôle après déploiement (`docker inspect -f '{{.Config.StopTimeout}}' <conteneur>` renvoie `15`). **Test** : `tests/unit/main-hardening.spec.ts` (+1) : le bloc du service `backend` déclare `stop_grace_period: 15s`, et une seule occurrence dans le fichier. **Contre-mutation** : ligne supprimée du compose : 1 échec ; restaurée, `cmp` identique. Remarque : `docker inspect` d'un conteneur lancé par `docker run` sans l'option affiche `StopTimeout` vide ; la valeur ne se lit que sur un conteneur créé par `docker compose` avec ce fichier.
+
+**Observations** :
+
+- `pnpm audit --prod --audit-level=high` : code 0, **14 avis** (2 low, 12 moderate), 0 high, plus d'avis `@nestjs/core` (15 avant). Les 14 : 12 `hono` / `@hono/node-server` (via `prisma`), `uuid` (via `firebase-admin`), `fast-xml-parser` 5.11.2 (low, via `firebase-admin`). `fast-xml-parser` existait déjà dans le lockfile de `HEAD` (donc dans l'ancien compte de 15) mais n'était pas listé dans `audit-exceptions.md` : ajouté.
+- Aucune bannière `dotenv` ni avertissement au démarrage de l'image.
+- `pnpm install` : seul avertissement de pairs `@firebase/rules-unit-testing` / `firebase@^13` (préexistant).
+
+**Questions pour l'architecte** : 1) Confirmer que l'identité de l'instantané et de la table des routes est le bon résultat. 2) L'essai manuel « Redeliver » GitHub et un client SCIM réel restent à faire au déploiement (conditions §8). 3) Accord pour consigner `fast-xml-parser` dans les exceptions (aucune action de remédiation possible sans montée de `firebase-admin`).
+
+### Mesures du lot
+
+| Contrôle                                                                                                      | Résultat                                                                                                                                                                    |
+| ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| e2e `--runInBand --detectOpenHandles`                                                                         | 13 suites, 424/424 (421 + 1 R9 + 2 deux instances), aucun handle ouvert                                                                                                     |
+| jest unitaire (`env -u DATABASE_URL -u E2E_DATABASE_URL`)                                                     | 113 suites, 3 023/3 023 (3 019 + 4)                                                                                                                                         |
+| `nest build`                                                                                                  | OK                                                                                                                                                                          |
+| `tsc -p tests --noEmit`                                                                                       | OK                                                                                                                                                                          |
+| ESLint                                                                                                        | 0 erreur, 15 avertissements `no-explicit-any` préexistants                                                                                                                  |
+| Prettier (`src`, `tests`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `docker-compose.prod.yml`, docs modifiées) | propre                                                                                                                                                                      |
+| vitest frontend                                                                                               | 34 fichiers, 296/296                                                                                                                                                        |
+| `pnpm install --frozen-lockfile`                                                                              | OK (« Already up to date »)                                                                                                                                                 |
+| `pnpm audit --prod --audit-level=high`                                                                        | code 0, 0 high, 14 avis moderate/low                                                                                                                                        |
+| Images Docker                                                                                                 | `backend/Dockerfile`, `frontend/Dockerfile`, `frontend/Dockerfile.prod` construites (Node 22 Alpine), backend démarré et arrêté (code 0, 0,17 s), images de test supprimées |
+| Environnement                                                                                                 | conteneurs `a9b2-*` supprimés, aucun processus `dist/main` résiduel, rien commité ni poussé                                                                                 |
+
+### Constats à passer en revue
+
+A9-b2, r58-a1 : `CORRIGÉ – À REVOIR`.
+
+## Revue architecte (r59) : lot A9-b2
+
+Détail complet dans `rapport-audit.md`, « Revue r59 ». Conteneurs `r59-mysql` et `r59-redis`, supprimés ; Node 22.22.2 ; rien en production, rien commité.
+
+### A9-b2 : NestJS 11.2.9, Express 5.2.1
+
+**Verdict : VALIDÉ.** e2e 424/424 (aucun handle ouvert), jest 3 023/3 023, vitest 296/296, build, `tsc`, ESLint, Prettier et `--frozen-lockfile` conformes aux annonces. Les références (table des routes, instantané HTTP) sont celles de `HEAD`, comparées à la sortie en direct de la pile Nest 11 et Express 5.2.1 : l'identité est attendue (aucun joker, aucun chemin optionnel). Query parser « simple » : aucune query du backend ni du frontend n'est imbriquée ou tabulaire. Crochets de destruction inversés : indépendants, `o22` et `o23` verts. Contre-mutations propres rejouées : surcharge globale (2 échecs), `platform-express` 10 (1), query parser `extended` et `qs.parse` (1 chacune), adaptateur Redis retiré (1).
+
+### r58-a1 : `stop_grace_period`
+
+**Verdict : VALIDÉ.** Suppression et valeur `5s` détectées (1 échec chacune).
+
+### Constats encore ouverts
+
+Aucun nouveau. A9-b3, A9-b4 (r56-a1), A8, P2, puis les améliorations antérieures. A9-b2 se déploie séparément, après A9-b0 à A9-b1 observés 24 h.
