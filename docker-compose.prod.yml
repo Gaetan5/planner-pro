@@ -46,6 +46,8 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     restart: unless-stopped
+    # Arrêt propre (O23) : le filet applicatif est de 8 s ; 15 s laisse une marge explicite avant SIGKILL
+    stop_grace_period: 15s
     command:
       ['sh', '-c', 'node wait-for-db.js && pnpm exec prisma migrate deploy && node dist/main']
     environment:

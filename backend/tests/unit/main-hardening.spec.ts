@@ -36,4 +36,13 @@ describe('S23/S24 : câblage de main.ts et du module racine', () => {
     const example = readFileSync(join(__dirname, '../../../.env.production.example'), 'utf8');
     expect(example).toMatch(/^TRUST_PROXY_HOPS=\d$/m);
   });
+
+  it('docker-compose.prod.yml déclare stop_grace_period: 15s pour le seul service backend (r58-a1, filet applicatif de 8 s)', () => {
+    const compose = readFileSync(join(__dirname, '../../../docker-compose.prod.yml'), 'utf8');
+    const services = compose.split(/^ {2}(?=[a-z][\w-]*:\n)/m).slice(1);
+    const backend = services.find((block) => block.startsWith('backend:'));
+    expect(backend).toBeDefined();
+    expect(backend).toMatch(/^ {4}stop_grace_period: 15s$/m);
+    expect(compose.match(/stop_grace_period:/g)).toHaveLength(1);
+  });
 });
