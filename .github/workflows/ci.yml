@@ -156,6 +156,9 @@ jobs:
         run: pnpm --filter backend exec prisma generate
       - name: Migrations
         run: pnpm --filter backend exec prisma migrate deploy
+      # O23 : le test d'arrêt propre lance le point d'entrée compilé (dist/main)
+      - name: Compilation du backend
+        run: pnpm --filter backend build
       - name: Tests e2e
         run: pnpm --filter backend exec jest --config jest-e2e.json --runInBand
 
