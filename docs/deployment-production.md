@@ -646,16 +646,16 @@ le push de `d13ae2b`).
 | --- | --- |
 | Production déployée | `75ac73e` (A9-b0 à A9-b1, Node 22) depuis le 2026-11-12 03:27 UTC, à la main ; images de retour `pre-a9b`, sauvegarde `planner-pro-20261112T032333Z.sql.gz.gpg` ; observation de 24 h en cours |
 | Nginx de l'hôte | arrêté et désactivé le 2026-11-12 (`systemctl disable nginx`) : après le redémarrage de la VM, il avait pris le port 80 et coupé tous les sites ; `ekose-nginx-1` recréé par `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --no-deps --force-recreate nginx` dans `/opt/ekose` |
-| 1. Utilisateur `deploy` | **à faire** |
-| 2. Sauvegarde hors du clone | **à faire** (l'unité active lance encore `/opt/planner-pro/scripts/backup-production.sh`) |
-| 3. Règles sudo | **à faire** |
-| 4. Clé de déploiement | générée ; partie privée uniquement dans le secret `DEPLOY_SSH_KEY` ; clé publique `SHA256:y04gmQnohF+BrsL31KDZc2eAfZZurcV3ZW+BO68D4dA` (`planner-pro-deploy`), **pas encore** dans `authorized_keys` (prévu à l'étape d'amorçage) |
-| 4. Durcissement de `sshd` | **à faire** ; seul `PasswordAuthentication no` est en place. `AllowUsers ubuntu deploy` exclura `opc` (aucune connexion sur 30 jours au 2026-11-12) |
+| 1. Utilisateur `deploy` | fait le 2026-11-12 : groupe `docker` seulement, clé GitHub en lecture dans `~deploy/.ssh`, clone `/opt/planner-pro` et `.env.production` (0600) appartenant à `deploy` |
+| 2. Sauvegarde hors du clone | faite le 2026-11-12 : `/usr/local/lib/planner-pro/backup-production.sh` (root, 0700), unité mise à jour ; sauvegarde de contrôle `planner-pro-20261112T050838Z.sql.gz.gpg` |
+| 3. Règles sudo | faites : `/etc/sudoers.d/planner-pro-deploy`, `sudo -l -U deploy` ne montre que les deux règles |
+| 4. Clé de déploiement | générée ; partie privée uniquement dans le secret `DEPLOY_SSH_KEY` ; clé publique `SHA256:y04gmQnohF+BrsL31KDZc2eAfZZurcV3ZW+BO68D4dA` (`planner-pro-deploy`), installée dans `~deploy/.ssh/authorized_keys` avec `command=` (wrapper) et `restrict` ; inopérante tant que `scripts/` n'est pas dans le clone ; tests négatifs à faire au premier run du workflow |
+| 4. Durcissement de `sshd` | fait : `/etc/ssh/sshd_config.d/10-planner-pro.conf` (mots de passe et root interdits, `AllowUsers ubuntu deploy` ; `opc`, sans connexion sur 30 jours, est exclu) ; nouvelle connexion `ubuntu` vérifiée après rechargement |
 | 5. Empreinte de l'hôte | `SHA256:jfFICirCYliDrdJfJwSBAfDJDQxdSxr3PQ6e4BJ6KWE`, comparée à celle lue sur la VM ; secret `DEPLOY_KNOWN_HOSTS` |
 | 6. Environnement `production` | créé : relecteur requis (propriétaire du dépôt), déploiement limité à la branche `main` ; secrets `DEPLOY_SSH_KEY`, `DEPLOY_HOST`, `DEPLOY_USER` (`deploy`), `DEPLOY_KNOWN_HOSTS` |
 | 6. Ruleset `protection-main` | actif : suppression et force-push interdits. **Écart** : pull request obligatoire et CI requise **non activées** (décision du propriétaire en attente : elles interdisent la poussée directe sur `main`) |
 | 6. Double authentification | à vérifier sur le compte propriétaire |
-| 8. Amorçage, 9. Contrôle à blanc | après les étapes 1 à 4 et la fin de l'observation de `75ac73e` |
+| 8. Amorçage, 9. Contrôle à blanc | copie d'amorçage dans `~deploy/cd-bootstrap/scripts` (depuis `origin/main`) ; dry-run vers `8f42464` (A9-b2) réussi le 2026-11-12 05:09 UTC (code 0) |
 | Déploiements suivants | A9-b2 seul, 24 h d'observation, puis A9-b3 seul, puis la tête de `main` ; ensuite `DEPLOY_ENABLED=true` |
 
 ## Connexion simulée (développement uniquement)
