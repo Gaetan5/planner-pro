@@ -644,7 +644,7 @@ l'approbation de l'environnement `production`. Couper : `gh variable delete DEPL
 
 | Étape | État |
 | --- | --- |
-| Production déployée | `e510255` (tête de `main` : A9-b3 jose 6.2.17 + scripts de CD) depuis le 2026-11-12 08:20 UTC. A9-b3 (`0954e96`) déployé à 08:18 UTC par le script (175 s, code 0, sauvegarde `planner-pro-20261112T081547Z.sql.gz.gpg`, retour `rollback-20261112T081549Z`) : jose 6.2.17 chargé sans avertissement, 148 routes, 5 domaines, 401, 429 ; SSO désactivé en production (`/auth/sso/discover` 404), essai SSO réel sans objet. A9-b2 (`8f42464`) le 2026-11-12 05:52 UTC, sain jusqu'à A9-b3 (0 erreur, 0 5xx, 0 redémarrage). Mot de passe vérifié sous Node 22. 2026-11-12 08:10 UTC : unité et script de sauvegarde vidés par une réexécution manuelle de la mise en place (git refusé sous `ubuntu`), restaurés et vérifiés |
+| Production déployée | `74dbeb0` depuis le 2026-11-12 08:33 UTC, par le CD (pile : Node 22, NestJS 11.2.9, Express 5.2.1, jose 6.2.17). Historique détaillé des déploiements et incidents : `docs/security/journal-corrections.md`, section « Exploitation du 2026-11-11 au 2026-11-13 ». Sauvegarde nocturne du 2026-11-13 vérifiée (`planner-pro-20261113T022843Z`) |
 | Nginx de l'hôte | arrêté et désactivé le 2026-11-12 (`systemctl disable nginx`) : après le redémarrage de la VM, il avait pris le port 80 et coupé tous les sites ; `ekose-nginx-1` recréé par `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --no-deps --force-recreate nginx` dans `/opt/ekose` |
 | 1. Utilisateur `deploy` | fait le 2026-11-12 : groupe `docker` seulement, clé GitHub en lecture dans `~deploy/.ssh`, clone `/opt/planner-pro` et `.env.production` (0600) appartenant à `deploy` |
 | 2. Sauvegarde hors du clone | faite le 2026-11-12 : `/usr/local/lib/planner-pro/backup-production.sh` (root, 0700), unité mise à jour ; sauvegarde de contrôle `planner-pro-20261112T050838Z.sql.gz.gpg` |
@@ -656,7 +656,7 @@ l'approbation de l'environnement `production`. Couper : `gh variable delete DEPL
 | 6. Ruleset `protection-main` | actif : suppression et force-push interdits. **Écart** : pull request obligatoire et CI requise **non activées** (décision du propriétaire en attente : elles interdisent la poussée directe sur `main`) |
 | 6. Double authentification | à vérifier sur le compte propriétaire |
 | 8. Amorçage, 9. Contrôle à blanc | fait : `scripts/` présent dans le clone depuis `e510255` (wrapper `0700 deploy`) ; copie d'amorçage dans `~deploy/cd-bootstrap/scripts` (depuis `origin/main`) ; dry-run vers `8f42464` (A9-b2) réussi le 2026-11-12 05:09 UTC (code 0) |
-| Activation | `DEPLOY_ENABLED=true` le 2026-11-12 ; premier run automatique (ce commit) en attente d'approbation : test de bout en bout de la clé |
+| Activation | `DEPLOY_ENABLED=true` le 2026-11-12 08:21 UTC ; premier run automatique (`74dbeb0`) approuvé et réussi le 2026-11-12 08:33 UTC (code 0) : clé de déploiement, `known_hosts` épinglé, wrapper et script validés de bout en bout |
 
 ## Connexion simulée (développement uniquement)
 
