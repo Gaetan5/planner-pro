@@ -72,7 +72,7 @@ Le système est conteneurisé et orchestré via Docker Compose, séparant hermé
         v                       v                                                |
 +---------------+       +-----------------------------------------------+        |
 |  CONTENEUR    |       |               CONTENEUR BACKEND               |        |
-|   FRONTEND    |       |                  (NestJS 10)                  |        |
+|   FRONTEND    |       |                  (NestJS 11)                  |        |
 | (Nginx Static |       | - Auth & SSO Service (JWT, 2FA, OAuth)        |        |
 |  Build Vite)  |       | - Projects & Tasks Module (Gantt DFS Engine)  |        |
 |               |       | - Notes Service (Regex Markdown-to-Tasks)     |        |
@@ -107,7 +107,7 @@ Le système est conteneurisé et orchestré via Docker Compose, séparant hermé
 
 #### Conteneur 3 : Backend API NestJS (`planner-pro-production-backend-1`)
 
-* **Framework & Moteur** : Node.js 20 LTS, NestJS 10, architecture modulaire en injection de dépendances.
+* **Framework & Moteur** : Node.js 22 LTS, NestJS 11 sur Express 5, architecture modulaire en injection de dépendances. Arrêt propre sur `SIGTERM` (`stop_grace_period` de 15 s). Le déploiement en production est continu (push sur `main`, CI, approbation, script de déploiement) : voir [deployment-production.md](deployment-production.md).
 * **Passerelle Temps Réel** : `@nestjs/websockets` avec moteur Socket.io v4. Couplé à `@socket.io/redis-adapter` pour permettre un dimensionnement horizontal multi-instances sans perte de cohésion de sessions.
 * **Couche d'Accès aux Données** : Prisma ORM v7 avec découpage multi-fichiers de schéma (`auth.prisma`, `project.prisma`, `tracking.prisma`, `notes.prisma`). Pool de connexions optimisé avec timeouts stricts.
 
@@ -737,7 +737,7 @@ Badge de cloche incrémenté        avec lien direct vers la tâche
 
 La stack est déployée sur une instance Cloud (Oracle Linux ARM64 / Ubuntu 24.04 LTS) selon la configuration définie dans [docker-compose.prod.yml](file:///home/gaetan/Documents/GitHub/planner-pro/docker-compose.prod.yml) :
 
-1. `planner-pro-production-backend` : Image Node.js 20 Alpine exécutant le binaire NestJS compilé (`127.0.0.1:3003 -> 3001`).
+1. `planner-pro-production-backend` : Image Node.js 22 Alpine exécutant le binaire NestJS compilé (`127.0.0.1:3003 -> 3001`).
 2. `planner-pro-production-frontend` : Image Nginx Alpine servant l'application SPA React 18 (`127.0.0.1:8080 -> 80`).
 3. `planner-pro-production-db` : Serveur MySQL 8.0 avec volumes montés sur stockage persistant hôte (`/var/lib/mysql`).
 4. `planner-pro-production-cache` : Serveur Redis 7.0 avec politique d'éviction mémoire `allkeys-lru`.

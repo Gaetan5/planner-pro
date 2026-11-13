@@ -27,4 +27,6 @@ docker rm -f pp-mysql pp-redis
 
 Le test `o23-sigterm` lance `dist/main.js` : faire `pnpm --filter backend build` avant `jest-e2e` (il échoue si `dist` est absent ou plus ancien que `main.ts`, `shutdown-signals.ts`, `bounded-quit.ts`, `redis.service.ts` ou `tracking.gateway.ts`).
 
+Jest 29 exécute du CommonJS alors que `jose` 6 est publié en ESM seul (A9-b3) : `backend/jest-esm-transform.js` traduit le vrai paquet en CommonJS avec le compilateur TypeScript du dépôt (aucune doublure de `jose`). Il est branché dans `transform` de `backend/package.json` et de `backend/jest-e2e.json`, et `transformIgnorePatterns` ne laisse passer que `jose` 6. Une nouvelle dépendance ESM seule se traite dans ce même fichier, pas par un `jest.mock`.
+
 Les tests e2e se placent dans `backend/tests/e2e/**/*.e2e-spec.ts` (le `jest` par défaut, `pnpm test`, ne les exécute pas). `tests/e2e/support/e2e-app.ts` démarre l'`AppModule` réel.

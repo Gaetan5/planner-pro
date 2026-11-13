@@ -10,7 +10,7 @@
 [![Security Hardened](<https://img.shields.io/badge/Security-Audit%20Validated%20(r20)-blueviolet?style=for-the-badge&logo=shield>)](docs/security/rapport-audit.md)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![React](https://img.shields.io/badge/React-18.x-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev/)
-[![NestJS](https://img.shields.io/badge/NestJS-10.x-E0234E?style=for-the-badge&logo=nestjs&logoColor=white)](https://nestjs.com/)
+[![NestJS](https://img.shields.io/badge/NestJS-11.x-E0234E?style=for-the-badge&logo=nestjs&logoColor=white)](https://nestjs.com/)
 [![MySQL](https://img.shields.io/badge/MySQL-8.0%20%7C%20MariaDB-4479A1?style=for-the-badge&logo=mysql&logoColor=white)](https://www.mysql.com/)
 [![Redis](https://img.shields.io/badge/Redis-7.x%20Cluster-DC382D?style=for-the-badge&logo=redis&logoColor=white)](https://redis.io/)
 [![Docker](https://img.shields.io/badge/Docker-Production%20Compose-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/)
@@ -97,7 +97,7 @@ graph TD
         RedisPubSub[Redis 7.x - Adaptateur Cluster & Cache-Aside]
     end
 
-    subgraph BackendLayer [Couche Métier & Sécurité - NestJS 10]
+    subgraph BackendLayer [Couche Métier & Sécurité - NestJS 11]
         PolicyGuard[PolicyService & Matrice RBAC Unifiée]
         Controllers[API REST Modulaire]
         CoreServices[Services Métier : Projets, Tâches, Notes, Auth]
@@ -135,7 +135,7 @@ graph TD
    - Passerelle **Socket.IO** intégrée à NestJS avec vérification cryptographique dès la poignée de main (_handshake_).
    - Adaptateur Redis pour supporter la distribution horizontale sur plusieurs conteneurs d'API.
 3. **Couche Métier & Sécurité Centrale (Backend API)** :
-   - Framework **NestJS 10** en TypeScript strict.
+   - Framework **NestJS 11** (Express 5, Node 22) en TypeScript strict. Le déploiement en production est continu (push sur `main`, CI, approbation, script de déploiement) : voir [docs/deployment-production.md](docs/deployment-production.md).
    - Service d'autorisation centralisé (`PolicyService`) s'appuyant sur une matrice de permissions déclarative unique ([permissions.ts](file:///home/gaetan/Documents/GitHub/planner-pro/backend/src/authz/permissions.ts)) interdisant formellement les failles IDOR/BOLA.
 4. **Couche Données & Chiffrement (Data & Security Vault)** :
    - **Prisma ORM** avec modularisation du modèle de données (`backend/prisma/schema/`).
