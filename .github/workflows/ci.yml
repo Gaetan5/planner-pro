@@ -233,7 +233,7 @@ jobs:
           --from-config-datasource --to-schema prisma/schema --exit-code
 
   # A9 (r42) : en-têtes de sécurité de l'image frontend de production, mesurés sur le conteneur
-  # réel (image construite avec pnpm 10 et Node 20), sur la page d'entrée et sur un asset .js.
+  # réel (image construite avec pnpm 10 et Node 22), sur la page d'entrée et sur un asset .js.
   frontend-headers:
     runs-on: ubuntu-latest
     timeout-minutes: 20
