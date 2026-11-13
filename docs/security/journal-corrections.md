@@ -5820,3 +5820,99 @@ Verdict global : **VALIDÉ**. Rejeu : 160 vérifications confirmées (159 + Shel
 
 ### Constats encore ouverts
 Aucun pour le lot CD. Restent A9-b4, A8, P2 (inchangés).
+
+## Exploitation du 2026-11-11 au 2026-11-13 : déploiements, incidents et activation du CD
+
+Entrée factuelle (pas un lot de correction). Heures en UTC. Les faits ci-dessous ont été exécutés ou constatés sur la VM de production et dans GitHub.
+
+### Déploiements
+
+| Date | Version | Moyen | Résultat |
+| --- | --- | --- | --- |
+| 2026-11-11 18:59 | `639c5d6` (P7 à P7-e), depuis `93711a8` | manuel (propriétaire) | sauvegarde `planner-pro-20261111T185922Z` ; migrations `20261116000000_a9_migration_drift` et `20261117000000_n6_sso_client_secret_text` appliquées |
+| 2026-11-12 03:27 | `75ac73e` (A9-b0 à A9-b1, Node 22) | manuel | sauvegarde `planner-pro-20261112T032333Z`, images `pre-a9b` ; Node v22.23.5, 148 routes, 401, 429 + `Retry-After` |
+| 2026-11-12 05:52 | `8f42464` (A9-b2, NestJS 11.2.9, Express 5.2.1) | `deploy-production.sh` (copie d'amorçage, compte `deploy`) | 185 s, code 0 ; `StopTimeout` 15 ; Socket.IO, webhook en casse mixte, 429 conformes |
+| 2026-11-12 08:18 | `0954e96` (A9-b3, jose 6.2.17) | idem | 175 s, code 0 ; jose 6.2.17 chargé sans avertissement ; SSO désactivé en production (`/auth/sso/discover` 404) |
+| 2026-11-12 08:20 | `e510255` (scripts de CD dans le clone) | idem | code 0 ; wrapper SSH présent |
+| 2026-11-12 08:33 | `74dbeb0` | **premier run CD** (`deploy.yml`, approuvé par le propriétaire) | code 0 : clé de déploiement, `known_hosts` épinglé, wrapper et script validés de bout en bout |
+
+Observation entre sous-lots : le propriétaire a choisi le 2026-11-12 de la réduire à quelques heures au lieu de 24 h (A9-b0 à A9-b1 : 2 h 25 ; A9-b2 : 2 h 26), chaque déploiement étant précédé d'un contrôle de santé (0 erreur backend, 0 5xx, 0 redémarrage). Mot de passe d'un compte existant vérifié sous Node 22 (réponse 403 « adresse non vérifiée », rendue après le contrôle du hash).
+
+### Incidents
+
+1. **2026-11-11 vers 21:24, redémarrage de la VM (noyau 7.0.0-1013)** : le service `nginx` de l'hôte, encore activé, a pris le port 80 ; `ekose-nginx-1` ne publiait plus 80/443 : tous les sites de la VM indisponibles jusqu'à 23:30 environ. Correctif : `systemctl stop nginx && systemctl disable nginx`, puis recréation de `ekose-nginx-1` par compose dans `/opt/ekose` (`docker restart` ne suffisait pas). Le commit `ff4042eef` d'ekose (routes planner-pro sur le proxy partagé), présent seulement sur la VM, a été poussé sur GitHub.
+2. **2026-11-12 03:28, 502 après le déploiement de `75ac73e`** : `ekose-nginx-1` gardait les anciennes IP des conteneurs ; `docker restart ekose-nginx-1` a corrigé. Le script de déploiement gère désormais ce cas (un redémarrage du proxy au plus).
+3. **2026-11-12 vers 08:09, sauvegarde rendue inopérante** : la procédure de mise en place, déjà faite, a été réexécutée à la main sous `ubuntu` ; `git show` étant refusé (clone appartenant à `deploy`), `install /dev/stdin` a écrit des fichiers **vides** : `/usr/local/lib/planner-pro/backup-production.sh`, `/etc/systemd/system/planner-pro-backup.service` (unité vue « masked ») et `~deploy/.ssh/known_hosts`. Détecté et corrigé à 08:10 (fichiers restaurés depuis `origin/main` lus sous `deploy`, sauvegarde de contrôle `planner-pro-20261112T081052Z`). Sauvegarde nocturne du 2026-11-13 02:28 vérifiée (`planner-pro-20261113T022843Z`).
+4. **Coupures brèves pendant les recréations** : 4 réponses 502 en 24 h (`/auth/refresh` et `/socket.io` polling), toutes pendant la recréation du backend (05:52:12-13 et 08:18:36-37) ; les clients se reconnectent. Pas de déploiement sans coupure (un seul backend).
+
+### Mise en place du CD (étapes de `docs/deployment-production.md`)
+
+- VM (2026-11-12 vers 05:08) : utilisateur `deploy` (groupe `docker` seul), sauvegarde root sortie du clone, `/etc/sudoers.d/planner-pro-deploy` (deux règles), `sshd` durci (`AllowUsers ubuntu deploy` ; `opc` sans connexion sur 30 jours exclu), clé de déploiement à commande forcée. Contrôle à blanc vers `8f42464` : code 0.
+- GitHub : environnement `production` (relecteur requis, branche `main` seule), secrets `DEPLOY_SSH_KEY` (partie privée générée puis détruite localement), `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_KNOWN_HOSTS` (empreinte `SHA256:jfFICirC…KWE` comparée à celle lue sur la VM) ; ruleset `protection-main` (suppression et force-push interdits) ; `DEPLOY_ENABLED=true` le 2026-11-12 08:21.
+- **Écarts restants** : pull request obligatoire et CI requise non activées dans le ruleset (décision du propriétaire en attente) ; 2FA du compte propriétaire non vérifiable par l'API ; tests négatifs explicites de la clé (`id`, `-L`, `scp`) non rejoués depuis un poste (partie privée uniquement dans GitHub).
+
+### Observations hors périmètre
+
+- Courriels de vérification : 5 envois acceptés par le SMTP Gmail (`ekorogaetan5@gmail.com`) le 2026-11-12, non reçus par le destinataire (probable filtrage) ; recommandation : service d'envoi dédié avec SPF/DKIM sur `boukarou-os.com`.
+- Proxy ekose : `resolver 127.0.0.11` et variables dans `proxy_pass` supprimeraient le 502 après recréation (modification à faire dans le dépôt ekose).
+
+## Lot A9-b4 (fixeur)
+
+Revue de référence : r60 (A9-b4 ouvert), r56-a1, « Spécification A9-b (architecte) », partie A9-b4. Documentation seule, plus l'alignement de `@types/node` du frontend. Aucune migration, aucune dépendance de production, aucun changement de schéma. Le lockfile change de 15 lignes (`@types/node` 20.19.41 vers 22.20.5 pour le frontend, version déjà présente côté backend), formaté par Prettier comme le dépôt.
+
+### A9-b4 — Documentation après la montée de version A9-b
+
+**Statut** : CORRIGÉ – À REVOIR
+
+**Changement** :
+- `README.md` : badge NestJS 11.x, diagramme (NestJS 11), description de la couche métier (NestJS 11, Express 5, Node 22) avec une phrase et un lien vers `docs/deployment-production.md` pour le déploiement continu.
+- `docs/DOSSIER_ARCHITECTURE_TECHNIQUE.md` : schéma (NestJS 11), conteneur 3 (Node.js 22 LTS, NestJS 11 sur Express 5, arrêt propre sur SIGTERM avec `stop_grace_period` de 15 s, lien vers `deployment-production.md`), topologie 14.1 (image Node.js 22 Alpine, ancienne ligne 740 de r56-a1).
+- `.github/workflows/ci.yml:236` : commentaire « Node 22 » (r56-a1, ancienne ligne 219).
+- `docs/security/ci.md` : paragraphe sur `backend/jest-esm-transform.js` (jose 6 en ESM seul, Jest 29 en CommonJS, branchement dans `package.json` et `jest-e2e.json`, `transformIgnorePatterns`).
+- Recherche `grep -rn "Node 20\|NestJS 10\|node:20\|jose 4"` sur `*.md`, `*.yml`, `Dockerfile*` : plus aucun reliquat hors rapport et journal (historiques).
+
+### r56-a1 — `@types/node` du frontend
+
+**Statut** : CORRIGÉ – À REVOIR
+
+**Changement** : `frontend/package.json` `@types/node` 20.19.41 vers 22.20.5 (identique au backend) ; `pnpm-lock.yaml` mis à jour (+15/-25 lignes, uniquement les entrées `@types/node` et leurs références vite/vitest).
+
+**Tests** : `tsc --noEmit` frontend sans erreur ; `vite build` OK ; vitest 34 fichiers, 296 tests passés ; `pnpm install --frozen-lockfile` OK.
+
+**Contre-mutations** : sans objet (documentation et types).
+
+**Écart par rapport au rapport** : version 22.20.5 plutôt que « 22.x » générique, pour réutiliser la version déjà résolue du lockfile. `audit-exceptions.md` et `ci.md` (Node 22) étaient déjà à jour ; le backend n'est pas modifié, jest non rejoué.
+
+**Questions pour l'architecte** : aucune. Note : `docs/DOSSIER_ARCHITECTURE_TECHNIQUE.md` n'était pas conforme à Prettier avant le lot (inchangé, non reformaté).
+
+### Mesures du lot
+
+| Contrôle | Résultat |
+| --- | --- |
+| e2e, jest, build, `tsc -p tests`, ESLint backend | non rejoués (backend inchangé) |
+| `tsc --noEmit` frontend | 0 erreur |
+| `vite build` frontend | OK |
+| vitest frontend | 34 fichiers, 296 tests passés |
+| Prettier | conforme sur `README.md`, `ci.md`, `ci.yml`, `frontend/package.json`, `pnpm-lock.yaml` ; `DOSSIER_ARCHITECTURE_TECHNIQUE.md` non conforme avant et après |
+| Environnement | aucun conteneur ni base créés |
+
+### Constats à passer en revue
+
+r56-a1 et A9-b4 : CORRIGÉ – À REVOIR.
+
+## Revue architecte (r64) : état de production après A9-b et activation du CD
+
+Revue d'état (pas de code, aucun accès à la VM, aucune écriture GitHub). Détail dans `docs/security/rapport-audit.md`, section « Revue r64 (architecte) ».
+
+- **Vérifié par moi** : run `deploy.yml` réussi sur `74dbeb0` (tête de `main`), `DEPLOY_ENABLED=true`, 4 secrets d'environnement, environnement `production` (relecteur requis, auto-approbation permise, contournement admin permis), ruleset `protection-main` limité à suppression et force-push, front en 200 avec en-têtes de sécurité, SSO désactivé (404). Le reste (VM) est lu dans ce journal, non contrôlé.
+- **Observation de 24 h réduite** : acceptée a posteriori (retours arrière prêts, pas de migration, sauvegarde nocturne réussie après A9-b2/b3, aucun incident applicatif), sans précédent ; toute dérogation sera consignée avant le déploiement suivant.
+- **Incidents** : redémarrage de la VM et `nginx` hôte (r64-m2), 502 par cache d'IP (r64-a1), sauvegarde vidée (garde-fou `test -s` en documentation et contrôle dans le dry-run : r64-m1), coupures de 1 à 2 s (risque accepté).
+- **Écarts** : CI requise et PR (r64-m3), 2FA (r64-m4), tests négatifs de la clé (r64-m5) ; courriels non délivrés (r64-m6). Documentation d'activation périmée (r64-a2). Latences et comportement du refresh sur 502 (r64-a3).
+- **Constats ouverts, dans l'ordre** : r64-m5, r64-m1, r64-m4, r64-m3, r64-m2, r64-m6 ; A9-b4 ; A8 (avec O-b, O-e), P2 ; r64-a1, r64-a2, r64-a3, r56-a1, r56-a2, r55-a1, r53-a1, r53-a2, O-f, O-a, r48-a1, r48-a2 ; Redeliver et SCIM réels.
+
+## Revue architecte (r65) : lot A9-b4 et correction r64-a2
+
+- **A9-b4** (README, dossier d'architecture, commentaire de CI, `ci.md`) : **VALIDÉ**, affirmations recoupées avec Dockerfiles, `docker-compose.prod.yml`, `package.json` et la configuration Jest. **r56-a1** : **VALIDÉ** ; `tsc` 0 erreur, `vite build` réussi, vitest 296/296, `--frozen-lockfile` réussi (rejoués par moi), lockfile limité à `@types/node`.
+- **r64-a2** (corrigé par la session principale) : **VALIDÉ**, conforme au run CD 43182747908.
+- Aucun nouveau constat. Feu vert en 4 commits (voir le rapport, « Revue r65 »).
+- **Constats encore ouverts** : r64-m5, r64-m1, r64-m4, r64-m3, r64-m2, r64-m6 ; A8 (avec O-b, O-e), P2 ; r64-a1, r64-a3, r56-a2, r55-a1, r53-a1, r53-a2, O-f, O-a, r48-a1, r48-a2 ; Redeliver et SCIM réels.

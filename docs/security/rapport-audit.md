@@ -8,7 +8,7 @@
 | Périmètre | `backend/` (NestJS 10, Prisma 7 / adaptateur MariaDB, MySQL 8, Socket.IO, Redis), `frontend/` (React 18 / Vite), `docker-compose*.yml`, `.github/workflows/ci.yml`, `firestore.rules` |
 | Méthode | Revue de code manuelle ligne par ligne, `pnpm audit --prod`, exécution de la suite Jest backend (32 suites, 185 tests, tous verts : **aucun ne couvre les scénarios d'attaque ci-dessous**) |
 | Statut | **Source de vérité** pour l'agent `fixeur`. Les identifiants sont stables : ne jamais renuméroter, ajouter les nouveaux constats à la suite. |
-| Révision | r63 (2026-11-12) : lot CD-c VALIDÉ (r62-m1 à m3 ; N3, N4, N5, N8, N9 détectées), lot CD entièrement clos, feu vert de commit en 4 commits, procédure d'activation confirmée ; aucun nouveau constat. Avant : r62 (2026-11-12) : lot CD-b À REPRENDRE (tests seulement) : CD-1, CD-2 (dépôt), CD-3 et r61-m1/m2/m3/m5/m6/a1-a3 VALIDÉS ; ouverts r62-m1 (garde du contrôle CI), r62-m2 (garde d'ascendance du SHA de retour), r62-m3 (dry-run et `RestartCount`) ; feu vert conditionnel, procédure d'activation finale. Avant : r61 (2026-11-12) : lot CD (déploiement continu) À REPRENDRE : CD-1 (redéploiement du même SHA : retour deux versions en arrière), CD-2 (compte de déploiement `ubuntu` = root), CD-3 (script de sauvegarde root dans le clone), r61-m1 à m7, r61-a1 à a3 ; wrapper robuste, procédure d'activation fournie. Avant : r60 (2026-11-12) : sous-lot A9-b3 (`jose` 6.2.17, transformateur Jest dédié) VALIDÉ, feu vert de commit, déploiement séparé après A9-b2 observé 24 h, essai IdP réel requis ; aucun nouveau constat ; ouverts A9-b4 (r56-a1), A8, P2. Avant : r59 (2026-11-12) : sous-lot A9-b2 (NestJS 11.2.9, Express 5.2.1, surcharge `body-parser` par majeure ; r58-a1) VALIDÉ, feu vert de commit, déploiement séparé après A9-b0 à A9-b1 observés 24 h ; aucun nouveau constat ; ouverts A9-b3, A9-b4 (r56-a1), A8, P2. Avant : r58 (2026-11-12) : sous-lot A9-b1 (throttler 6, config 4, jwt 11 sur NestJS 10 ; r57-m1, r57-a1, r57-a2) VALIDÉ, feu vert de commit ; ouverts r58-m1 (Prettier du fichier des exceptions d'audit, à corriger avant le commit docs) et r58-a1 ; puis A9-b2 à A9-b4, A8, P2. Avant : r57 (2026-11-12) : sous-lot A9-b0b (arrêt propre O23, test anti-CSRF r56-m1) VALIDÉ, feu vert de commit ; ouverts r57-m1 (tests de garde manquants) avant A9-b2, r57-a1, r57-a2 ; puis A9-b1 à A9-b4, A8, P2. Avant : r56 (2026-11-12) : sous-lot A9-b0 (caractérisation, table des routes, Node 22) VALIDÉ, feu vert de commit ; ouverts r56-m1 et O23 (reclassé Mineur) dans un sous-lot A9-b0b avant A9-b2, r56-a1, r56-a2 ; puis A9-b1 à A9-b4, A8, P2. Avant : r55 (2026-11-11) + « Spécification A9-b (architecte) » (2026-11-11) : lot P7-e (r54-m1, r54-a1) VALIDÉ, ouvert r55-a1. SCIM activable en production après déploiement de ce lot (conditions dans « Revue r55 »). Voir la section « Revue r55 » à la fin. |
+| Révision | r65 (2026-11-13) : lot A9-b4 et correction r64-a2 VALIDÉS (clôt r56-a1, r64-a2), aucun nouveau constat, feu vert en 4 commits. Avant : r64 (2026-11-13) : revue d'état, pas de code : A9-b2 et A9-b3 déployés, CD actif (premier run `74dbeb0` vérifié), observation réduite acceptée a posteriori ; nouveaux constats r64-m1 à m6 (Mineurs) et r64-a1 à a3 ; aucun Critique ni Majeur. Avant : r63 (2026-11-12) : lot CD-c VALIDÉ (r62-m1 à m3 ; N3, N4, N5, N8, N9 détectées), lot CD entièrement clos, feu vert de commit en 4 commits, procédure d'activation confirmée ; aucun nouveau constat. Avant : r62 (2026-11-12) : lot CD-b À REPRENDRE (tests seulement) : CD-1, CD-2 (dépôt), CD-3 et r61-m1/m2/m3/m5/m6/a1-a3 VALIDÉS ; ouverts r62-m1 (garde du contrôle CI), r62-m2 (garde d'ascendance du SHA de retour), r62-m3 (dry-run et `RestartCount`) ; feu vert conditionnel, procédure d'activation finale. Avant : r61 (2026-11-12) : lot CD (déploiement continu) À REPRENDRE : CD-1 (redéploiement du même SHA : retour deux versions en arrière), CD-2 (compte de déploiement `ubuntu` = root), CD-3 (script de sauvegarde root dans le clone), r61-m1 à m7, r61-a1 à a3 ; wrapper robuste, procédure d'activation fournie. Avant : r60 (2026-11-12) : sous-lot A9-b3 (`jose` 6.2.17, transformateur Jest dédié) VALIDÉ, feu vert de commit, déploiement séparé après A9-b2 observé 24 h, essai IdP réel requis ; aucun nouveau constat ; ouverts A9-b4 (r56-a1), A8, P2. Avant : r59 (2026-11-12) : sous-lot A9-b2 (NestJS 11.2.9, Express 5.2.1, surcharge `body-parser` par majeure ; r58-a1) VALIDÉ, feu vert de commit, déploiement séparé après A9-b0 à A9-b1 observés 24 h ; aucun nouveau constat ; ouverts A9-b3, A9-b4 (r56-a1), A8, P2. Avant : r58 (2026-11-12) : sous-lot A9-b1 (throttler 6, config 4, jwt 11 sur NestJS 10 ; r57-m1, r57-a1, r57-a2) VALIDÉ, feu vert de commit ; ouverts r58-m1 (Prettier du fichier des exceptions d'audit, à corriger avant le commit docs) et r58-a1 ; puis A9-b2 à A9-b4, A8, P2. Avant : r57 (2026-11-12) : sous-lot A9-b0b (arrêt propre O23, test anti-CSRF r56-m1) VALIDÉ, feu vert de commit ; ouverts r57-m1 (tests de garde manquants) avant A9-b2, r57-a1, r57-a2 ; puis A9-b1 à A9-b4, A8, P2. Avant : r56 (2026-11-12) : sous-lot A9-b0 (caractérisation, table des routes, Node 22) VALIDÉ, feu vert de commit ; ouverts r56-m1 et O23 (reclassé Mineur) dans un sous-lot A9-b0b avant A9-b2, r56-a1, r56-a2 ; puis A9-b1 à A9-b4, A8, P2. Avant : r55 (2026-11-11) + « Spécification A9-b (architecte) » (2026-11-11) : lot P7-e (r54-m1, r54-a1) VALIDÉ, ouvert r55-a1. SCIM activable en production après déploiement de ce lot (conditions dans « Revue r55 »). Voir la section « Revue r55 » à la fin. |
 
 > Note de reconstruction : le plan de référence S1–S21 / A1–A9 / P1–P8 n'avait jamais été enregistré. La numérotation ci-dessous a été reconstruite en respectant le découpage par phase. Chaque constat a été **revérifié dans le code actuel** ; les anciens documents (`docs/audit_roadmap_phases.md`, `docs/etat_des_lieux.md`, `docs/manifeste_actions_restantes.md`) contiennent des affirmations fausses, signalées en section 1.3.
 
@@ -6677,3 +6677,147 @@ Prérequis : fin de l'observation de 24 h de A9-b0 à A9-b1 (vers 2026-11-13 3 h
 1. Aucun constat du lot CD ouvert. Clos : CD-1, CD-2 (dépôt), CD-3, r61-m1 à m7, r61-a1 à a3, r62-m1 à m3.
 2. **A9-b4**, **A8**, **P2** ; améliorations r56-a1, r56-a2, r55-a1, r53-a1, r53-a2, O-f, O-a, r48-a1, r48-a2 ; reliquats antérieurs.
 3. Actions d'exploitation : activation du CD (procédure ci-dessus), `resolver 127.0.0.11` côté ekose, déploiements A9-b2 puis A9-b3, Redeliver et IdP SCIM réels après A9-b2, SSO réel après A9-b3.
+
+---
+
+## Revue r64 (architecte) : état de production après A9-b et activation du CD
+
+Revue **documentaire et d'état**, pas une revue de code. Date : 2026-11-13. Aucune connexion à la VM, aucune écriture GitHub.
+
+### Vérifications indépendantes (lecture seule)
+
+| Commande | Résultat | Certitude |
+| --- | --- | --- |
+| `gh run list --workflow deploy.yml` | 5 runs : 4 `skipped` (2026-11-12 04:40 à 05:57, avant `DEPLOY_ENABLED`) ; 1 `success` sur `74dbeb0` (tête actuelle de `main`), créé 08:25 UTC, 8 min 36 s, événement `workflow_run` | VÉRIFIÉ |
+| `gh variable list` | `DEPLOY_ENABLED=true`, 2026-11-12 08:21:17 UTC | VÉRIFIÉ |
+| `gh secret list --env production` | `DEPLOY_HOST`, `DEPLOY_KNOWN_HOSTS`, `DEPLOY_SSH_KEY`, `DEPLOY_USER` (noms et dates seuls) | VÉRIFIÉ |
+| `gh api .../environments/production` | relecteur requis (`Gaetan5`), `prevent_self_review: false`, politique de branches personnalisée (`protected_branches: false`), `can_admins_bypass: true` | VÉRIFIÉ |
+| `gh api .../rulesets` (+ détail) | un seul ruleset `protection-main`, actif, cible la branche par défaut : règles `deletion` et `non_fast_forward` **uniquement** ; aucun acteur de contournement | VÉRIFIÉ |
+| `curl https://planner-pro.boukarou-os.com/` | 200 ; HSTS, `X-Content-Type-Options`, `X-Frame-Options: DENY`, CSP en mode *Report-Only* | VÉRIFIÉ |
+| `curl https://api.planner-pro.boukarou-os.com/auth/sso/discover` | 404 (SSO désactivé, conforme au journal) | VÉRIFIÉ |
+
+Écart de mesure : trois des premières requêtes ont pris 5,8 s, la même requête rejouée 0,7 s (DNS 0,03 s, TLS 0,47 s). Cause non établie (réseau du poste de revue, résolution IPv6 ou démarrage à froid du proxy). `NON VÉRIFIÉ`, à surveiller (voir r64-a3), pas un constat.
+
+Non vérifiable par moi : tout ce qui se passe sur la VM (versions déployées, sauvegardes, `RestartCount`, erreurs backend, état de `nginx` hôte, dépôt ekose). Les éléments VM ci-dessous sont **ÉTABLIS PAR LECTURE du journal**, pas contrôlés.
+
+### 1. Déploiements : constat et clôture
+
+D'après le journal (section « Exploitation du 2026-11-11 au 2026-11-13 ») recoupé avec GitHub :
+
+| Date (UTC) | Version | Moyen | Certitude |
+| --- | --- | --- | --- |
+| 2026-11-11 18:59 | `639c5d6` (P7 à P7-e), migrations `20261116000000_a9_migration_drift` et `20261117000000_n6_sso_client_secret_text` | manuel | journal seul |
+| 2026-11-12 03:27 | `75ac73e` (A9-b0, A9-b1, Node 22) | manuel | journal seul |
+| 2026-11-12 05:52 | `8f42464` (A9-b2, NestJS 11.2.9, Express 5.2.1) | `deploy-production.sh`, copie d'amorçage | journal seul |
+| 2026-11-12 08:18 | `0954e96` (A9-b3, jose 6.2.17) | idem | journal seul |
+| 2026-11-12 08:20 | `e510255` (scripts de CD dans le clone) | idem | journal seul |
+| 2026-11-12 08:33 environ | `74dbeb0` | **premier run `deploy.yml`, approuvé** | VÉRIFIÉ (run 43182747908, succès, SHA = tête de `main`) |
+
+**Clôture des actions d'exploitation** (reprises de la liste r63) : activation du CD (étapes 1 à 9) ; déploiement A9-b2 ; déploiement A9-b3 ; ruleset, environnement, secrets ; sauvegarde hors du clone ; durcissement `sshd` ; clé de déploiement à commande forcée. **Closes**, sous réserve de ce qui suit.
+**Non closes** : essais « Redeliver » GitHub et client SCIM réel après A9-b2 (aucune trace dans le journal) ; essai SSO réel **sans objet** tant que le SSO est désactivé en production (à rejouer si on l'active) ; `resolver` côté ekose (r64-a1).
+
+Un point positif, preuve à l'appui : le premier run réel du CD a validé de bout en bout la clé, `known_hosts` épinglé, le wrapper et le script, avec approbation humaine. Les 4 runs `skipped` avant l'activation confirment que le workflow était bien inerte sans la variable.
+
+### 2. Écart de plan : observation de 24 h réduite à quelques heures
+
+Ma condition (r63) était 24 h après A9-b0/b1. Le propriétaire a choisi 2 h 25 (avant A9-b2) et 2 h 26 (avant A9-b3), avec contrôle de santé avant chaque déploiement (0 erreur backend, 0 5xx, 0 redémarrage ; mot de passe vérifié sous Node 22).
+
+**Position : accepté a posteriori, sans en faire un précédent.** Raisons :
+- les retours arrière étaient prêts (images `pre-a9b`, étiquettes `rollback-*`, sauvegarde avant chaque déploiement) et A9-b2/b3 ne portent aucune migration ;
+- la production a ensuite tourné sans incident applicatif signalé : A9-b2 depuis environ 24 h, A9-b3 depuis environ 22 h au moment de cette revue, avec la sauvegarde nocturne du 2026-11-13 réussie (cycle quotidien couvert) et le front répond 200 ;
+- les seuls incidents sont d'exploitation (voir 4), aucun lié à Node 22, NestJS 11 ou jose 6.
+
+Réserves : (a) 24 h servaient à couvrir un cycle complet (tâches planifiées, sauvegarde, rotation des jetons) ; ce cycle n'a pas été observé *avant* A9-b2/b3 mais l'a été *après*, ce qui justifie l'acceptation, pas la décision sur le moment ; (b) les chiffres « 0 erreur / 0 5xx / 0 redémarrage » viennent du journal, je n'ai pas accès aux journaux de la VM ; (c) l'écart n'a pas été consigné *avant* d'agir. **Règle proposée** : toute dérogation à une durée d'observation est inscrite dans le journal avant le déploiement suivant, avec le critère de santé qui la remplace.
+
+### 3. Écarts restants
+
+| Écart | Classement | Position |
+| --- | --- | --- |
+| PR obligatoire non activée | **Risque accepté par le propriétaire, à formaliser** (r64-m3) | Mono-développeur : une PR sans relecteur tiers n'apporte pas de séparation des tâches. Si le propriétaire l'active, la configurer avec 0 approbation requise. |
+| CI requise non activée dans le ruleset | **Mineur** (r64-m3) | Atténué : le workflow de CD vérifie lui-même que la CI est verte sur le SHA (r62-m1, testé) et l'approbation de l'environnement est requise. Mais la protection est tardive (au déploiement, pas à la fusion). Activer « required status checks » sur les jobs de `ci.yml` ; vérifier avant que cela ne bloque pas la poussée directe de façon inacceptable, sinon documenter l'acceptation. |
+| 2FA du compte propriétaire non vérifiable | **Mineur** (r64-m4) | Le compte pousse sur `main` **et** approuve (`prevent_self_review: false`, `can_admins_bypass: true`) : l'approbation est une confirmation humaine, pas une séparation des tâches. Le compte est donc le point unique de compromission de la production. Le propriétaire vérifie lui-même (paramètres de sécurité GitHub : 2FA par clé ou application, pas SMS) et consigne la date dans le journal. |
+| Tests négatifs de la clé non rejoués | **Mineur** (r64-m5), priorité haute dans les Mineurs | Le compte `deploy` est dans le groupe `docker` (équivalent root) : la commande forcée (`command=` + `restrict`) est la seule barrière si la clé fuit. Le premier run ne prouve que le chemin passant. Rejouer `id`, `-L`, `scp`, une commande arbitraire, avec une **clé jetable** portant exactement les mêmes options (la clé réelle n'existe que dans GitHub), à ajouter puis retirer de `authorized_keys`. Consigner la sortie. Les tests unitaires du wrapper ne remplacent pas un essai réel via `sshd`. |
+
+### 4. Incidents
+
+| # | Incident | Analyse | Décision |
+| --- | --- | --- | --- |
+| 1 | Redémarrage de la VM (2026-11-11 vers 21:24) : `nginx` de l'hôte réactivé, 80/443 pris, tous les sites de la VM indisponibles environ 2 h | Cause racine : service hôte encore activé, non lié à planner-pro mais impact total. Corrigé (`disable`). Le commit ekose `ff4042eef` n'existait que sur la VM, désormais poussé (non vérifié, dépôt hors périmètre). | **r64-m2** : aucune procédure de reprise après redémarrage ni supervision externe ; une indisponibilité de 2 h ne doit pas dépendre d'un constat humain. |
+| 2 | 502 après `75ac73e` : `ekose-nginx-1` garde les anciennes IP | Cause : `proxy_pass` résolu au démarrage. Le script gère (un redémarrage du proxy au plus), mais redémarrer le proxy partagé touche un autre projet. | **r64-a1** (Amélioration, côté ekose). |
+| 3 | Sauvegarde vidée par réexécution manuelle de la mise en place (`install /dev/stdin` depuis `git show` sous `ubuntu`, clone appartenant à `deploy`) : script de sauvegarde, unité (vue « masked ») et `known_hosts` vides | Cause : commande qui échoue en amont d'un `install` qui écrit quand même un fichier vide, sans contrôle de taille. Détecté en 1 minute parce que l'opérateur regardait. Le déploiement réel aurait échoué sans modifier la production (sauvegarde fraîche exigée), mais la sauvegarde nocturne aurait échoué silencieusement. Restauré, sauvegarde de contrôle puis nocturne du 13 vérifiée (journal). | **Oui, garde-fou : r64-m1** (voir ci-dessous). |
+| 4 | Coupures de 1 à 2 s pendant les recréations : 4 réponses 502 (`/auth/refresh`, `/socket.io` en polling) | Inhérent à un seul backend. Socket.IO se reconnecte. | **Risque accepté**, sans constat. Seule inconnue : le comportement du client sur un 502 de `/auth/refresh` (déconnexion de l'utilisateur ?). `NON VÉRIFIÉ`, rattaché à r64-a3. |
+
+**Garde-fou pour l'incident 3 : oui, deux niveaux.**
+1. *Documentation* (`docs/deployment-production.md`, mise en place de la sauvegarde et de `known_hosts`) : remplacer toute écriture par flux (`install /dev/stdin`, redirections) par une copie depuis un fichier, et faire suivre chaque installation de `test -s <fichier>` (par ex. `sudo test -s /usr/local/lib/planner-pro/backup-production.sh && sudo test -s /etc/systemd/system/planner-pro-backup.service`), ainsi que de `systemctl show -p LoadState planner-pro-backup.service` qui doit afficher `LoadState=loaded` (pas `masked`). Ajouter un avertissement : « la mise en place a déjà été faite : ne pas la rejouer ; utiliser la procédure de mise à jour ».
+2. *Dry-run* (`scripts/deploy-production.sh`, `step_backup` en mode `--dry-run`) : aujourd'hui il ne vérifie que les droits `sudo` (lignes 112-116 environ), qui restent vrais avec un script vide. Ajouter, sans droit supplémentaire (le répertoire `/usr/local/lib/planner-pro` est en 0755, un `test -s` de l'utilisateur `deploy` y suffit) : fichier présent et non vide, `LoadState=loaded` de l'unité. Test attendu : un faux répertoire avec un fichier de taille 0 fait échouer le dry-run ; contre-mutation : retirer la vérification doit faire échouer ce test.
+Option complémentaire (Amélioration) : alerte si aucun fichier `.sql.gz.gpg` de moins de 26 h (sonde de fraîcheur, voir r64-m2).
+
+### 5. Observations hors périmètre
+
+- **Délivrabilité des courriels** : 5 envois acceptés par le SMTP Gmail et non reçus (probable filtrage). Ce n'est pas un défaut de code, mais **un blocage produit** : sans courriel de vérification, aucun nouvel utilisateur ne peut activer son compte (la réponse 403 « adresse non vérifiée » existe). À traiter avant tout pilote : service d'envoi transactionnel, SPF/DKIM/DMARC sur `boukarou-os.com`, adresse d'expédition du domaine. Classé **r64-m6** (Mineur côté sécurité, bloquant côté produit).
+- **Resolver côté ekose** : `resolver 127.0.0.11` avec variables dans `proxy_pass` supprimerait le 502 après recréation. Voir r64-a1. Modification dans le dépôt ekose, hors de ce dépôt.
+
+### 6. Constats
+
+| ID | Sévérité | Constat | Remédiation attendue | Certitude |
+| --- | --- | --- | --- | --- |
+| r64-m1 | Mineur | Aucun garde-fou contre un fichier d'installation vide (sauvegarde, unité, `known_hosts`) ; le dry-run ne détecte pas un script de sauvegarde vide | Voir « Garde-fou pour l'incident 3 », points 1 et 2 ; test et contre-mutation du dry-run | ÉTABLI PAR LECTURE (journal, `deploy-production.sh` lignes 107-117) |
+| r64-m2 | Mineur | Pas de procédure de reprise après redémarrage de la VM ni de supervision externe de disponibilité (indisponibilité d'environ 2 h le 2026-11-11) | Runbook « après redémarrage » (80/443 publiés par `ekose-nginx-1`, `nginx` hôte désactivé, conteneurs sains, sauvegarde du jour) ; sonde externe gratuite sur `/` et l'API avec alerte courriel ; sonde de fraîcheur de la sauvegarde | ÉTABLI PAR LECTURE (journal) |
+| r64-m3 | Mineur | Ruleset `protection-main` : ni PR ni CI requise (VÉRIFIÉ : deux règles seulement), décision en attente | Soit activer la CI requise (et PR à 0 approbation si souhaité), soit consigner l'acceptation du risque par le propriétaire avec date | VÉRIFIÉ |
+| r64-m4 | Mineur | 2FA du compte propriétaire non attestée ; compte unique qui pousse et approuve | Attestation du propriétaire consignée dans le journal ; si possible un second relecteur ou un compte distinct à terme | NON VÉRIFIÉ (non vérifiable par API) |
+| r64-m5 | Mineur | Tests négatifs de la clé de déploiement jamais rejoués (compte dans le groupe `docker`) | Voir section 3 ; sortie consignée | ÉTABLI PAR LECTURE |
+| r64-m6 | Mineur (bloquant produit) | Courriels de vérification non délivrés | Voir section 5 | PROBABLE (journal, non rejoué) |
+| r64-a1 | Amélioration | Proxy partagé : `proxy_pass` figé sur l'IP au démarrage, redémarrage du proxy d'un autre projet à chaque déploiement | `resolver 127.0.0.11 valid=10s` et variable dans `proxy_pass` (dépôt ekose) ; ensuite retirer le redémarrage du script | ÉTABLI PAR LECTURE |
+| r64-a2 | Amélioration | `docs/deployment-production.md` « État de l'activation » est périmé : indique `e510255` en production et le premier run « en attente », alors que `74dbeb0` est déployé par run CD (VÉRIFIÉ) ; son tableau dit aussi « tests négatifs à faire au premier run » | Mettre à jour (hors A9-b4 : ce fichier n'est pas dans son périmètre) | VÉRIFIÉ |
+| r64-a3 | Amélioration | Latences ponctuelles de 5,8 s observées depuis le poste de revue ; comportement du client sur un 502 de `/auth/refresh` non connu | Mesurer avec la sonde de r64-m2 ; vérifier (test frontend) qu'un 5xx sur le refresh déclenche une nouvelle tentative et non une déconnexion | NON VÉRIFIÉ |
+
+### 7. Position globale
+
+Le dispositif de déploiement est **opérationnel et correctement conçu** (CD avec approbation, commande forcée, sauvegarde hors du clone, retour arrière préparé) : aucun nouveau constat Critique ni Majeur. Les faiblesses restantes sont d'exploitation (supervision, reprise, garde-fous de mise en place) et de gouvernance (compte unique). Pour un pilote : r64-m5 et r64-m6 à clore ; r64-m2 fortement recommandé.
+
+### Ordre des constats ouverts (fin de r64)
+1. **r64-m5** (tests négatifs de la clé), **r64-m1** (garde `test -s` et dry-run), **r64-m4** (attestation 2FA, action du propriétaire), **r64-m3** (CI requise ou acceptation consignée), **r64-m2** (runbook de reprise et supervision), **r64-m6** (courriels, avant pilote).
+2. **A9-b4** (en cours chez le fixeur : `README.md`, `docs/DOSSIER_ARCHITECTURE_TECHNIQUE.md`).
+3. **A8** (journal d'audit, avec O-b et O-e), **P2** (documentation de pilotage).
+4. Améliorations : **r64-a1**, **r64-a2**, **r64-a3**, puis r56-a1, r56-a2, r55-a1, r53-a1, r53-a2, O-f, O-a, r48-a1, r48-a2.
+5. Actions d'exploitation restantes : Redeliver GitHub et client SCIM réels (après A9-b2), SSO réel si activé un jour. Closes : activation du CD, déploiements A9-b2 et A9-b3.
+
+---
+
+## Revue r65 (architecte) : lot A9-b4 et correction r64-a2 : VALIDÉ, aucun nouveau constat
+
+| Élément | Verdict |
+| --- | --- |
+| README.md (badge, diagramme, texte NestJS 11, Express 5, Node 22, phrase sur le CD) | **VALIDÉ** |
+| `docs/DOSSIER_ARCHITECTURE_TECHNIQUE.md` (schéma, conteneur 3, topologie 14.1) | **VALIDÉ** |
+| `.github/workflows/ci.yml` (commentaire Node 22) | **VALIDÉ** |
+| `docs/security/ci.md` (paragraphe `jest-esm-transform.js`) | **VALIDÉ** |
+| r56-a1 (`@types/node` frontend 22.20.5) | **VALIDÉ** (clôt r56-a1) |
+| r64-a2 (`docs/deployment-production.md`, lignes « Production déployée » et « Activation ») | **VALIDÉ** (clôt r64-a2) |
+
+### Vérifications indépendantes
+- Exactitude par rapport au code (ÉTABLI PAR LECTURE) : `backend/Dockerfile` et `frontend/Dockerfile` en `node:22-alpine` ; `docker-compose.prod.yml:50` `stop_grace_period: 15s` ; `@nestjs/core` et `@nestjs/platform-express` 11.2.9 (Express 5 est transitif, non déclaré : l'affirmation « Express 5 » repose sur le journal d'exploitation, pas sur `package.json`) ; CI en `node-version: 22` ; `jest-esm-transform.js` présent, branché dans `backend/package.json:91-92` et `backend/jest-e2e.json:8-9`, `transformIgnorePatterns` limité à `jose` 6 (`jest-e2e.json:17`) : le paragraphe de `ci.md` est exact. Plus aucune occurrence « Node 20 » ni « NestJS 10 » dans README, dossier d'architecture et `ci.yml`.
+- Frontend rejoué (VÉRIFIÉ) : `tsc --noEmit` code 0 ; `vite build` réussi (avertissement habituel de taille de bundle) ; `vitest` 34 fichiers, **296/296** ; `pnpm install --frozen-lockfile --offline` code 0. Le diff de `pnpm-lock.yaml` ne contient que le remplacement de `@types/node` 20.19.41 par 22.20.5 (et ses références vite/vitest/plugin-react) : rien d'autre.
+- Cohérence avec `deployment-production.md` : aucune contradiction ; les lignes corrigées (`74dbeb0` par le CD depuis 08:33 UTC, premier run réussi) concordent avec le run 43182747908 (créé 08:25, 8 min 36 s, succès). Nuance : l'heure 08:33 est la fin du run, déduite de ces valeurs.
+- Le lot ne change aucun code exécuté en production (`@types/node` est une dépendance de développement) : pas de déploiement nécessaire.
+- Contre-mutations : sans objet (documentation et types).
+
+### Constats
+Aucun nouveau constat.
+
+### Feu vert de commit (chemins explicites, jamais `git add -A`, ni `.claude/`, ni `.env*` ; docs en dernier)
+Contrainte : `rapport-audit.md` et `journal-corrections.md` portent chacun plusieurs revues dans un seul fichier ; ils partent donc dans un **seul** commit final (découper par hunks n'apporterait rien).
+1. `chore(frontend): @types/node 22.20.5, commentaire Node 22 de la CI (A9-b4, r56-a1)` : `frontend/package.json`, `pnpm-lock.yaml`, `.github/workflows/ci.yml`.
+2. `docs: README et dossier d'architecture en NestJS 11 et Node 22, note sur jest-esm-transform (A9-b4)` : `README.md`, `docs/DOSSIER_ARCHITECTURE_TECHNIQUE.md`, `docs/security/ci.md`.
+3. `docs(ops): état de l'activation du déploiement continu à jour, 74dbeb0 déployé par le CD (r64-a2)` : `docs/deployment-production.md`.
+4. `docs(security): journal d'exploitation du 2026-11-11 au 2026-11-13, revues r64 et r65, lot A9-b4` : `docs/security/rapport-audit.md`, `docs/security/journal-corrections.md`.
+Aucune mention d'outil d'assistance ni `Co-Authored-By`.
+
+### Conditions de déploiement
+Aucune. Le push de ces commits déclenchera le workflow (CI puis demande d'approbation de l'environnement `production`) : il redéploiera `main` sans changement fonctionnel. Approuver ou rejeter à la discrétion du propriétaire ; en cas de doute, ne pas approuver (aucun gain en production). Rollback : sans objet.
+
+### Ordre des constats ouverts (fin de r65)
+1. r64-m5, r64-m1, r64-m4, r64-m3, r64-m2, r64-m6.
+2. A8 (avec O-b, O-e), P2.
+3. Améliorations : r64-a1, r64-a3, r56-a2, r55-a1, r53-a1, r53-a2, O-f, O-a, r48-a1, r48-a2.
+4. Clos par r65 : A9-b4, r56-a1, r64-a2. Actions d'exploitation restantes : Redeliver GitHub et client SCIM réels.
